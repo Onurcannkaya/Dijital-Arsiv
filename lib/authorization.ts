@@ -1,0 +1,60 @@
+import { jsonError } from "./archive-storage";
+
+export type ArchiveRole = "admin" | "archive_manager" | "reviewer" | "viewer";
+export type ArchivePermission = "document.read" | "document.upload" | "document.review" | "document.archive" | "ocr.run" | "users.manage";
+export type ArchivePrincipal = { email:string; displayName:string; role:ArchiveRole; unit:string; permissions:ArchivePermission[] };
+
+type UserRow = { email:string; display_name:string; role:ArchiveRole; unit:string; active:number };
+
+const permissionMap: Record<ArchiveRole, ArchivePermission[]> = {
+  admin: ["document.read", "document.upload", "document.review", "document.archive", "ocr.run", "users.manage"],
+  archive_manager: ["document.read", "document.upload", "document.review", "document.archive", "ocr.run"],
+  reviewer: ["document.read", "document.review"],
+  viewer: ["document.read"],
+};
+
+function identityFromRequest(request: Request) {
+  const emailHeader = request.headers.get("oai-authenticated-user-email")?.trim().toLocaleLowerCase("tr");
+  const hostname = new URL(request.url).hostname;
+  const localFallback = !emailHeader && (hostname === "localhost" || hostname === "127.0.0.1");
+  const email = emailHeader || (localFallback ? "yerel-pilot@sivas.bel.tr" : "");
+  if (!email) return null;
+  let displayName = localFallback ? "Yerel Pilot Yönetici" : email.split("@")[0];
+  const encodedName = request.headers.get("oai-authenticated-user-full-name")?.trim();
+  if (encodedName && request.headers.get("oai-authenticated-user-full-name-encoding") === "percent-encoded-utf-8") {
+    try { displayName = decodeURIComponent(encodedName); } catch { /* E-posta adı güvenli geri dönüş olarak kalır. */ }
+  }
+  return { email, displayName, localFallback };
+}
+
+function bootstrapEmails(value?: string) {
+  return new Set((value ?? "").split(",").map((email) => email.trim().toLocaleLowerCase("tr")).filter(Boolean));
+}
+
+export async function authorizeRequest(request: Request, db: D1Database, permission: ArchivePermission, configuredAdmins?: string): Promise<ArchivePrincipal | Response> {
+  const identity = identityFromRequest(request);
+  if (!identity) return jsonError("Bu işlem için doğrulanmış oturum gereklidir.", 401);
+  const mayBootstrap = identity.localFallback || bootstrapEmails(configuredAdmins).has(identity.email);
+  let row = await db.prepare(`SELECT email, display_name, role, unit, active FROM archive_users WHERE email = ?`).bind(identity.email).first<UserRow>();
+  if (!row && mayBootstrap) {
+    await db.prepare(`INSERT INTO archive_users (email, display_name, role, unit, active)
+      VALUES (?, ?, 'admin', '*', 1) ON CONFLICT(email) DO NOTHING`).bind(identity.email, identity.displayName).run();
+    row = await db.prepare(`SELECT email, display_name, role, unit, active FROM archive_users WHERE email = ?`).bind(identity.email).first<UserRow>();
+  }
+  if (row && identity.localFallback && row.display_name !== identity.displayName) {
+    await db.prepare("UPDATE archive_users SET display_name = ?, updated_at = CURRENT_TIMESTAMP WHERE email = ?").bind(identity.displayName, identity.email).run();
+    row.display_name = identity.displayName;
+  }
+  if (!row || !row.active) return jsonError("Bu arşiv çalışma alanına erişim yetkiniz bulunmuyor.", 403);
+  const permissions = permissionMap[row.role] ?? [];
+  if (!permissions.includes(permission)) return jsonError("Bu işlem rolünüz için yetkili değildir.", 403);
+  return { email:row.email, displayName:row.display_name, role:row.role, unit:row.unit, permissions };
+}
+
+export function canAccessUnit(principal: ArchivePrincipal, unit: string) {
+  return principal.unit === "*" || principal.unit === unit;
+}
+
+export function roleLabel(role: ArchiveRole) {
+  return ({ admin:"Sistem Yöneticisi", archive_manager:"Arşiv Yöneticisi", reviewer:"Belge Doğrulayıcı", viewer:"Arşiv Görüntüleyici" } as const)[role];
+}
