@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element -- Özel R2 dosya rotası Next Image iyileştirmesine uygun değildir. */
 
-import { AlertTriangle, ArrowLeft, CheckCircle2, FileClock, FileCog, FileText, Gauge, History, Image as ImageIcon, LoaderCircle, LockKeyhole, Play, Plus, RotateCcw, Save, ScanLine, ShieldCheck, Sparkles, ThumbsDown, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Download, FileClock, FileCog, FileText, Gauge, History, Image as ImageIcon, LoaderCircle, LockKeyhole, Play, Plus, RotateCcw, Save, ScanLine, ShieldCheck, Sparkles, ThumbsDown, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EntityRelation, EntityRelations } from "./entity-relations";
 
@@ -173,6 +173,8 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const canProcess=Boolean(needsOcr&&permissions.includes("ocr.run"));
   const canReview=permissions.includes("document.review");
   const canArchive=permissions.includes("document.archive");
+  // Görüntüleme ve indirme ayrı yetkilerdir; ikisi de denetim kaydı üretir.
+  const canDownload=permissions.includes("document.download");
   const archived=detail?.document.status==="archived";
   const pendingValues=detail?.fields.filter(value=>value.verificationStatus==="SUGGESTED").length??0;
   const emptyRequired=detail?.fields.filter(value=>(drafts[value.id]??value.value)===MISSING_VALUE&&!rejections[value.id])??[];
@@ -203,7 +205,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     <div className="review-grid">
       <aside className="thumbs">{(detail.pages.length?detail.pages:[{pageNumber:1}]).map((page,index)=><button className={index===0?"active":""} key={page.pageNumber}><span>{page.pageNumber}</span><i/></button>)}</aside>
       <section className="document">
-        <div className="document-tools"><span>{detail.document.originalName}</span><div className="preview-switch"><button className={previewMode==="image"?"active":""} onClick={()=>setPreviewMode("image")} aria-label="Belge görüntüsü"><ImageIcon size={15}/> Görüntü</button><button className={previewMode==="text"?"active":""} onClick={()=>setPreviewMode("text")} disabled={!detail.pages.length} aria-label="Okunabilir OCR metni"><FileText size={15}/> Okunabilir metin</button></div></div>
+        <div className="document-tools"><span>{detail.document.originalName}</span>{canDownload?<a className="download-original" href={`${detail.document.fileUrl}?download=1`} download><Download size={14}/> Aslını indir</a>:null}<div className="preview-switch"><button className={previewMode==="image"?"active":""} onClick={()=>setPreviewMode("image")} aria-label="Belge görüntüsü"><ImageIcon size={15}/> Görüntü</button><button className={previewMode==="text"?"active":""} onClick={()=>setPreviewMode("text")} disabled={!detail.pages.length} aria-label="Okunabilir OCR metni"><FileText size={15}/> Okunabilir metin</button></div></div>
         <div className="real-preview">{previewMode==="text"?<article className="ocr-transcript"><header><div><span><FileText size={17}/><b>Onaylı ve aranabilir belge metni</b><em className={textPending?"pending":"verified"}>{textPending?"Kontrol bekliyor":"Personel onaylı"}</em></span><small>Otomatik metni asıl belgeyle karşılaştırın. Kaydedilen her düzeltme sürüm ve SHA-256 denetim iziyle korunur.</small></div>{canReview&&!archived?<button className="text-confirm" onClick={saveText} disabled={savingText||(!textPending&&!hasTextChanges)}>{savingText?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {hasTextChanges?"Düzeltmeleri kaydet":"Metni onayla"}</button>:null}</header>{detail.pages.map(page=><section key={page.pageNumber}><h3><span>Sayfa {page.pageNumber}</span>{page.confirmedBy?<small>{page.confirmedBy} · {page.confirmedAt?new Date(page.confirmedAt).toLocaleString("tr-TR"):"Onaylandı"}</small>:<small>Henüz personel onayı yok</small>}</h3>{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:isImage?<div className="image-evidence"><img src={detail.document.fileUrl} alt={`${detail.document.referenceNo} asıl belge`}/>{selected&&evidencePage&&selected.box.some(value=>value>0)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}/>:null}</div>:<object data={detail.document.fileUrl} type={detail.document.mediaType} aria-label={`${detail.document.referenceNo} asıl belge`}><a href={detail.document.fileUrl}>Asıl dosyayı aç</a></object>}</div>
       </section>
       <aside className="fields">

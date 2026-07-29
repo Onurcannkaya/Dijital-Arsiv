@@ -4,23 +4,45 @@ import json
 import os
 import tempfile
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 
 from .extractors import extract_fields
-from .text_cleaner import readable_text, search_text
+from .text_cleaner import readable_text
 
 MAX_BYTES = 25 * 1024 * 1024
 ALLOWED_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/tiff"}
-app = FastAPI(title="Sivas Arşiv Yerel OCR", version="0.1.0")
 _engine: Any | None = None
 
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Üretim imajında modeli trafik kabul edilmeden önce belleğe alır."""
+    if os.getenv("OCR_PRELOAD_MODEL", "false").lower() == "true":
+        engine()
+    yield
+
+
+app = FastAPI(title="Sivas Arşiv Yerel OCR", version="0.1.0", lifespan=lifespan)
+
+
 def authorize(authorization: str | None = Header(default=None)) -> None:
+    """Servis anahtarını doğrular; anahtar tanımlı değilse istek kabul edilmez.
+
+    Önceki davranış anahtar tanımsızken ucu tamamen açık bırakıyordu: 8090 portu
+    ağda görünen bir kurulumda herkes belge yükleyip OCR çalıştırabilirdi.
+    Eksik yapılandırma açık kapı değil, açık hata üretmelidir.
+    """
     token = os.getenv("OCR_SERVICE_TOKEN", "").strip()
-    if token and authorization != f"Bearer {token}":
+    if not token:
+        raise HTTPException(
+            status_code=503,
+            detail="OCR_SERVICE_TOKEN tanımlı değil; servis anahtarsız çalıştırılamaz",
+        )
+    if authorization != f"Bearer {token}":
         raise HTTPException(status_code=401, detail="Geçersiz OCR servis anahtarı")
 
 
@@ -70,6 +92,50 @@ def engine() -> Any:
     return _engine
 
 
+ACCESS_MAX_EDGE = int(os.getenv("ACCESS_DERIVATIVE_MAX_EDGE", "1600"))
+ACCESS_QUALITY = int(os.getenv("ACCESS_DERIVATIVE_QUALITY", "72"))
+
+
+def build_access_derivative(content: bytes, content_type: str) -> dict[str, Any] | None:
+    """Görüntüleme için kontrollü erişim türevi üretir.
+
+    Asıl dosya (değiştirilemez asıl) yalnız indirme yetkisiyle sunulmalıdır;
+    görüntüleme bu türevi alır (S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md §5).
+    Türev burada üretilir çünkü servis görüntüyü OCR için zaten çözüyor.
+
+    PDF için türev üretilmez: servis PDF sayfası çizdirecek bir bileşen
+    içermiyor. `None` dönmesi, uygulamanın bu belgede türev bulunmadığını
+    bilmesini ve durumu raporlamasını sağlar.
+    """
+    if not content_type.startswith("image/"):
+        return None
+    try:
+        import base64
+
+        import cv2
+        import numpy as np
+
+        image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if image is None:
+            return None
+        height, width = image.shape[:2]
+        longest = max(height, width)
+        if longest > ACCESS_MAX_EDGE:
+            scale = ACCESS_MAX_EDGE / longest
+            image = cv2.resize(image, (max(1, int(width * scale)), max(1, int(height * scale))), interpolation=cv2.INTER_AREA)
+        encoded_ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, ACCESS_QUALITY])
+        if not encoded_ok:
+            return None
+        payload = encoded.tobytes()
+        return {
+            "mediaType": "image/jpeg",
+            "byteSize": len(payload),
+            "base64": base64.b64encode(payload).decode("ascii"),
+        }
+    except Exception:
+        return None
+
+
 def rectangular_box(poly: list[list[float]]) -> list[float]:
     return [min(point[0] for point in poly), min(point[1] for point in poly), max(point[0] for point in poly), max(point[1] for point in poly)]
 
@@ -91,14 +157,14 @@ def page_from_result(item: Any, page_number: int) -> dict[str, Any]:
     height = max((word["box"][3] for word in words), default=1.0)
     average = sum(word["confidence"] for word in words) / len(words) if words else 0.0
     raw_text = "\n".join(word["text"] for word in words)
-    full_text = readable_text(words)
+    # Aranabilir biçim uygulama katmanında üretilir (`lib/text-search.ts`).
+    # Sorgu ve dizin aynı fonksiyondan geçmezse eşleşmeler sessizce kaçar.
     return {
         "pageNumber": page_number,
         "width": int(width),
         "height": int(height),
         "rawText": raw_text,
-        "fullText": full_text,
-        "searchText": search_text(full_text),
+        "fullText": readable_text(words),
         "averageConfidence": round(average, 4),
         "words": words,
     }
@@ -138,8 +204,14 @@ def prepare_image(content: bytes, content_type: str) -> tuple[bytes, bool, int |
         return content, False, None, None, {}
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "engine": "PaddleOCR", "model": os.getenv("PADDLEOCR_VERSION", "PP-OCRv5")}
+def health() -> dict[str, str | bool]:
+    return {
+        "status": "ok",
+        "engine": "PaddleOCR",
+        "model": os.getenv("PADDLEOCR_VERSION", "PP-OCRv5"),
+        "modelReady": _engine is not None,
+        "device": os.getenv("PADDLEOCR_DEVICE", "cpu"),
+    }
 
 
 @app.post("/v1/ocr", dependencies=[Depends(authorize)])
@@ -181,6 +253,8 @@ async def run_ocr(
             # Hangi profil ve sözlük sürümüyle çıkarım yapıldığı sonuçla saklanır.
             "profileVersion": document_profile.get("profileVersion"),
             "vocabularyVersion": document_profile.get("vocabularyVersion"),
+            # Görüntüleme türevi; PDF'lerde `None` döner.
+            "accessDerivative": build_access_derivative(content, file.content_type or ""),
             "pages": pages,
             "fields": fields,
         }

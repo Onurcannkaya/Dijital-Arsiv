@@ -4,9 +4,11 @@ import { check, index, integer, real, sqliteTable, text, uniqueIndex } from "dri
 /**
  * Drizzle şema aynası.
  *
- * Çalışma zamanı DDL kaynağı `lib/archive-schema.ts` dosyasıdır; bu dosya tip
- * üretimi ve `drizzle/` göç dosyaları içindir. İki tanımın aynı tabloları
- * içermesi `tests/schema-contract.test.mjs` ile denetlenir.
+ * Yetkili DDL kaynağı `lib/archive-schema.ts` dosyasıdır. Bu dosya yalnız tip
+ * tanımı ve kısıt niyetinin okunabilir kaydıdır; hiçbir sorgu buradan üretilmez
+ * (`db/index.ts` içindeki Drizzle istemcisi kullanılmıyor). İki tanımın kolon
+ * düzeyinde ayrışması `tests/schema-contract.test.ts` ile engellenir: bir tabloya
+ * kolon eklerken **her iki dosya** güncellenmelidir.
  */
 
 export const archiveDocuments = sqliteTable("archive_documents", {
@@ -30,6 +32,8 @@ export const archiveDocuments = sqliteTable("archive_documents", {
   index("archive_documents_status_idx").on(table.status),
   index("archive_documents_created_at_idx").on(table.createdAt),
   index("archive_documents_profile_idx").on(table.documentTypeId),
+  index("archive_documents_created_id_idx").on(table.createdAt, table.id),
+  index("archive_documents_status_created_id_idx").on(table.status, table.createdAt, table.id),
 ]);
 
 /** VERI_SOZLUGU.md §13: kontrollü sözlükler. */
@@ -149,10 +153,14 @@ export const processingJobs = sqliteTable("processing_jobs", {
   maxAttempts: integer("max_attempts").notNull().default(3),
   model: text("model").notNull().default("paddleocr-local"),
   errorMessage: text("error_message"),
+  nextAttemptAt: text("next_attempt_at"),
+  lastAttemptAt: text("last_attempt_at"),
+  deadLetteredAt: text("dead_lettered_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   index("processing_jobs_status_created_idx").on(table.status, table.createdAt),
+  index("processing_jobs_schedule_idx").on(table.status, table.nextAttemptAt, table.createdAt),
   index("processing_jobs_document_idx").on(table.documentId),
 ]);
 
@@ -376,6 +384,26 @@ export const archiveUsers = sqliteTable("archive_users", {
 }, (table) => [
   index("archive_users_role_idx").on(table.role),
   index("archive_users_unit_idx").on(table.unit),
+]);
+
+/**
+ * Uzun süren bakım işleri (arama dizini yenilemesi gibi). Bütün arşivi dolaşan
+ * iş göç adımının içinde çalıştırılmaz; kilitli ve imleçli olarak dilimlenir.
+ */
+export const maintenanceTasks = sqliteTable("maintenance_tasks", {
+  id: text("id").primaryKey(),
+  status: text("status").notNull().default("PENDING"),
+  cursor: text("cursor"),
+  processed: integer("processed").notNull().default(0),
+  total: integer("total"),
+  lockedUntil: text("locked_until"),
+  lastError: text("last_error"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("maintenance_tasks_status_idx").on(table.status),
+  check("maintenance_tasks_status_check", sql`${table.status} IN ('PENDING', 'RUNNING', 'DONE', 'FAILED')`),
+  check("maintenance_tasks_processed_check", sql`${table.processed} >= 0`),
 ]);
 
 /** `lib/archive-schema.ts` sürüm kapısı tablosu. */

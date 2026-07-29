@@ -3,14 +3,17 @@
     "version": "0.1.0",
     "private": true,
     "engines": {
-        "node": ">=22.13.0"
+        "node": ">=22.18.0"
     },
     "scripts": {
         "dev": "vinext dev",
         "build": "vinext build",
         "start": "vinext start",
-        "test": "npm run build && node --test \"tests/*.test.mjs\"",
-        "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+        "test": "npm run build && node --test \"tests/*.test.mjs\" \"tests/*.test.ts\"",
+        "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .wrangler --ignore-pattern outputs --ignore-pattern work",
+        "typecheck": "tsc --noEmit",
+        "verify": "npm run typecheck && npm run lint && npm test",
+        "deploy:verify": "node scripts/verify-deployment.mjs",
         "db:generate": "drizzle-kit generate"
     },
     "dependencies": {

@@ -1,0 +1,80 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "sivas-dijital-arsiv",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  },
+  "triggers": {
+    "crons": ["*/2 * * * *", "*/5 * * * *", "17 */6 * * *"]
+  },
+  "vars": {
+    "APP_ENV": "development"
+  },
+  "secrets": {
+    "required": [
+      "OCR_SERVICE_URL",
+      "OCR_SERVICE_TOKEN",
+      "ARCHIVE_MIGRATION_TOKEN",
+      "ARCHIVE_ADMIN_EMAILS"
+    ]
+  },
+
+  // DB ve ARCHIVE_FILES, .openai/hosting.json içindeki mantıksal bağlardır.
+  // Gerçek D1/R2 kaynak kimlikleri Sites tarafından yönetilir; bu dosyaya sahte
+  // ya da başka ortama ait kimlik yazılmaz.
+  "env": {
+    "dev": {
+      "name": "sivas-dijital-arsiv-dev",
+      "vars": { "APP_ENV": "development" },
+      "secrets": {
+        "required": [
+          "OCR_SERVICE_URL",
+          "OCR_SERVICE_TOKEN",
+          "ARCHIVE_MIGRATION_TOKEN",
+          "ARCHIVE_ADMIN_EMAILS"
+        ]
+      },
+      "triggers": {
+        "crons": ["*/2 * * * *", "*/5 * * * *", "17 */6 * * *"]
+      }
+    },
+    "staging": {
+      "name": "sivas-dijital-arsiv-staging",
+      "vars": { "APP_ENV": "staging" },
+      "secrets": {
+        "required": [
+          "OCR_SERVICE_URL",
+          "OCR_SERVICE_TOKEN",
+          "ARCHIVE_MIGRATION_TOKEN",
+          "ARCHIVE_ADMIN_EMAILS"
+        ]
+      },
+      "triggers": {
+        "crons": ["*/2 * * * *", "*/5 * * * *", "17 */6 * * *"]
+      }
+    },
+    "production": {
+      "name": "sivas-dijital-arsiv-production",
+      "vars": { "APP_ENV": "production" },
+      "secrets": {
+        "required": [
+          "OCR_SERVICE_URL",
+          "OCR_SERVICE_TOKEN",
+          "ARCHIVE_MIGRATION_TOKEN",
+          "ARCHIVE_ADMIN_EMAILS"
+        ]
+      },
+      "triggers": {
+        "crons": ["*/2 * * * *", "*/5 * * * *", "17 */6 * * *"]
+      }
+    }
+  }
+}

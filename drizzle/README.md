@@ -3,8 +3,10 @@
 `0000`–`0005` arası dosyalar şema sürümü 1'in (tek değerli `extracted_fields`)
 geçmiş kaydıdır. Bu zincir **hiçbir zaman otomatik uygulanmadı**: `package.json`
 içinde bir `db:migrate` adımı, `wrangler` tarafında da bir migrations
-yapılandırması bulunmuyor. Şema, çalışma zamanında `lib/archive-schema.ts`
-tarafından kurulur ve `schema_state.version` ile sürümlenir.
+yapılandırması bulunmuyor. Şema, `lib/archive-schema.ts` tarafından kurulur,
+`schema_state.version` ile sürümlenir ve korumalı `POST /api/admin/migrate` uç
+noktasından uygulanır. Sites paketleyicisi bu tarihsel dizini dağıtım paketine
+kopyalamaz.
 
 ## Neden donduruldu?
 

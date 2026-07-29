@@ -1,7 +1,8 @@
 import { authorizeRequest } from "../../../lib/authorization";
-import { ensureArchiveSchema, getArchiveBindings, jsonError } from "../../../lib/archive-storage";
+import { requireArchiveSchema, getArchiveBindings } from "../../../lib/archive-storage";
 import { UNIT_VOCABULARY_CODE } from "../../../lib/archive-seed";
 import { listActiveProfiles, loadVocabularyTerms } from "../../../lib/document-profile";
+import { failure } from "../../../lib/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,8 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   try {
     const bindings = getArchiveBindings();
-    await ensureArchiveSchema(bindings.DB);
+    const schemaError = await requireArchiveSchema(request, bindings.DB);
+    if (schemaError) return schemaError;
     const principal = await authorizeRequest(request, bindings.DB, "document.read", bindings.ARCHIVE_ADMIN_EMAILS);
     if (principal instanceof Response) return principal;
 
@@ -48,6 +50,6 @@ export async function GET(request: Request) {
       units: (units ?? []).map((term) => ({ code: term.code, label: term.label })),
     });
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "Profiller alınamadı.", 500);
+    return failure(error, "profiles.read", "Profiller alınamadı.", request);
   }
 }

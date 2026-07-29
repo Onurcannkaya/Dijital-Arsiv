@@ -1,6 +1,22 @@
 import { env } from "cloudflare:workers";
+import { createObjectStorage, type ObjectStorage } from "./object-storage.ts";
 
-export { ensureArchiveSchema, ARCHIVE_SCHEMA_VERSION } from "./archive-schema";
+export {
+  ARCHIVE_SCHEMA_VERSION, applyArchiveMigrations, assertSchemaReady,
+  readMaintenanceProgress, readSchemaVersion, requireArchiveSchema,
+  runMaintenanceSlice, SchemaNotReadyError, SEARCH_REINDEX_TASK,
+} from "./archive-schema";
+export { jsonError } from "./http.ts";
+export {
+  resolveOriginalObject, resolveViewableObject,
+  type ResolvedObject, type StoredObject,
+} from "./binary-objects.ts";
+export {
+  createObjectStorage, R2ObjectStorage,
+  type ObjectStorage, type ObjectStorageBody, type ObjectStorageHead,
+  type ObjectStoragePutOptions, type ObjectStorageValue,
+} from "./object-storage.ts";
+export { INTEGRITY_SCAN_TASK, readIntegrityProgress, runIntegritySlice } from "./integrity.ts";
 
 export type ArchiveBindings = {
   DB: D1Database;
@@ -8,6 +24,8 @@ export type ArchiveBindings = {
   OCR_SERVICE_URL?: string;
   OCR_SERVICE_TOKEN?: string;
   ARCHIVE_ADMIN_EMAILS?: string;
+  /** Şema göç uç noktasının anahtarı; tanımlı değilse uç nokta kapalıdır. */
+  ARCHIVE_MIGRATION_TOKEN?: string;
 };
 
 /** S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md §5 nesne sınıfları. */
@@ -21,28 +39,13 @@ export function getArchiveBindings(): ArchiveBindings {
   return bindings as ArchiveBindings;
 }
 
+/** Çalışma zamanı nesne kasasını ADR-012 arayüzüne dönüştürür. */
+export function getArchiveObjectStorage(bindings: Pick<ArchiveBindings, "ARCHIVE_FILES">): ObjectStorage {
+  return createObjectStorage(bindings.ARCHIVE_FILES);
+}
+
 export function localOcrServiceUrl(request: Request, configured?: string) {
   if (configured) return configured.replace(/\/$/, "");
   const hostname = new URL(request.url).hostname;
   return hostname === "localhost" || hostname === "127.0.0.1" ? "http://127.0.0.1:8090" : null;
-}
-
-export function jsonError(message: string, status = 400) {
-  return Response.json({ error: message }, { status });
-}
-
-type OriginalObject = { object_key: string; media_type: string; byte_size: number; sha256: string };
-
-/**
- * Belgenin asıl nesnesini `binary_objects` üzerinden çözer.
- *
- * Nesne kaydı yetkili listedir; `archive_documents` kolonları kabul alındısı
- * olarak yalnız geri dönüş yolu sağlar (geçmiş kayıtlar için).
- */
-export async function resolveOriginalObject(db: D1Database, documentId: string): Promise<OriginalObject | null> {
-  const object = await db.prepare(`SELECT object_key, media_type, byte_size, sha256 FROM binary_objects
-    WHERE document_id = ? AND object_class = 'original' LIMIT 1`).bind(documentId).first<OriginalObject>();
-  if (object) return object;
-  return await db.prepare(`SELECT storage_key AS object_key, media_type, byte_size, sha256
-    FROM archive_documents WHERE id = ?`).bind(documentId).first<OriginalObject>();
 }

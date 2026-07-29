@@ -1,6 +1,6 @@
 import { prepareAuditEvent } from "../../../../../lib/audit";
 import { authorizeRequest, canAccessUnit } from "../../../../../lib/authorization";
-import { ensureArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
+import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
 import { resolveDocumentProfile } from "../../../../../lib/document-profile";
 import { MISSING_VALUE, requiredFields, verificationRequiredFields } from "../../../../../lib/field-policy";
 
@@ -14,7 +14,8 @@ type RelationSummary = { total: number; pending: number; verified: number };
 export async function POST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const bindings = getArchiveBindings();
-  await ensureArchiveSchema(bindings.DB);
+  const schemaError = await requireArchiveSchema(request, bindings.DB);
+  if (schemaError) return schemaError;
   const principal = await authorizeRequest(request, bindings.DB, "document.archive", bindings.ARCHIVE_ADMIN_EMAILS);
   if (principal instanceof Response) return principal;
   const DB = bindings.DB;

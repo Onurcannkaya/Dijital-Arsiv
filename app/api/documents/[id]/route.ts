@@ -1,5 +1,5 @@
 import { authorizeRequest, canAccessUnit } from "../../../../lib/authorization";
-import { ensureArchiveSchema, getArchiveBindings, jsonError } from "../../../../lib/archive-storage";
+import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../lib/archive-storage";
 import { loadVocabularyTerms, resolveDocumentProfile } from "../../../../lib/document-profile";
 import { listDocumentRelations } from "../../../../lib/entities";
 import { isMultiValueField } from "../../../../lib/field-policy";
@@ -16,7 +16,8 @@ type ObjectRow = { id:string; object_class:string; object_key:string; media_type
 export async function GET(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const bindings = getArchiveBindings();
-  await ensureArchiveSchema(bindings.DB);
+  const schemaError = await requireArchiveSchema(request, bindings.DB);
+  if (schemaError) return schemaError;
   const principal = await authorizeRequest(request, bindings.DB, "document.read", bindings.ARCHIVE_ADMIN_EMAILS);
   if (principal instanceof Response) return principal;
   const row = await bindings.DB.prepare(`SELECT id, reference_no, original_name, media_type, byte_size, sha256,

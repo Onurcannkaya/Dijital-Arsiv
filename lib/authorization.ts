@@ -1,20 +1,46 @@
-import { jsonError } from "./archive-storage";
+import { jsonError } from "./http.ts";
 
 export type ArchiveRole = "admin" | "archive_manager" | "reviewer" | "viewer";
-export type ArchivePermission = "document.read" | "document.upload" | "document.review" | "document.archive" | "ocr.run" | "users.manage";
+/**
+ * `document.read` üst veriyi ve belge görüntülemeyi açar; `document.download`
+ * dosyanın indirilmesini ayrı olarak yetkilendirir.
+ * KENT_REHBERI_ENTEGRASYON_SOZLESMESI.md §11: "Belge listesi, özet alanları,
+ * görüntüleme ve indirme ayrı yetkilerdir."
+ */
+export type ArchivePermission =
+  | "document.read" | "document.download" | "document.upload"
+  | "document.review" | "document.archive" | "ocr.run" | "users.manage";
 export type ArchivePrincipal = { email:string; displayName:string; role:ArchiveRole; unit:string; permissions:ArchivePermission[] };
 
 type UserRow = { email:string; display_name:string; role:ArchiveRole; unit:string; active:number };
 
+/**
+ * Rol-yetki eşlemesi kurumun görev ayrılığı kararıyla kesinleşir
+ * (ANA_SISTEM_TASARIM_BELGESI.md §5). Buradaki dağılım en az ayrıcalık
+ * varsayımıdır: indirme yalnız arşiv sorumluluğu olan rollere verilir;
+ * doğrulayıcı belgeyi görüntüleyerek karşılaştırır.
+ */
 const permissionMap: Record<ArchiveRole, ArchivePermission[]> = {
-  admin: ["document.read", "document.upload", "document.review", "document.archive", "ocr.run", "users.manage"],
-  archive_manager: ["document.read", "document.upload", "document.review", "document.archive", "ocr.run"],
+  admin: ["document.read", "document.download", "document.upload", "document.review", "document.archive", "ocr.run", "users.manage"],
+  archive_manager: ["document.read", "document.download", "document.upload", "document.review", "document.archive", "ocr.run"],
   reviewer: ["document.read", "document.review"],
   viewer: ["document.read"],
 };
 
+/**
+ * E-posta adresini karşılaştırma için sadeleştirir.
+ *
+ * Türkçe locale küçültmesi kullanılmaz: `"IBRAHIM"` değeri `tr` kuralıyla
+ * `"ıbrahim"` olur ve veritabanındaki `ibrahim@...` kaydıyla asla eşleşmez.
+ * E-posta adresi ASCII'dir; locale bağımsız küçültme doğru olanıdır.
+ */
+export function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
 function identityFromRequest(request: Request) {
-  const emailHeader = request.headers.get("oai-authenticated-user-email")?.trim().toLocaleLowerCase("tr");
+  const rawEmail = request.headers.get("oai-authenticated-user-email");
+  const emailHeader = rawEmail ? normalizeEmail(rawEmail) : undefined;
   const hostname = new URL(request.url).hostname;
   const localFallback = !emailHeader && (hostname === "localhost" || hostname === "127.0.0.1");
   const email = emailHeader || (localFallback ? "yerel-pilot@sivas.bel.tr" : "");
@@ -28,7 +54,7 @@ function identityFromRequest(request: Request) {
 }
 
 function bootstrapEmails(value?: string) {
-  return new Set((value ?? "").split(",").map((email) => email.trim().toLocaleLowerCase("tr")).filter(Boolean));
+  return new Set((value ?? "").split(",").map(normalizeEmail).filter(Boolean));
 }
 
 export async function authorizeRequest(request: Request, db: D1Database, permission: ArchivePermission, configuredAdmins?: string): Promise<ArchivePrincipal | Response> {

@@ -13,6 +13,9 @@
                             "esModuleInterop":  true,
                             "module":  "esnext",
                             "moduleResolution":  "bundler",
+                            // Saf mantık modülleri `node --test` ile doğrudan
+                            // çalıştırılır; Node'un ESM çözümleyicisi açık uzantı ister.
+                            "allowImportingTsExtensions":  true,
                             "resolveJsonModule":  true,
                             "isolatedModules":  true,
                             "jsx":  "react-jsx",
