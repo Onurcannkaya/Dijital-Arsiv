@@ -1,0 +1,48 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1784210242986,
+      "tag": "0000_glossy_purple_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784270626927,
+      "tag": "0001_same_morgan_stark",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784271353186,
+      "tag": "0002_elite_zodiak",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1784272213766,
+      "tag": "0003_pale_wallflower",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1784278371642,
+      "tag": "0004_fair_gravity",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1784286266932,
+      "tag": "0005_marvelous_bruce_banner",
+      "breakpoints": true
+    }
+  ]
+}
