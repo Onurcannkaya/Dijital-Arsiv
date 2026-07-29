@@ -27,8 +27,12 @@ export function sites(): Plugin {
     async closeBundle() {
       const outputDirectory = resolve(root, "dist", ".openai");
       const hostingConfig = resolve(root, ".openai", "hosting.json");
+      const copiedLocalSecrets = resolve(root, "dist", "server", ".dev.vars");
 
       await rm(outputDirectory, { recursive: true, force: true });
+      // Cloudflare'ın yerel geliştirme kopyası hiçbir koşulda Sites arşivine
+      // giremez. Çalışma zamanı sırları yalnız Sites ortamında tutulur.
+      await rm(copiedLocalSecrets, { force: true });
       await mkdir(outputDirectory, { recursive: true });
 
       if (await exists(hostingConfig)) {

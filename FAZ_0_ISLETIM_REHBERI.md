@@ -36,7 +36,8 @@ npm test
 ```
 
 `npm test` üretim derlemesini de yapar. `.dev.vars` dosyasının sürüm kontrolüne
-girmesi CI tarafından ayrıca reddedilir.
+girmesi CI tarafından ayrıca reddedilir. Sites paketleyicisi, araç zinciri yerel
+bir `.dev.vars` kopyası üretse bile bunu dağıtım arşivinden zorunlu olarak siler.
 
 Dağıtımdan sonra aşağıdaki komut göçü uygular, şema sürümünü tekrar okur ve D1,
 nesne deposu, OCR ve şema readiness denetimlerinin tamamını doğrular:

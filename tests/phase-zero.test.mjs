@@ -74,6 +74,8 @@ test("dağıtım sözleşmesi sırları, şema göçünü ve readiness kontrolü
   assert.match(workflow, /npm run lint/);
   assert.match(workflow, /npm test/);
   assert.doesNotMatch(sitesPlugin, /cp\(drizzleSource/);
+  assert.match(sitesPlugin, /dist", "server", "\.dev\.vars/);
+  assert.match(sitesPlugin, /rm\(copiedLocalSecrets/);
 });
 
 test("OCR üretim imajı modeli gömer ve ayrıcalıksız kullanıcıyla çalışır", async () => {
