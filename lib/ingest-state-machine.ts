@@ -36,7 +36,10 @@ const ordinaryTransitions: Readonly<Record<IngestSessionStatus, readonly IngestS
   QUARANTINED: ["SCANNING", "EXPIRED", "FAILED"],
   SCANNING: ["VERIFIED", "REJECTED", "FAILED"],
   VERIFIED: ["PROMOTING", "DUPLICATE", "EXPIRED"],
-  PROMOTING: ["ACCEPTED", "FAILED"],
+  // PROMOTING -> DUPLICATE yalnız eşzamanlı terfi yarışında, başka oturum aynı
+  // sunucu SHA'sını önce kabul ettiğinde kullanılır. Böylece ikinci oturum yeni
+  // belge/asıl/OCR kaydı üretmeden güvenli biçimde kapanır.
+  PROMOTING: ["ACCEPTED", "DUPLICATE", "FAILED"],
   ACCEPTED: [],
   REJECTED: [],
   DUPLICATE: [],

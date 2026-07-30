@@ -84,6 +84,9 @@ Sentetik dosyalar depo içinde tutulacaksa içeriklerinin SHA-256 değerleri ve
   `head` ve tam SHA raporu.
 - Yürüten: Yazılım Geliştirme.
 - Onaylayan: Bilgi Güvenliği.
+- Kod ön kanıtı: `tests/ingest-promotion.test.ts`; başarılı terfi, yazma sonrası
+  yanıt kaybı/kurtarma, bozuk asıl ve mükerrer SHA senaryoları. Bu test gerçek
+  sağlayıcı kanıtının yerine geçmez.
 
 ### T-02 — Asıl SHA yazma sonrası doğrulanır
 
@@ -91,7 +94,9 @@ Sentetik dosyalar depo içinde tutulacaksa içeriklerinin SHA-256 değerleri ve
 - Veri/uygulama: Bilinen SHA değerli sentetik PDF karantinadan terfi ettirilir.
 - Beklenen: Karantina SHA, kabul alındısı, asıl tam okuma SHA ve veritabanı SHA
   değerleri aynıdır; uyuşmazlıkta `ACCEPTED` oluşmaz.
-- Kanıt: Kabul alındısı, dört SHA karşılaştırması ve negatif uyuşmazlık koşusu.
+- Kanıt: Değiştirilemez `promotion_receipts` kaydı, tarama alındısı, karantina
+  nesne kaydı, `binary_objects` kaydı, tam yeniden okuma SHA sonucu ve negatif
+  uyuşmazlık koşusu.
 - Yürüten: Yazılım Geliştirme.
 - Onaylayan: Bilgi Güvenliği ve Arşiv.
 

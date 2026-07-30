@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { ObjectStorage } from "./object-storage.ts";
-import { createObjectStorage, R2StagingStorage } from "./r2-object-storage.ts";
+import { createObjectStorage, R2ImmutableVaultWriter, R2ObjectReader, R2StagingStorage } from "./r2-object-storage.ts";
 
 export {
   ARCHIVE_SCHEMA_VERSION, applyArchiveMigrations, assertSchemaReady,
@@ -67,6 +67,21 @@ export function getIngestStorages(bindings: Pick<ArchiveBindings, "TEMPORARY_FIL
 /** Çalışma zamanı nesne kasasını ADR-012 arayüzüne dönüştürür. */
 export function getArchiveObjectStorage(bindings: Pick<ArchiveBindings, "ARCHIVE_FILES">): ObjectStorage {
   return createObjectStorage(bindings.ARCHIVE_FILES);
+}
+
+/** F1.5 promotion role: quarantine read, immutable vault write, and vault read-back. */
+export function getPromotionStorages(
+  bindings: Pick<ArchiveBindings, "ARCHIVE_FILES" | "QUARANTINE_FILES">,
+) {
+  if (!bindings.QUARANTINE_FILES) {
+    throw new Error("QUARANTINE_FILES must be configured for promotion.");
+  }
+  const quarantineReader = new R2ObjectReader(bindings.QUARANTINE_FILES);
+  return {
+    quarantineReader,
+    vaultReader: new R2ObjectReader(bindings.ARCHIVE_FILES),
+    vaultWriter: new R2ImmutableVaultWriter(bindings.ARCHIVE_FILES, quarantineReader),
+  };
 }
 
 export function localContentScanServiceUrl(request: Request, configured?: string) {

@@ -40,6 +40,7 @@ test("cron tetikleyicileri Worker zamanlanmış işleyicisine bağlıdır", asyn
   assert.match(worker, /async scheduled\(/);
   assert.match(worker, /ctx\.waitUntil\(runScheduledJob/);
   assert.match(jobs, /processNextOcrJob/);
+  assert.match(jobs, /processNextPromotionJob/);
   assert.match(jobs, /runMaintenanceSlice/);
   assert.match(jobs, /runIntegritySlice/);
   for (const cron of ["*/2 * * * *", "*/5 * * * *", "17 */6 * * *"]) {

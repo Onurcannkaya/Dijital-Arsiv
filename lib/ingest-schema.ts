@@ -138,6 +138,82 @@ export const ingestTableStatements: readonly string[] = [
     CHECK (attempt >= 0 AND max_attempts BETWEEN 1 AND 20)
   )`,
   "CREATE INDEX IF NOT EXISTS content_scan_jobs_claim_idx ON content_scan_jobs (status, next_attempt_at, lease_expires_at, created_at)",
+
+  `CREATE TABLE IF NOT EXISTS promotion_jobs (
+    id TEXT PRIMARY KEY NOT NULL,
+    upload_session_id TEXT NOT NULL UNIQUE REFERENCES upload_sessions(id) ON DELETE CASCADE,
+    ingest_receipt_id TEXT NOT NULL REFERENCES ingest_receipts(id),
+    document_id TEXT NOT NULL UNIQUE,
+    binary_object_id TEXT NOT NULL UNIQUE,
+    target_object_key TEXT NOT NULL UNIQUE,
+    sha256 TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'QUEUED',
+    attempt INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 5,
+    next_attempt_at TEXT,
+    lease_token TEXT,
+    lease_expires_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (length(sha256) = 64),
+    CHECK (status IN ('QUEUED', 'PROMOTING', 'RETRY', 'COMPLETED', 'FAILED')),
+    CHECK (attempt >= 0 AND max_attempts BETWEEN 1 AND 20)
+  )`,
+  "CREATE INDEX IF NOT EXISTS promotion_jobs_claim_idx ON promotion_jobs (status, next_attempt_at, lease_expires_at, created_at)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS promotion_jobs_active_sha_unique ON promotion_jobs (sha256) WHERE status <> 'FAILED'",
+
+  `CREATE TABLE IF NOT EXISTS promotion_receipts (
+    id TEXT PRIMARY KEY NOT NULL,
+    promotion_job_id TEXT NOT NULL REFERENCES promotion_jobs(id),
+    lease_token TEXT NOT NULL,
+    upload_session_id TEXT NOT NULL REFERENCES upload_sessions(id) ON DELETE CASCADE,
+    ingest_receipt_id TEXT NOT NULL REFERENCES ingest_receipts(id),
+    result TEXT NOT NULL,
+    document_id TEXT REFERENCES archive_documents(id),
+    binary_object_id TEXT REFERENCES binary_objects(id),
+    source_object_key TEXT NOT NULL,
+    target_object_key TEXT NOT NULL,
+    quarantine_sha256 TEXT NOT NULL,
+    vault_sha256 TEXT,
+    expected_byte_size INTEGER NOT NULL,
+    vault_byte_size INTEGER,
+    vault_storage_version_id TEXT,
+    provider_etag TEXT,
+    provider_checksum_sha256 TEXT,
+    encryption_status TEXT NOT NULL DEFAULT 'provider-managed',
+    failure_code TEXT,
+    failure_message TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (length(lease_token) > 0),
+    CHECK (result IN ('VERIFIED', 'FAILED')),
+    CHECK (length(quarantine_sha256) = 64),
+    CHECK (vault_sha256 IS NULL OR length(vault_sha256) = 64),
+    CHECK (expected_byte_size > 0),
+    CHECK (vault_byte_size IS NULL OR vault_byte_size >= 0),
+    CHECK (
+      result <> 'VERIFIED'
+      OR (
+        document_id IS NOT NULL AND binary_object_id IS NOT NULL
+        AND vault_sha256 = quarantine_sha256
+        AND vault_byte_size = expected_byte_size
+        AND failure_code IS NULL AND failure_message IS NULL
+      )
+    )
+  )`,
+  "CREATE UNIQUE INDEX IF NOT EXISTS promotion_receipts_job_verified_unique ON promotion_receipts (promotion_job_id) WHERE result = 'VERIFIED'",
+  "CREATE INDEX IF NOT EXISTS promotion_receipts_session_created_idx ON promotion_receipts (upload_session_id, created_at)",
+  `CREATE TRIGGER IF NOT EXISTS promotion_receipts_lease_guard
+    BEFORE INSERT ON promotion_receipts
+    WHEN NOT EXISTS (
+      SELECT 1 FROM promotion_jobs j WHERE j.id = NEW.promotion_job_id
+        AND j.status = 'PROMOTING' AND j.lease_token = NEW.lease_token
+    )
+    BEGIN SELECT RAISE(ABORT, 'Promotion receipt lease is stale'); END`,
+  `CREATE TRIGGER IF NOT EXISTS promotion_receipts_no_update
+    BEFORE UPDATE ON promotion_receipts BEGIN SELECT RAISE(ABORT, 'Promotion receipt is immutable'); END`,
+  `CREATE TRIGGER IF NOT EXISTS promotion_receipts_no_delete
+    BEFORE DELETE ON promotion_receipts BEGIN SELECT RAISE(ABORT, 'Promotion receipt is immutable'); END`,
   `CREATE TRIGGER IF NOT EXISTS ingest_receipts_no_update
     BEFORE UPDATE ON ingest_receipts BEGIN SELECT RAISE(ABORT, 'Ingest receipt is immutable'); END`,
   `CREATE TRIGGER IF NOT EXISTS ingest_receipts_no_delete
@@ -268,7 +344,7 @@ export const ingestTableStatements: readonly string[] = [
           OR (OLD.status = 'QUARANTINED' AND NEW.status IN ('SCANNING', 'EXPIRED', 'FAILED'))
           OR (OLD.status = 'SCANNING' AND NEW.status IN ('VERIFIED', 'REJECTED', 'FAILED'))
           OR (OLD.status = 'VERIFIED' AND NEW.status IN ('PROMOTING', 'DUPLICATE', 'EXPIRED'))
-          OR (OLD.status = 'PROMOTING' AND NEW.status IN ('ACCEPTED', 'FAILED'))
+          OR (OLD.status = 'PROMOTING' AND NEW.status IN ('ACCEPTED', 'DUPLICATE', 'FAILED'))
           OR (OLD.status = 'FAILED' AND NEW.status = 'PROMOTING')
         )
       )

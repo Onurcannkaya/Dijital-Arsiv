@@ -340,7 +340,7 @@ asıl SHA-256 tekilliği D1 kısıt/tetikleyicileriyle korunuyor. Taze kurulum,
 yükseltme, yarıda kalma ve tekrar çalıştırma testleri vardır. Bütün nesne okumaları
 `binary_objects` üzerinden yapılır; `storage_key` yalnız geriye uyumlu yazma/kabul
 alındısı olarak bir sürüm daha tutulur ve daraltma göçünde fiziksel olarak kaldırılır.
-F1.3–F1.5 çalışma zamanı akışı bu sözleşmeyi kullanacaktır.
+F1.3–F1.5 çalışma zamanı akışı bu sözleşmeyi kullanır.
 
 ### F1.3 — Çok parçalı ve yeniden başlatılabilir karantina yüklemesi
 
@@ -449,6 +449,18 @@ Akış:
   `objectStorage.delete(storageKey)` davranışı kaldırılmıştır; yalnız geçici veya
   karantina nesnesi ayrı rol tarafından temizlenebilir.
 - Sağlayıcı sürümü ve şifreleme durumu `binary_objects` kaydına yazılır.
+
+**Uygulama durumu (2026-07-30):** Kod kapısı tamamlandı. Şema v14 ile kiralı,
+geri çekilmeli ve dead-letter görünür `promotion_jobs` kuyruğu ile değiştirilemez
+`promotion_receipts` kanıtı eklendi. Terfi yalnız `ImmutableVaultWriter.promote`
+üzerinden `if-absent` koşuluyla yapılır; yanıt kaybı sonrasında dolu hedefin
+üzerine yazılmaz, mevcut hedef tam okunarak güvenli biçimde kurtarılır. Asıl
+nesne boyutu ve SHA-256 değeri tam akışlı yeniden okumayla doğrulanmadan belge,
+`binary_objects`, OCR işi ve iki denetim zinciri oluşturulmaz. D1 sonlandırması
+kira belirteciyle çitlenmiş tek batch'tir; sonlandırma hatasında asıl silinmez.
+Birim testleri başarılı yazma, yazma sonrası yanıt kaybı, bozuk asıl ve mükerrer
+SHA yarışını kapsar. Gerçek R2 üzerinde T-01/T-02 ve kontrollü sonlandırma hatası
+kanıtları F1.11 staging koşusunda hâlâ zorunludur.
 
 ### F1.6 — Kalıcı bütünlük taraması, alarm ve uzlaştırma
 
@@ -644,6 +656,7 @@ namespace/bucket, ayrı servis kimlikleri ve süreli yaşam döngüsüyle tutulu
 | `lib/content-hasher.ts` | Çalışma zamanı bağımsız akışlı SHA-256 sözleşmesi; Cloudflare uygulamasında `DigestStream` |
 | `lib/ingest-contract.ts` | Sağlayıcı bağımsız durumlar, hata kodları ve kabul alındısı |
 | `lib/ingest-state-machine.ts` | İzinli, idempotent durum geçişleri |
+| `lib/ingest-promotion.ts` | Kiralı koşullu terfi, tam yeniden okuma SHA doğrulaması, değiştirilemez terfi alındısı ve atomik kabul sonlandırması |
 | `lib/content-validation.ts` | Magic-byte ve bildirilen/algılanan tür politikası |
 | `lib/integrity.ts` | Tam akış SHA taraması ve kalıcı koşu/bulgu kayıtları |
 | `lib/reconciliation.ts` | Sahipsiz nesne ve dosyasız kayıt taraması |
@@ -682,8 +695,8 @@ kabul ölçütleri değişiklik yönetimi olmadan daraltılamaz.
 
 | No | Kabul testi | Başlangıç durumu | İş paketi | Zorunlu kanıt |
 |---:|---|---|---|---|
-| 1 | Aynı nesne anahtarına ikinci yazma engellenir | Eksik | F1.1, F1.5 | Gerçek sağlayıcıda ikinci yazma reddi, nesne sürümü/SHA değişmedi |
-| 2 | Asıl SHA yazma sonrası doğrulanır | Eksik | F1.5 | Kabul alındısı ve tam yeniden okuma SHA sonucu |
+| 1 | Aynı nesne anahtarına ikinci yazma engellenir | Kod/sözleşme testi geçti; staging kanıtı açık | F1.1, F1.5 | Gerçek sağlayıcıda ikinci yazma reddi, nesne sürümü/SHA değişmedi |
+| 2 | Asıl SHA yazma sonrası doğrulanır | Kod/negatif test geçti; staging kanıtı açık | F1.5 | `promotion_receipts` alındısı ve tam yeniden okuma SHA sonucu |
 | 3 | Asıl güncellenmeden türev üretilir | Görselde mevcut, PDF eksik | F1.7 | Önce/sonra asıl SHA+sürüm ve yeni türev kaydı |
 | 4 | Kullanıcı bucket erişim anahtarı alamaz | Tasarımda mevcut | F1.9 | Yanıt/ağ izi denetimi ve erişim politikası |
 | 5 | Süresi dolan görüntüleme bileti çalışmaz | Eksik | F1.9 | Zaman kontrollü negatif test ve denetim olayı |

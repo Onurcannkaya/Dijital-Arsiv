@@ -41,7 +41,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 13;
+export const ARCHIVE_SCHEMA_VERSION = 14;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -689,6 +689,21 @@ async function migrateContentScanEvidence(db: D1Database) {
     await db.prepare(statement).run();
   }
 }
+/** F1.5: kiralı terfi kuyruğu ve değiştirilemez kasa doğrulama kanıtı. */
+async function createPromotionEvidenceTables(db: D1Database) {
+  for (const statement of ingestTableStatements.filter((sql) =>
+    sql.includes("promotion_jobs") || sql.includes("promotion_receipts"))) {
+    await db.prepare(statement).run();
+  }
+  if (!(await tableExists(db, "upload_sessions"))) return;
+  // CREATE TRIGGER IF NOT EXISTS, v13 geçiş kümesini kendiliğinden yükseltmez.
+  await db.prepare("DROP TRIGGER IF EXISTS upload_sessions_transition_guard").run();
+  const transitionGuard = ingestTableStatements.find((sql) =>
+    sql.includes("CREATE TRIGGER IF NOT EXISTS upload_sessions_transition_guard"));
+  if (!transitionGuard) throw new Error("Upload session transition guard DDL is missing.");
+  await db.prepare(transitionGuard).run();
+}
+
 /** F1.2 düzeltmesi: deneme geçmişi korunur, yalnız VERIFIED sonuç tekildir. */
 async function migrateIngestReceiptHistory(db: D1Database) {
   await db.prepare("DROP INDEX IF EXISTS ingest_receipts_session_unique").run();
@@ -990,6 +1005,8 @@ const structuralMigrations: MigrationStep[] = [
   { version: 12, run: createUploadPartLeases },
   // 12 → 13: tür/ayrıştırıcı/tarayıcı kanıtı ve tarama işi.
   { version: 13, run: migrateContentScanEvidence },
+  // 13 -> 14: conditional promotion and post-write full SHA verification.
+  { version: 14, run: createPromotionEvidenceTables },
 ];
 
 /**

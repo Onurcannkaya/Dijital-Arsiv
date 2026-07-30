@@ -64,12 +64,12 @@ async function sha256Text(value: string) {
  * `upload_sessions_transition_guard` eşzamanlı iki yazarın yalnız birinin
  * kazanmasını sağlar.
  */
-export async function transitionIngestSession(db: D1Database, input: IngestTransitionInput) {
+export async function prepareIngestTransition(db: D1Database, input: IngestTransitionInput) {
   const session = await db.prepare(
     "SELECT status, state_version FROM upload_sessions WHERE id = ?",
   ).bind(input.sessionId).first<SessionHead>();
   if (!session) throw new Error("Kabul oturumu bulunamadı.");
-  if (session.status === input.to) return { changed: false, status: session.status, stateVersion: session.state_version };
+  if (session.status === input.to) return { changed: false, status: session.status, stateVersion: session.state_version, statements: [] };
 
   const decision = decideIngestTransition(session.status, input.to, input.retryEvidence);
   if (!decision.allowed) throw new Error(decision.reason);
@@ -98,7 +98,7 @@ export async function transitionIngestSession(db: D1Database, input: IngestTrans
     createdAt,
   }));
 
-  await db.batch([
+  const statements = [
     db.prepare(`INSERT INTO upload_session_events
       (id, upload_session_id, event_number, from_status, to_status, actor_kind,
        actor_id, reason, ingest_receipt_id, event_hash, created_at)
@@ -114,7 +114,14 @@ export async function transitionIngestSession(db: D1Database, input: IngestTrans
       .bind(input.to, eventNumber, input.failureCode ?? null,
         input.duplicateOfDocumentId ?? null, session.status, input.to, reason,
         createdAt, input.sessionId, session.status, session.state_version),
-  ]);
-  return { changed: true, status: input.to, stateVersion: eventNumber, eventHash };
+  ];
+  return { changed: true, status: input.to, stateVersion: eventNumber, eventHash, statements };
+}
+
+export async function transitionIngestSession(db: D1Database, input: IngestTransitionInput) {
+  const prepared = await prepareIngestTransition(db, input);
+  if (!prepared.changed) return prepared;
+  await db.batch(prepared.statements);
+  return prepared;
 }
 

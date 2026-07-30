@@ -1,7 +1,8 @@
 import { processNextOcrJob } from "../app/api/jobs/process/route.ts";
 import { processNextContentScanJob } from "./content-scan.ts";
 import { assertSchemaReady, runMaintenanceSlice } from "./archive-schema.ts";
-import type { ArchiveBindings } from "./archive-storage.ts";
+import { getPromotionStorages, type ArchiveBindings } from "./archive-storage.ts";
+import { processNextPromotionJob } from "./ingest-promotion.ts";
 import { R2ObjectReader, R2StagingStorage } from "./r2-object-storage.ts";
 import { createDigestStreamHasher } from "./content-hasher.ts";
 import { expireIncompleteUploads } from "./ingest-service.ts";
@@ -29,32 +30,59 @@ async function readQueueMetrics(db: D1Database) {
 export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
   await assertSchemaReady(bindings.DB);
   if (cron === CONTENT_SCAN_CRON) {
+    const deadline = Date.now() + 8 * 60_000;
     if (!bindings.CONTENT_SCAN_SERVICE_URL || !bindings.CONTENT_SCAN_SERVICE_TOKEN) {
       logEvent("error", "cron.content-scan-skipped", { reason: "content scan service configuration missing" });
-      return;
-    }
-    await measured("cron.content-scan", { cron }, async () => {
-      const started = Date.now();
-      let processed = 0;
-      while (processed < 3 && Date.now() - started < 8 * 60_000) {
-        const result = await processNextContentScanJob({
-          db: bindings.DB,
-          serviceUrl: bindings.CONTENT_SCAN_SERVICE_URL!,
-          serviceToken: bindings.CONTENT_SCAN_SERVICE_TOKEN!,
+    } else {
+      await measured("cron.content-scan", { cron }, async () => {
+        let processed = 0;
+        while (processed < 3 && Date.now() < deadline) {
+          const result = await processNextContentScanJob({
+            db: bindings.DB,
+            serviceUrl: bindings.CONTENT_SCAN_SERVICE_URL!,
+            serviceToken: bindings.CONTENT_SCAN_SERVICE_TOKEN!,
+          });
+          if (!result.processed) break;
+          processed += 1;
+        }
+        const metrics = await bindings.DB.prepare(`SELECT
+          SUM(CASE WHEN status IN ('QUEUED', 'RETRY') THEN 1 ELSE 0 END) AS depth,
+          SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS dead_letter
+          FROM content_scan_jobs`).first<Record<string, number>>();
+        logEvent("info", "cron.content-scan-result", {
+          processed,
+          queueDepth: Number(metrics?.depth ?? 0),
+          deadLetter: Number(metrics?.dead_letter ?? 0),
         });
-        if (!result.processed) break;
-        processed += 1;
-      }
-      const metrics = await bindings.DB.prepare(`SELECT
-        SUM(CASE WHEN status IN ('QUEUED', 'RETRY') THEN 1 ELSE 0 END) AS depth,
-        SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS dead_letter
-        FROM content_scan_jobs`).first<Record<string, number>>();
-      logEvent("info", "cron.content-scan-result", {
-        processed,
-        queueDepth: Number(metrics?.depth ?? 0),
-        deadLetter: Number(metrics?.dead_letter ?? 0),
       });
-    });
+    }
+
+    if (!bindings.QUARANTINE_FILES) {
+      logEvent("error", "cron.promotion-skipped", { reason: "QUARANTINE_FILES binding missing" });
+    } else {
+      await measured("cron.promotion", { cron }, async () => {
+        let processed = 0;
+        const storages = getPromotionStorages(bindings);
+        while (processed < 3 && Date.now() < deadline) {
+          const result = await processNextPromotionJob({
+            db: bindings.DB,
+            ...storages,
+            hasher: createDigestStreamHasher(),
+          });
+          if (!result.processed) break;
+          processed += 1;
+        }
+        const metrics = await bindings.DB.prepare(`SELECT
+          SUM(CASE WHEN status IN ('QUEUED', 'RETRY') THEN 1 ELSE 0 END) AS depth,
+          SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS dead_letter
+          FROM promotion_jobs`).first<Record<string, number>>();
+        logEvent("info", "cron.promotion-result", {
+          processed,
+          queueDepth: Number(metrics?.depth ?? 0),
+          deadLetter: Number(metrics?.dead_letter ?? 0),
+        });
+      });
+    }
     return;
   }
   if (cron === OCR_CRON) {

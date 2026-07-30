@@ -25,6 +25,7 @@ test("F1.2 tabloları taze şemada kurulur", async () => {
       "upload_sessions", "upload_parts", "ingest_objects", "ingest_receipts",
       "upload_session_events", "integrity_runs", "integrity_findings",
       "reconciliation_runs", "reconciliation_findings", "access_tickets",
+      "promotion_jobs", "promotion_receipts",
     ]) {
       assert.ok(names.has(table), `${table} kurulmadı`);
     }
@@ -137,6 +138,27 @@ test("asıl SHA-256 tekilliği binary_objects üzerinde yarış kapısıdır", a
     assert.throws(() => db.raw.prepare(`INSERT INTO binary_objects
       (id, document_id, object_class, object_key, media_type, byte_size, sha256)
       VALUES ('o2', 'd2', 'original', 'vault/o2', 'application/pdf', 10, ?)`).run(SHA_C));
+  } finally {
+    db.close();
+  }
+});
+
+test("v14 migration replaces the v13 promotion transition guard", async () => {
+  const db = createSqliteD1();
+  try {
+    await applyArchiveMigrations(db);
+    db.raw.exec("DROP TRIGGER upload_sessions_transition_guard");
+    db.raw.exec(`CREATE TRIGGER upload_sessions_transition_guard
+      BEFORE UPDATE OF status ON upload_sessions
+      WHEN OLD.status = 'PROMOTING' AND NEW.status = 'DUPLICATE'
+      BEGIN SELECT RAISE(ABORT, 'v13 blocker'); END`);
+    db.raw.prepare("UPDATE schema_state SET version = 13 WHERE id = 'archive'").run();
+
+    await applyArchiveMigrations(db);
+    const trigger = db.raw.prepare(`SELECT sql FROM sqlite_master
+      WHERE type = 'trigger' AND name = 'upload_sessions_transition_guard'`).get() as { sql: string };
+    assert.match(trigger.sql, /NEW\.status IN \('ACCEPTED', 'DUPLICATE', 'FAILED'\)/);
+    assert.doesNotMatch(trigger.sql, /v13 blocker/);
   } finally {
     db.close();
   }

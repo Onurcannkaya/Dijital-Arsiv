@@ -76,6 +76,9 @@ oluşur.
   sonra en geç 1 saat içinde yetkili temizlik rolüyle kaldırılır.
 - `FAILED` oturumun karantina nesnesi, kök neden incelemesi ve ADR-013'teki
   yetkili yeniden deneme penceresi için 7 gün tutulur; ardından temizlenir.
+- `DUPLICATE` sonucuyla kapanan oturumun karantina nesnesi, aynı içerik
+  doğrulanmış asıl olarak zaten kasada bulunduğundan en geç 24 saat içinde
+  yetkili temizlik rolüyle kaldırılır.
 - Reddedilen nesne olay incelemesi için 72 saat izole tutulur, ardından silinir.
 - Açık güvenlik olayı varsa Bilgi Güvenliği süreli olay bekletmesi koyabilir;
   karantina saklama süresi kurumsal arşiv saklama süresi sayılmaz.

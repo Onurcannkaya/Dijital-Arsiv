@@ -31,6 +31,7 @@ test("normal kabul zinciri yalnız tanımlı ileri geçişlere izin verir", () =
 
 test("mükerrer içerik VERIFIED aşamasından terminal DUPLICATE durumuna gider", () => {
   assert.equal(decideIngestTransition("VERIFIED", "DUPLICATE").allowed, true);
+  assert.equal(decideIngestTransition("PROMOTING", "DUPLICATE").allowed, true);
   assert.equal(isTerminalIngestStatus("DUPLICATE"), true);
   assert.equal(decideIngestTransition("DUPLICATE", "PROMOTING").allowed, false);
 });
