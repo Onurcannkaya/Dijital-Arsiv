@@ -8,6 +8,8 @@ interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   ARCHIVE_FILES: R2Bucket;
+  TEMPORARY_FILES?: R2Bucket;
+  QUARANTINE_FILES?: R2Bucket;
   OCR_SERVICE_URL?: string;
   OCR_SERVICE_TOKEN?: string;
   ARCHIVE_ADMIN_EMAILS?: string;

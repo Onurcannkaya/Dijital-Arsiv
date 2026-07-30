@@ -63,6 +63,8 @@ oluşur.
 ## Yaşam döngüsü
 
 - Tamamlanmamış `temporary` oturum 24 saat sonra uygulama işiyle iptal edilir.
+  Temizlik, multipart/geçici nesneyi siler ve oturumu `EXPIRED` yapar; oturum ile
+  değiştirilemez olay/alındı satırları denetim kanıtı olarak fiziksel silinmez.
 - Sağlayıcı yaşam döngüsü, tamamlanmamış multipart yüklemeyi en geç 7 günde
   ikinci güvenlik ağı olarak sonlandırır.
 - Kabul edilip terfi eden karantina nesnesi doğrulanmış asıl kaydı oluştuktan

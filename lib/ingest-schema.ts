@@ -10,9 +10,13 @@ export const ingestTableStatements: readonly string[] = [
     tenant_id TEXT NOT NULL DEFAULT 'default',
     user_id TEXT NOT NULL,
     unit TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    requested_document_type TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'CREATED',
     state_version INTEGER NOT NULL DEFAULT 0,
+    in_flight_parts INTEGER NOT NULL DEFAULT 0,
+    parts_lease_expires_at TEXT,
     expected_byte_size INTEGER NOT NULL,
     uploaded_byte_size INTEGER NOT NULL DEFAULT 0,
     declared_media_type TEXT NOT NULL,
@@ -26,6 +30,7 @@ export const ingestTableStatements: readonly string[] = [
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (status IN ('CREATED', 'UPLOADING', 'QUARANTINED', 'SCANNING', 'VERIFIED', 'PROMOTING', 'ACCEPTED', 'REJECTED', 'DUPLICATE', 'EXPIRED', 'FAILED')),
     CHECK (state_version >= 0),
+    CHECK (in_flight_parts BETWEEN 0 AND 4),
     CHECK (expected_byte_size BETWEEN 1 AND 2147483648),
     CHECK (uploaded_byte_size BETWEEN 0 AND expected_byte_size),
     CHECK ((status = 'DUPLICATE' AND duplicate_of_document_id IS NOT NULL) OR status <> 'DUPLICATE')
@@ -64,6 +69,7 @@ export const ingestTableStatements: readonly string[] = [
     provider_etag TEXT,
     media_type TEXT NOT NULL,
     byte_size INTEGER NOT NULL,
+    -- temporary/quarantine SHA tam nesne SCANNING öncesi akışla okunana kadar bilinmeyebilir.
     sha256 TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at TEXT,
@@ -98,8 +104,12 @@ export const ingestTableStatements: readonly string[] = [
     CHECK (scanner_result IN ('CLEAN', 'MALICIOUS', 'ERROR')),
     CHECK (vault_sha256 IS NULL OR length(vault_sha256) = 64)
   )`,
-  "CREATE UNIQUE INDEX IF NOT EXISTS ingest_receipts_session_unique ON ingest_receipts (upload_session_id)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS ingest_receipts_session_verified_unique ON ingest_receipts (upload_session_id) WHERE result = 'VERIFIED'",
   "CREATE INDEX IF NOT EXISTS ingest_receipts_result_created_idx ON ingest_receipts (result, created_at)",
+  `CREATE TRIGGER IF NOT EXISTS ingest_receipts_no_update
+    BEFORE UPDATE ON ingest_receipts BEGIN SELECT RAISE(ABORT, 'Ingest receipt is immutable'); END`,
+  `CREATE TRIGGER IF NOT EXISTS ingest_receipts_no_delete
+    BEFORE DELETE ON ingest_receipts BEGIN SELECT RAISE(ABORT, 'Ingest receipt is immutable'); END`,
 
   `CREATE TABLE IF NOT EXISTS integrity_runs (
     id TEXT PRIMARY KEY NOT NULL,
@@ -205,7 +215,8 @@ export const ingestTableStatements: readonly string[] = [
           AND o.object_class = 'quarantine' AND o.deleted_at IS NULL
       ))
     BEGIN SELECT RAISE(ABORT, 'Operator retry evidence is incomplete'); END`,
-  `CREATE TRIGGER IF NOT EXISTS upload_sessions_transition_guard
+  `CREATE TRIGGER IF NOT EXISTS upload_sessions_no_delete
+    BEFORE DELETE ON upload_sessions BEGIN SELECT RAISE(ABORT, 'Ingest session is retained as audit evidence'); END`,  `CREATE TRIGGER IF NOT EXISTS upload_sessions_transition_guard
     BEFORE UPDATE OF status, state_version ON upload_sessions
     WHEN NOT (
       (NEW.status = OLD.status AND NEW.state_version = OLD.state_version)

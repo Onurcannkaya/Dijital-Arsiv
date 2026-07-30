@@ -168,22 +168,30 @@ export async function processNextOcrJob(bindings: ArchiveBindings, options: OcrP
     if (!document) throw new PublicError("OCR işine ait belge bulunamadı.", 502);
     const original = await resolveOriginalObject(bindings.DB, document.id);
     if (!original) throw new PublicError("Belgenin asıl nesne kaydı bulunamadı.", 502);
-    const object = await objectStorage.get(original.object_key);
-    if (!object) throw new PublicError("Asıl dosya kasada bulunamadı.", 502);
-
     const currentProfile = await resolveDocumentProfile(bindings.DB, {
       documentTypeId: document.document_type_id,
       documentType: document.document_type,
     });
     const ocrProfile = await buildOcrProfile(bindings.DB, currentProfile);
 
-    const form = new FormData();
-    form.set("file", new File([await object.arrayBuffer()], document.original_name, { type: original.media_type }));
-    form.set("documentId", document.id);
-    form.set("profile", JSON.stringify(ocrProfile));
-    const headers: HeadersInit = {};
+    // Belge baytları Worker üzerinden taşınmaz. OCR servisi yalnız nesne
+    // referansını alır ve ORIGINAL_FILES için salt-okunur servis kimliğiyle
+    // nesneyi kendi geçici diskine akışla indirir (ADR-014/F1.3).
+    const headers: HeadersInit = { "content-type": "application/json" };
     if (bindings.OCR_SERVICE_TOKEN) headers.authorization = `Bearer ${bindings.OCR_SERVICE_TOKEN}`;
-    const response = await fetch(`${serviceUrl}/v1/ocr`, { method: "POST", headers, body: form, signal: AbortSignal.timeout(120_000) });
+    const response = await fetch(`${serviceUrl}/v1/ocr`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        documentId: document.id,
+        objectKey: original.object_key,
+        mediaType: original.media_type,
+        byteSize: original.byte_size,
+        sha256: original.sha256,
+        profile: ocrProfile,
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
     if (!response.ok) throw new Error(`OCR servisi ${response.status} hatası verdi: ${(await response.text()).slice(0, 300)}`);
     const result = parseOcrServiceResult(await response.json());
 

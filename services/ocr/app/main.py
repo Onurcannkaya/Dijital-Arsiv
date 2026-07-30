@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -8,12 +9,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field
 
 from .extractors import extract_fields
 from .text_cleaner import readable_text
 
-MAX_BYTES = 25 * 1024 * 1024
+MAX_BYTES = 2 * 1024 * 1024 * 1024
 ALLOWED_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/tiff"}
 _engine: Any | None = None
 
@@ -49,21 +51,17 @@ def authorize(authorization: str | None = Header(default=None)) -> None:
 MAX_PROFILE_BYTES = 256 * 1024
 
 
-def parse_profile(raw: str | None) -> dict[str, Any]:
-    """Uygulamadan gelen belge türü profilini ayrıştırır.
-
-    Müdürlük ve belge türü sözlükleri istekle taşınır; servis kendi listesini
-    tutmaz. Bozuk veya aşırı büyük profil sessizce yok sayılmaz, açık hata verir:
-    eksik sözlükle çalışmak alanların sessizce kaybolmasına yol açar.
-    """
+def parse_profile(raw: dict[str, Any] | str | None) -> dict[str, Any]:
+    """Profil nesnesini boyut sınırıyla doğrular; servis kendi sözlüğünü uydurmaz."""
     if not raw:
         return {}
-    if len(raw.encode("utf-8")) > MAX_PROFILE_BYTES:
-        raise HTTPException(status_code=413, detail="Profil verisi çok büyük")
     try:
-        parsed = json.loads(raw)
-    except ValueError as exc:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+        encoded = json.dumps(parsed, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="Profil verisi geçerli JSON değil") from exc
+    if len(encoded) > MAX_PROFILE_BYTES:
+        raise HTTPException(status_code=413, detail="Profil verisi çok büyük")
     if not isinstance(parsed, dict):
         raise HTTPException(status_code=400, detail="Profil verisi nesne olmalıdır")
     return parsed
@@ -96,26 +94,14 @@ ACCESS_MAX_EDGE = int(os.getenv("ACCESS_DERIVATIVE_MAX_EDGE", "1600"))
 ACCESS_QUALITY = int(os.getenv("ACCESS_DERIVATIVE_QUALITY", "72"))
 
 
-def build_access_derivative(content: bytes, content_type: str) -> dict[str, Any] | None:
-    """Görüntüleme için kontrollü erişim türevi üretir.
-
-    Asıl dosya (değiştirilemez asıl) yalnız indirme yetkisiyle sunulmalıdır;
-    görüntüleme bu türevi alır (S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md §5).
-    Türev burada üretilir çünkü servis görüntüyü OCR için zaten çözüyor.
-
-    PDF için türev üretilmez: servis PDF sayfası çizdirecek bir bileşen
-    içermiyor. `None` dönmesi, uygulamanın bu belgede türev bulunmadığını
-    bilmesini ve durumu raporlamasını sağlar.
-    """
+def build_access_derivative(source_path: str, content_type: str) -> dict[str, Any] | None:
+    """Görüntüleme türevini dosya yolundan üretir; ham aslı yeniden belleğe almaz."""
     if not content_type.startswith("image/"):
         return None
     try:
         import base64
-
         import cv2
-        import numpy as np
-
-        image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = cv2.imread(source_path, cv2.IMREAD_COLOR)
         if image is None:
             return None
         height, width = image.shape[:2]
@@ -127,11 +113,7 @@ def build_access_derivative(content: bytes, content_type: str) -> dict[str, Any]
         if not encoded_ok:
             return None
         payload = encoded.tobytes()
-        return {
-            "mediaType": "image/jpeg",
-            "byteSize": len(payload),
-            "base64": base64.b64encode(payload).decode("ascii"),
-        }
+        return {"mediaType": "image/jpeg", "byteSize": len(payload), "base64": base64.b64encode(payload).decode("ascii")}
     except Exception:
         return None
 
@@ -170,16 +152,16 @@ def page_from_result(item: Any, page_number: int) -> dict[str, Any]:
     }
 
 
-def prepare_image(content: bytes, content_type: str) -> tuple[bytes, bool, int | None, int | None, dict[str, float]]:
+def prepare_image(source_path: str, content_type: str) -> tuple[str, bool, int | None, int | None, dict[str, float], str | None]:
+    """Görüntüyü ham dosyayı ikinci kez belleğe almadan dosya yolundan hazırlar."""
     if not content_type.startswith("image/"):
-        return content, False, None, None, {}
+        return source_path, False, None, None, {}, None
     try:
         import cv2
         import numpy as np
-
-        image = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = cv2.imread(source_path, cv2.IMREAD_COLOR)
         if image is None:
-            return content, False, None, None, {}
+            return source_path, False, None, None, {}, None
         height, width = image.shape[:2]
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         mean = float(gray.mean())
@@ -192,16 +174,67 @@ def prepare_image(content: bytes, content_type: str) -> tuple[bytes, bool, int |
         should_enhance = mode == "always" or (mode == "auto" and not is_bilevel and mean > 210 and contrast_span < 80)
         metrics = {"mean": round(mean, 2), "contrastSpan": round(contrast_span, 2), "uniqueLevels": unique_levels}
         if not should_enhance:
-            return content, False, width, height, metrics
+            return source_path, False, width, height, metrics, None
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
         blurred = cv2.GaussianBlur(clahe, (0, 0), 1.0)
         enhanced = cv2.addWeighted(clahe, 1.55, blurred, -0.55, 0)
-        encoded_ok, encoded = cv2.imencode(".png", enhanced, [cv2.IMWRITE_PNG_COMPRESSION, 3])
-        if not encoded_ok:
-            return content, False, width, height, metrics
-        return encoded.tobytes(), True, width, height, metrics
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as generated:
+            generated_path = generated.name
+        if not cv2.imwrite(generated_path, enhanced, [cv2.IMWRITE_PNG_COMPRESSION, 3]):
+            Path(generated_path).unlink(missing_ok=True)
+            return source_path, False, width, height, metrics, None
+        return generated_path, True, width, height, metrics, generated_path
     except Exception:
-        return content, False, None, None, {}
+        return source_path, False, None, None, {}, None
+
+
+class OcrObjectRequest(BaseModel):
+    documentId: str
+    objectKey: str
+    mediaType: str
+    byteSize: int = Field(gt=0, le=MAX_BYTES)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    profile: dict[str, Any] = Field(default_factory=dict)
+
+
+def download_original(reference: OcrObjectRequest, destination: str) -> None:
+    """Aslı sabit kovadan salt-okunur kimlikle ve sınırlı parçalarla indirir."""
+    bucket = os.getenv("OCR_ORIGINAL_BUCKET", "").strip()
+    endpoint = os.getenv("OCR_S3_ENDPOINT_URL", "").strip() or None
+    if not bucket:
+        raise HTTPException(status_code=503, detail="OCR_ORIGINAL_BUCKET tanımlı değil")
+    if not reference.objectKey.startswith("originals/") or ".." in reference.objectKey.split("/"):
+        raise HTTPException(status_code=400, detail="Geçersiz asıl nesne anahtarı")
+    try:
+        import boto3
+        client = boto3.client("s3", endpoint_url=endpoint)
+        response = client.get_object(Bucket=bucket, Key=reference.objectKey)
+        reported_size = int(response.get("ContentLength", -1))
+        if reported_size != reference.byteSize:
+            raise HTTPException(status_code=422, detail="Nesne boyutu yetkili kayıtla eşleşmiyor")
+        body = response["Body"]
+        digest = hashlib.sha256()
+        written = 0
+        try:
+            with open(destination, "wb") as output:
+                while True:
+                    chunk = body.read(8 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > reference.byteSize or written > MAX_BYTES:
+                        raise HTTPException(status_code=413, detail="Nesne boyut sınırını aşıyor")
+                    digest.update(chunk)
+                    output.write(chunk)
+        finally:
+            body.close()
+        if written != reference.byteSize or digest.hexdigest() != reference.sha256:
+            raise HTTPException(status_code=422, detail="Nesne SHA-256 doğrulaması başarısız")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Asıl nesne salt-okunur depodan alınamadı") from exc
+
 
 @app.get("/health")
 def health() -> dict[str, str | bool]:
@@ -215,28 +248,20 @@ def health() -> dict[str, str | bool]:
 
 
 @app.post("/v1/ocr", dependencies=[Depends(authorize)])
-async def run_ocr(
-    file: UploadFile = File(...),
-    documentId: str | None = None,
-    profile: str | None = Form(default=None),
-) -> dict[str, Any]:
-    document_profile = parse_profile(profile)
-    if file.content_type not in ALLOWED_TYPES:
+async def run_ocr(reference: OcrObjectRequest) -> dict[str, Any]:
+    document_profile = parse_profile(reference.profile)
+    if reference.mediaType not in ALLOWED_TYPES:
         raise HTTPException(status_code=415, detail="Desteklenmeyen dosya türü")
-    content = await file.read(MAX_BYTES + 1)
-    if not content or len(content) > MAX_BYTES:
-        raise HTTPException(status_code=413, detail="Dosya boş veya 25 MB sınırını aşıyor")
-    suffix = Path(file.filename or "belge").suffix or ".bin"
-    processed_content, enhanced, image_width, image_height, quality = prepare_image(content, file.content_type or "")
-    if enhanced:
-        suffix = ".png"
+    suffix = {"application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png", "image/tiff": ".tiff"}[reference.mediaType]
     started = time.perf_counter()
-    path: str | None = None
+    source_path: str | None = None
+    generated_path: str | None = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temporary:
-            temporary.write(processed_content)
-            path = temporary.name
-        predictions = engine().predict(path)
+            source_path = temporary.name
+        download_original(reference, source_path)
+        processing_path, enhanced, image_width, image_height, quality, generated_path = prepare_image(source_path, reference.mediaType)
+        predictions = engine().predict(processing_path)
         pages = [page_from_result(item, index + 1) for index, item in enumerate(predictions)]
         if len(pages) == 1 and image_width and image_height:
             pages[0]["width"] = image_width
@@ -245,19 +270,17 @@ async def run_ocr(
         base_model = os.getenv("PADDLEOCR_VERSION", "PP-OCRv5")
         model = f"{base_model}+clahe-auto" if enhanced else base_model
         return {
-            "engine": "PaddleOCR",
-            "model": model,
+            "engine": "PaddleOCR", "model": model,
             "durationMs": int((time.perf_counter() - started) * 1000),
-            "documentId": documentId,
+            "documentId": reference.documentId,
             "preprocessing": {"enhanced": enhanced, **quality},
-            # Hangi profil ve sözlük sürümüyle çıkarım yapıldığı sonuçla saklanır.
             "profileVersion": document_profile.get("profileVersion"),
             "vocabularyVersion": document_profile.get("vocabularyVersion"),
-            # Görüntüleme türevi; PDF'lerde `None` döner.
-            "accessDerivative": build_access_derivative(content, file.content_type or ""),
-            "pages": pages,
-            "fields": fields,
+            "accessDerivative": build_access_derivative(source_path, reference.mediaType),
+            "pages": pages, "fields": fields,
         }
     finally:
-        if path:
-            Path(path).unlink(missing_ok=True)
+        if generated_path:
+            Path(generated_path).unlink(missing_ok=True)
+        if source_path:
+            Path(source_path).unlink(missing_ok=True)

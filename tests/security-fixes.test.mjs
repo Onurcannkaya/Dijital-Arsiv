@@ -12,17 +12,18 @@ test("e-posta karşılaştırması locale bağımsızdır", async () => {
   assert.match(authorization, /value\.trim\(\)\.toLowerCase\(\)/);
 });
 
-test("nesne anahtarı ve nesne metadatası kişisel veri taşımaz", async () => {
-  const upload = await read("app/api/documents/route.ts");
-  // S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md §6.
-  assert.match(upload, /function originalObjectKey/);
-  assert.match(upload, /`originals\/\$\{documentId\}\/\$\{binaryObjectId\}`/);
-  assert.doesNotMatch(upload, /safeFileName/);
-  assert.doesNotMatch(upload, /originalName:\s*safeFileName/);
-  assert.doesNotMatch(upload, /uploadedBy:\s*principal\.email/);
-  assert.match(upload, /customMetadata: \{ sha256, documentId: id, binaryObjectId: objectId \}/);
+test("kabul nesne anahtarı ve nesne metadatası kişisel veri taşımaz", async () => {
+  const [ingest, route] = await Promise.all([
+    read("lib/ingest-service.ts"),
+    read("app/api/documents/route.ts"),
+  ]);
+  assert.match(ingest, /`temporary\/\$\{sessionId\}\/payload`/);
+  assert.match(ingest, /`quarantine\/\$\{sessionId\}\/payload`/);
+  assert.match(ingest, /customMetadata: \{ uploadSessionId: .* objectClass: "temporary" \}/);
+  assert.match(ingest, /customMetadata: \{ uploadSessionId: .* objectClass: "quarantine" \}/);
+  assert.doesNotMatch(ingest, /customMetadata: \{[^\n]*(?:originalName|requestedDocumentType|userId)/);
+  assert.doesNotMatch(route, /legacyDirectUpload|objectStorage\.put|request\.formData\(\)/);
 });
-
 test("OCR servisi anahtarsız çalışmaz", async () => {
   const [main, readme] = await Promise.all([read("services/ocr/app/main.py"), read("services/ocr/README.md")]);
   assert.match(main, /if not token:/);
@@ -53,9 +54,10 @@ test("görüntüleme ve indirme ayrı yetkilidir ve denetlenir", async () => {
   assert.match(audit, /attempts = 4/);
 });
 
-test("kabul, OCR, doğrulama ve erişim olayları denetim zincirine girer", async () => {
-  const [upload, processor, fields, relations, approve, text, fileRoute] = await Promise.all([
-    read("app/api/documents/route.ts"),
+test("kabul oturumu, OCR, doğrulama ve erişim olayları denetim zincirine girer", async () => {
+  const [ingest, events, processor, fields, relations, approve, textRoute, fileRoute] = await Promise.all([
+    read("lib/ingest-service.ts"),
+    read("lib/ingest-events.ts"),
     read("app/api/jobs/process/route.ts"),
     read("app/api/documents/[id]/fields/route.ts"),
     read("app/api/documents/[id]/relations/route.ts"),
@@ -63,16 +65,18 @@ test("kabul, OCR, doğrulama ve erişim olayları denetim zincirine girer", asyn
     read("app/api/documents/[id]/text/route.ts"),
     read("app/api/documents/[id]/file/route.ts"),
   ]);
+  assert.match(ingest, /transitionIngestSession/);
+  assert.match(events, /canonicalEvent/);
+  assert.match(events, /previousHash/);
   const actions = [
-    [upload, "document.received"], [processor, "ocr.completed"], [fields, "fields.confirmed"],
-    [relations, "relation.verified"], [approve, "document.archived"], [text, "text.confirmed"],
+    [processor, "ocr.completed"], [fields, "fields.confirmed"],
+    [relations, "relation.verified"], [approve, "document.archived"], [textRoute, "text.confirmed"],
     [fileRoute, "document.viewed"],
   ];
   for (const [source, action] of actions) {
     assert.ok(source.includes(action), `${action} olayı yazılmıyor`);
   }
 });
-
 test("arama normalleştirmesi tek uygulamadır", async () => {
   const [cleaner, main, contract, processor, schema] = await Promise.all([
     read("services/ocr/app/text_cleaner.py"),

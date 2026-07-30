@@ -135,15 +135,14 @@ test("arşivleme kapısı bekleyen değer, metin ve ilişki bırakmaz", async ()
 });
 
 test("nesne kaydı asıl dosyanın yetkili listesidir", async () => {
-  const [upload, file, processor, storage] = await Promise.all([
-    read("app/api/documents/route.ts"),
+  const [schema, file, processor, storage] = await Promise.all([
+    read("lib/archive-schema.ts"),
     read("app/api/documents/[id]/file/route.ts"),
     read("app/api/jobs/process/route.ts"),
     read("lib/archive-storage.ts"),
   ]);
-  assert.match(upload, /INSERT INTO binary_objects/);
-  assert.match(upload, /'original'/);
-  assert.match(upload, /document\.received/);
+  assert.match(schema, /CREATE TABLE IF NOT EXISTS binary_objects/);
+  assert.match(schema, /binary_objects_single_original_unique/);
   // Depolama konumu artık nesne kaydından çözülür.
   assert.match(storage, /resolveOriginalObject/);
   assert.match(file, /resolveOriginalObject/);

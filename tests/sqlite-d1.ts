@@ -29,8 +29,8 @@ export function createSqliteD1(location = ":memory:"): FakeD1 {
         return { results: database.prepare(sql).all(...(args as never[])) as T[], success: true };
       },
       async run() {
-        database.prepare(sql).run(...(args as never[]));
-        return { success: true };
+        const result = database.prepare(sql).run(...(args as never[]));
+        return { success: true, meta: { changes: Number(result.changes) } };
       },
       /** D1 `batch()` içinde çalıştırılabilmesi için ham SQL ve argümanlar. */
       __execute() {

@@ -379,6 +379,16 @@ servis kimliğiyle akışla okur.
 - Boyut sınırı hem oturum başında hem tamamlanan nesne başlığında doğrulanır.
 - Yarım yüklemeler belirlenen süre sonunda raporlanır ve yalnız geçici alandan
   temizlenir.
+**Uygulama durumu (F1.3):** Oturum oluşturma/durum sorgulama, akışlı parça
+yükleme, eksik parçadan devam, sunucu tarafı parça SHA-256 doğrulaması, dört
+aktif parça sınırı, idempotent tamamlama ve ayrı `TEMPORARY_FILES` →
+`QUARANTINE_FILES` akışlı aktarım servis/HTTP katmanında uygulandı. 24 saatlik
+iş, yalnız tamamlanmamış geçici nesneyi temizleyip oturumu `EXPIRED` bırakır.
+OCR tüketicisi belge baytını Worker üzerinden taşımak yerine asıl nesne
+referansını gönderir; OCR servisi sabit kovadan salt-okunur kimlikle 8 MiB
+parçalarla indirip boyut/SHA-256 değerini doğrular. Arayüz yeni kabul API'sine
+taşındı ve eski doğrudan-asıl HTTP POST yolu kapatıldı. Kod kabul ölçütleri
+tamamdır; gerçek ayrı kova bağları ve 2 GiB bellek gözlemi F1.11 staging kanıtıdır.
 
 ### F1.4 — Magic-byte, ayrıştırıcı ve zararlı içerik taraması
 
@@ -394,6 +404,8 @@ Kontroller:
 - Zararlı içerik taraması izole servis rolüyle tüm nesne üzerinde çalışır.
 - Tarayıcı motoru, sürümü, imza/veritabanı sürümü ve sonuç kabul alındısına
   yazılır.
+- Tarama denemelerinin her biri ayrı, değiştirilemez `ingest_receipts` satırıdır;
+  hata geçmişi korunur ve oturum başına yalnız bir `VERIFIED` alındı bulunabilir.
 - Testte güvenli EICAR örneği kullanılır; gerçek zararlı yazılım saklanmaz.
 
 **Kabul ölçütleri:**

@@ -93,6 +93,11 @@ export function decideIngestTransition(
   };
 }
 
-export function isTerminalIngestStatus(status: IngestSessionStatus) {
+/**
+ * İş akışı terminal durumlarını bildirir. `FAILED` bilinçli olarak false döner:
+ * operatör yeniden deneme penceresi açık olabilir. Pencere kapandığında kayıt
+ * fiilen kalıcıdır; tüketici bunu karantina varlığı/son kullanma politikasıyla
+ * ayrıca değerlendirmelidir.
+ */export function isTerminalIngestStatus(status: IngestSessionStatus) {
   return (TERMINAL_INGEST_STATUSES as readonly IngestSessionStatus[]).includes(status);
 }

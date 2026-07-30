@@ -41,7 +41,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 8;
+export const ARCHIVE_SCHEMA_VERSION = 11;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -632,6 +632,46 @@ async function migrateProcessingJobOperationsColumns(db: D1Database) {
   }
 }
 
+/** F1.3: dağıtık parça yüklemelerinde oturum başına en çok dört aktif istek. */
+async function migrateIngestSessionConcurrencyColumn(db: D1Database) {
+  if (!(await tableExists(db, "upload_sessions"))) return;
+  const columns = await columnNames(db, "upload_sessions");
+  if (!columns.has("in_flight_parts")) {
+    await db.prepare("ALTER TABLE upload_sessions ADD COLUMN in_flight_parts INTEGER NOT NULL DEFAULT 0 CHECK (in_flight_parts BETWEEN 0 AND 4)").run();
+  }
+}
+
+/** F1.3: sonraki kabul aşamalarının belge üst verisini oturumda korur. */
+async function migrateIngestSessionDocumentMetadata(db: D1Database) {
+  if (!(await tableExists(db, "upload_sessions"))) return;
+  const columns = await columnNames(db, "upload_sessions");
+  if (!columns.has("original_name")) {
+    await db.prepare("ALTER TABLE upload_sessions ADD COLUMN original_name TEXT NOT NULL DEFAULT 'belge'").run();
+  }
+  if (!columns.has("requested_document_type")) {
+    await db.prepare("ALTER TABLE upload_sessions ADD COLUMN requested_document_type TEXT NOT NULL DEFAULT 'Tasnif bekliyor'").run();
+  }
+}
+
+/**
+ * F1.3 düzeltmesi: parça slotları süresiz sayaç yerine kiraya bağlanır.
+ *
+ * Worker isolate'i parça yüklemesi ortasında düşerse `finally` çalışmaz ve
+ * `in_flight_parts` sızar; oturum süre dolumuna kadar 429'a kilitlenirdi. Kira
+ * damgası, ADR-014'teki 15 dakikalık parça yazma yetkisi dolduğunda sayacın
+ * güvenle sıfırlanmasına izin verir.
+ */
+async function migrateIngestSessionPartLease(db: D1Database) {
+  if (!(await tableExists(db, "upload_sessions"))) return;
+  const columns = await columnNames(db, "upload_sessions");
+  if (!columns.has("parts_lease_expires_at")) {
+    await db.prepare("ALTER TABLE upload_sessions ADD COLUMN parts_lease_expires_at TEXT").run();
+  }
+}
+/** F1.2 düzeltmesi: deneme geçmişi korunur, yalnız VERIFIED sonuç tekildir. */
+async function migrateIngestReceiptHistory(db: D1Database) {
+  await db.prepare("DROP INDEX IF EXISTS ingest_receipts_session_unique").run();
+}
 /** Sürüm 8: içerik tekilliğinin yetkisini `binary_objects` tablosuna taşır. */
 async function migrateOriginalShaUniqueness(db: D1Database) {
   await db.prepare("DROP INDEX IF EXISTS archive_documents_sha256_unique").run();
@@ -919,6 +959,12 @@ const structuralMigrations: MigrationStep[] = [
   { version: 3, run: migrateFieldVerifierColumns },
   // 3 → 4: belge türü profili ve alan tanımı bağları.
   { version: 4, run: migrateProfileColumns },
+  // 8 → 9: aktif parça sayacı mevcut kabul oturumlarına eklenir.
+  { version: 9, run: migrateIngestSessionConcurrencyColumn },
+  // 9 → 10: belge adı ve talep edilen tür kabul oturumunda korunur.
+  { version: 10, run: migrateIngestSessionDocumentMetadata },
+  // 10 → 11: parça slotları kira damgasıyla kurtarılabilir olur.
+  { version: 11, run: migrateIngestSessionPartLease },
 ];
 
 /**
@@ -937,10 +983,13 @@ const dataMigrations: MigrationStep[] = [
   { version: 7, run: migrateProcessingJobOperationsColumns },
   // 7 → 8: kabul tabloları kurulur; SHA tekilliği yetkili nesne envanterine taşınır.
   { version: 8, run: migrateOriginalShaUniqueness },
+  // 8 → 9: tarama denemeleri ayrı, değiştirilemez alındılar olarak saklanır.
+  { version: 9, run: migrateIngestReceiptHistory },
 ];
 
 /** Sürüm sözleşmesi denetimi ve raporlama için birleşik liste. */
-export const archiveMigrationSteps: MigrationStep[] = [...structuralMigrations, ...dataMigrations];
+export const archiveMigrationSteps: MigrationStep[] = [...structuralMigrations, ...dataMigrations]
+  .sort((left, right) => left.version - right.version);
 
 function isLocalRequest(request: Request) {
   const hostname = new URL(request.url).hostname;

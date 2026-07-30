@@ -47,7 +47,10 @@ oturumu gerekir.
 
 İzinli geçiş listesi dışında durum güncellenemez. Her geçiş;
 `upload_session_id`, beklenen mevcut durum, `state_version`, korelasyon kimliği
-ve denetim olayıyla koşullu yapılır. Aynı komutun yeniden çalışması aynı sonucu
+ve denetim olayıyla koşullu yapılır. Olay özeti; sabit alan sırasıyla önceki olay
+özetini, oturum/sürüm, eski-yeni durum, aktör, gerekçe, kanıt alındısı ve zamanı
+içeren UTF-8 JSON üzerinden SHA-256 olarak hesaplanır; böylece olaylar zincirlidir.
+Aynı komutun yeniden çalışması aynı sonucu
 döndürür; ikinci belge, asıl nesne veya OCR işi üretmez.
 
 İdempotency anahtarı kiracı, kullanıcı ve işlem amacı kapsamında benzersizdir.

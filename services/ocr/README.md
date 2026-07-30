@@ -12,6 +12,18 @@ docker run --rm -p 8090:8090 -e OCR_SERVICE_TOKEN=guclu-bir-servis-anahtari siva
 `OCR_SERVICE_TOKEN` **zorunludur**. Tanımlı değilse `/v1/ocr` 503 döner; servis
 anahtarsız çalışmaz. Aynı değer uygulama tarafında da `OCR_SERVICE_TOKEN` olarak
 tanımlanmalıdır.
+OCR isteği belge baytlarını taşımaz; yalnız `objectKey`, boyut, tür ve yetkili
+SHA-256 kaydını taşır. Servis aslı S3 uyumlu depodan 8 MiB parçalarla geçici diske
+indirir ve SHA-256 değerini yeniden doğrular. Aşağıdaki yapılandırma zorunludur:
+
+- `OCR_ORIGINAL_BUCKET`: yalnız asılları içeren sabit kova;
+- `OCR_S3_ENDPOINT_URL`: R2/S3 uyumlu uç (AWS S3 kullanılıyorsa boş bırakılabilir);
+- `AWS_ACCESS_KEY_ID` ve `AWS_SECRET_ACCESS_KEY`: yalnız `GetObject` yetkili OCR
+  servis kimliği. Yazma, silme, listeleme ve karantina yetkisi verilmez.
+
+İstekten kova veya uç adresi kabul edilmez; böylece OCR ucu başka depolara vekil
+olarak kullanılamaz. Geçici disk kapasitesi ADR-014'e göre eşzamanlı tarama sayısı
+× 2 GiB ve güvenli baş boşluğu üzerinden boyutlandırılır.
 
 ## Sözlükler istekle taşınır
 

@@ -1,15 +1,10 @@
-import { prepareAuditEvent } from "../../../lib/audit";
-import { authorizeRequest, canAccessUnit } from "../../../lib/authorization";
-import { getArchiveObjectStorage, requireArchiveSchema, getArchiveBindings, jsonError } from "../../../lib/archive-storage";
-import { DEFAULT_DOCUMENT_TYPE_CODE, UNIT_VOCABULARY_CODE } from "../../../lib/archive-seed";
-import { loadProfileByCode, loadProfileByName, loadVocabularyTerms } from "../../../lib/document-profile";
+import { authorizeRequest } from "../../../lib/authorization";
+import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../lib/archive-storage";
 import { failure } from "../../../lib/errors";
 import { escapeLike, normalizeSearch } from "../../../lib/text-search";
 
 export const dynamic = "force-dynamic";
 
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
-const ACCEPTED_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "image/tiff"]);
 const MISSING_VALUE = "Belirlenmedi";
 
 type DocumentRecord = {
@@ -30,25 +25,6 @@ function publicDocument(row: DocumentRecord) {
     verifiedRelations:row.verified_relations ?? 0,
     suggestedRelations:row.suggested_relations ?? 0,
   };
-}
-
-/**
- * Nesne anahtarı üretir.
- *
- * S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md §6: anahtarda kişi adı, kimlik
- * numarası, adres, parsel veya belge konusu bulunmaz ve kullanıcının gönderdiği
- * dosya adı anahtar yapılmaz. Gerçek taramalarda dosya adları
- * `AhmetYilmaz_1847ada12parsel.pdf` biçiminde olur; bu değer anahtara, nesne
- * metadatasına ve erişim loglarına sızmamalıdır. Özgün ad yalnız yetkiye bağlı
- * üst veride (`archive_documents.original_name`) tutulur.
- */
-function originalObjectKey(documentId: string, binaryObjectId: string) {
-  return `originals/${documentId}/${binaryObjectId}`;
-}
-
-async function sha256Hex(bytes: ArrayBuffer) {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 /**
@@ -197,94 +173,10 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
-  try {
-    const bindings = getArchiveBindings();
-    const objectStorage = getArchiveObjectStorage(bindings);
-    const schemaError = await requireArchiveSchema(request, bindings.DB);
-    if (schemaError) return schemaError;
-    const principal = await authorizeRequest(request, bindings.DB, "document.upload", bindings.ARCHIVE_ADMIN_EMAILS);
-    if (principal instanceof Response) return principal;
-    const form = await request.formData();
-    const file = form.get("file");
-    if (!(file instanceof File)) return jsonError("Yüklenecek dosya bulunamadı.");
-    if (!ACCEPTED_TYPES.has(file.type)) return jsonError("Yalnızca PDF, JPEG, PNG veya TIFF yüklenebilir.");
-    if (file.size === 0) return jsonError("Boş dosya yüklenemez.");
-    if (file.size > MAX_FILE_SIZE) return jsonError("Dosya boyutu 25 MB sınırını aşıyor.", 413);
-    const requestedType = String(form.get("documentType") || "").trim().slice(0, 120);
-    const unit = String(form.get("unit") || MISSING_VALUE).trim().slice(0, 160);
-    if (!canAccessUnit(principal, unit)) return jsonError("Bu müdürlük adına belge yükleme yetkiniz bulunmuyor.", 403);
-
-    // Belge türü kontrollü listeden gelir; serbest metin tasnif kabul edilmez.
-    const profile = requestedType
-      ? await loadProfileByName(bindings.DB, requestedType)
-      : await loadProfileByCode(bindings.DB, DEFAULT_DOCUMENT_TYPE_CODE);
-    if (!profile) return jsonError("Belge türü yürürlükteki profiller arasında bulunamadı.");
-    const documentType = profile.name;
-
-    // Müdürlük de kontrollü listeye bağlıdır (yetki kapsamını belirlediği için zorunlu).
-    const unitTerms = await loadVocabularyTerms(bindings.DB, UNIT_VOCABULARY_CODE);
-    if (unitTerms && !unitTerms.some((term) => term.label === unit || term.code === unit)) {
-      return jsonError("Müdürlük değeri kontrollü listede bulunmuyor.");
-    }
-
-    const bytes = await file.arrayBuffer();
-    const sha256 = await sha256Hex(bytes);
-    const duplicate = await bindings.DB.prepare(`SELECT id, reference_no, original_name, media_type, byte_size,
-      sha256, document_type, unit, status, uploaded_by, created_at FROM archive_documents WHERE sha256 = ? LIMIT 1`).bind(sha256).first<DocumentRecord>();
-    if (duplicate) {
-      return canAccessUnit(principal, duplicate.unit)
-        ? Response.json({ document:publicDocument(duplicate), duplicate:true }, { status:409 })
-        : jsonError("Aynı içeriğe sahip bir belge arşivde zaten bulunuyor.", 409);
-    }
-
-    const now = new Date();
-    const id = crypto.randomUUID();
-    const jobId = crypto.randomUUID();
-    const objectId = crypto.randomUUID();
-    const referenceNo = `ARS-${now.getUTCFullYear()}-${id.slice(0,8).toUpperCase()}`;
-    const storageKey = originalObjectKey(id, objectId);
-    // Nesne metadatası da kişisel veri taşımaz: yükleyen ve özgün dosya adı
-    // yetkiye bağlı üst veride tutulur (S3_DEPOLAMA... §8).
-    await objectStorage.put(storageKey, bytes, {
-      contentType: file.type,
-      customMetadata: { sha256, documentId: id, binaryObjectId: objectId },
-    });
-    try {
-      const audit = await prepareAuditEvent(bindings.DB, {
-        documentId: id,
-        actor: principal.email,
-        action: "document.received",
-        details: {
-          referenceNo, sha256, byteSize: file.size, mediaType: file.type, documentType, unit,
-          objectClass: "original", profileCode: profile.code, profileVersion: profile.profileVersion,
-        },
-      });
-      await bindings.DB.batch([
-        bindings.DB.prepare(`INSERT INTO archive_documents
-          (id, reference_no, original_name, storage_key, media_type, byte_size, sha256,
-           document_type, document_type_id, document_profile_version, unit, status, uploaded_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)`)
-          .bind(id, referenceNo, file.name, storageKey, file.type, file.size, sha256,
-            documentType, profile.documentTypeId, profile.profileVersion, unit, principal.email),
-        // S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md §8: nesne kaydı yetkili listedir.
-        bindings.DB.prepare(`INSERT INTO binary_objects
-          (id, document_id, object_class, object_key, storage_provider, bucket_or_namespace, media_type, byte_size, sha256, generator)
-          VALUES (?, ?, 'original', ?, 'r2', 'ARCHIVE_FILES', ?, ?, ?, 'archive-ingest')`)
-          .bind(objectId, id, storageKey, file.type, file.size, sha256),
-        bindings.DB.prepare(`INSERT INTO processing_jobs (id, document_id, kind, status, attempt, max_attempts, model)
-          VALUES (?, ?, 'ocr', 'queued', 0, 3, 'paddleocr-local')`).bind(jobId, id),
-        audit.statement,
-      ]);
-    } catch (error) {
-      await objectStorage.delete(storageKey);
-      throw error;
-    }
-    const created = await bindings.DB.prepare(`SELECT id, reference_no, original_name, media_type, byte_size,
-      sha256, document_type, unit, status, uploaded_by, created_at FROM archive_documents WHERE id = ?`).bind(id).first<DocumentRecord>();
-    if (!created) throw new Error("Belge kaydı oluşturulamadı.");
-    return Response.json({ document:publicDocument(created), job:{id:jobId,status:"queued",model:"paddleocr-local"} }, { status:201 });
-  } catch (error) {
-    return failure(error, "documents.upload", "Belge yüklenemedi.", request);
-  }
+/**
+ * F1.3 ile doğrudan asıl yazma kapatıldı. İstemci önce `/api/uploads` kabul
+ * oturumunu kullanır; tarama ve terfi tamamlanmadan belge/asıl/OCR kaydı oluşmaz.
+ */
+export async function POST() {
+  return jsonError("Doğrudan belge yükleme kapatıldı; güvenli kabul oturumunu kullanın.", 410);
 }

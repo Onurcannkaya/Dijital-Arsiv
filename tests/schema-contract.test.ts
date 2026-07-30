@@ -110,6 +110,8 @@ test("istek yolu şema değiştirmez", async () => {
     "app/api/documents/[id]/approve/route.ts", "app/api/documents/[id]/relations/route.ts",
     "app/api/documents/[id]/text/route.ts", "app/api/jobs/process/route.ts",
     "app/api/me/route.ts", "app/api/overview/route.ts", "app/api/profiles/route.ts",
+    "app/api/uploads/route.ts", "app/api/uploads/[id]/parts/route.ts",
+    "app/api/uploads/[id]/complete/route.ts",
   ];
   for (const route of routes) {
     const source = await readFile(new URL(`../${route}`, import.meta.url), "utf8");

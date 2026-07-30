@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { ObjectStorage } from "./object-storage.ts";
-import { createObjectStorage } from "./r2-object-storage.ts";
+import { createObjectStorage, R2StagingStorage } from "./r2-object-storage.ts";
 
 export {
   ARCHIVE_SCHEMA_VERSION, applyArchiveMigrations, assertSchemaReady,
@@ -32,6 +32,8 @@ export { INTEGRITY_SCAN_TASK, readIntegrityProgress, runIntegritySlice } from ".
 export type ArchiveBindings = {
   DB: D1Database;
   ARCHIVE_FILES: R2Bucket;
+  TEMPORARY_FILES?: R2Bucket;
+  QUARANTINE_FILES?: R2Bucket;
   OCR_SERVICE_URL?: string;
   OCR_SERVICE_TOKEN?: string;
   ARCHIVE_ADMIN_EMAILS?: string;
@@ -50,6 +52,16 @@ export function getArchiveBindings(): ArchiveBindings {
   return bindings as ArchiveBindings;
 }
 
+/** F1.3 yükleme rolü yalnız geçici ve karantina yetki alanlarını alır. */
+export function getIngestStorages(bindings: Pick<ArchiveBindings, "TEMPORARY_FILES" | "QUARANTINE_FILES">) {
+  if (!bindings.TEMPORARY_FILES || !bindings.QUARANTINE_FILES) {
+    throw new Error("TEMPORARY_FILES ve QUARANTINE_FILES fiziksel depolama bağları yapılandırılmalıdır.");
+  }
+  return {
+    temporary: new R2StagingStorage(bindings.TEMPORARY_FILES),
+    quarantine: new R2StagingStorage(bindings.QUARANTINE_FILES),
+  };
+}
 /** Çalışma zamanı nesne kasasını ADR-012 arayüzüne dönüştürür. */
 export function getArchiveObjectStorage(bindings: Pick<ArchiveBindings, "ARCHIVE_FILES">): ObjectStorage {
   return createObjectStorage(bindings.ARCHIVE_FILES);

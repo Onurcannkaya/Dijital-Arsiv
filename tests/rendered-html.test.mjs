@@ -49,24 +49,27 @@ test("service worker belge içeriğini önbelleğe almaz", async () => {
   // Önbellek adı yükseltildi: eski önbellekte kalmış belge yanıtları silinir.
   assert.doesNotMatch(serviceWorker, /shell-v1/);
 });
-test("durable upload pipeline protects originals and queues OCR", async () => {
-  const [route, storage, schema, hosting] = await Promise.all([
-    readFile(new URL("../app/api/documents/route.ts", import.meta.url), "utf8"),
+test("resumable upload pipeline isolates untrusted bytes in quarantine", async () => {
+  const [route, parts, complete, ingest, storage, schema, config] = await Promise.all([
+    readFile(new URL("../app/api/uploads/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/uploads/[id]/parts/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/uploads/[id]/complete/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/ingest-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/archive-storage.ts", import.meta.url), "utf8"),
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
-    readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
+    readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
   ]);
-  assert.match(route, /SHA-256/);
-  assert.match(route, /getArchiveObjectStorage/);
-  assert.match(route, /objectStorage\.put/);
-  assert.doesNotMatch(route, /ARCHIVE_FILES\.put/);
-  assert.match(route, /status:\s*409/);
-  assert.match(route, /paddleocr-local/);
-  // DDL kaynağı `lib/archive-schema.ts`; depolama modülü doğrulamayı yeniden yayar.
-  assert.match(storage, /requireArchiveSchema/);
-  assert.match(schema, /processingJobs/);
-  assert.match(hosting, /"d1": "DB"/);
-  assert.match(hosting, /"r2": "ARCHIVE_FILES"/);
+  assert.match(route, /createUploadSession/);
+  assert.match(parts, /x-content-sha256/);
+  assert.match(complete, /completeUploadSession/);
+  assert.match(ingest, /MULTIPART_THRESHOLD_BYTES/);
+  assert.match(ingest, /quarantineKey/);
+  assert.match(ingest, /dependencies\.hasher\.sha256/);
+  assert.doesNotMatch(route + parts + complete, /ARCHIVE_FILES\.(?:put|get|delete)/);
+  assert.match(storage, /getIngestStorages/);
+  assert.match(schema, /uploadSessions/);
+  assert.match(config, /TEMPORARY_FILES/);
+  assert.match(config, /QUARANTINE_FILES/);
 });
 test("OCR evidence pipeline persists coordinates and opens the real document", async () => {
   const [processor, detailRoute, contract, review, migration] = await Promise.all([
@@ -111,9 +114,9 @@ test("personnel confirmation archives through a tamper-evident audit chain", asy
   assert.match(migration, /audit_events_no_delete/);
 });
 test("server-side roles and unit scopes protect every archive operation", async () => {
-  const [authorization, documents, detail, fileRoute, fields, approve, process, me, workspace, migration, storage] = await Promise.all([
+  const [authorization, uploads, detail, fileRoute, fields, approve, process, me, workspace, migration, storage] = await Promise.all([
     readFile(new URL("../lib/authorization.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/documents/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/uploads/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/documents/[id]/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/documents/[id]/file/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/documents/[id]/fields/route.ts", import.meta.url), "utf8"),
@@ -127,7 +130,7 @@ test("server-side roles and unit scopes protect every archive operation", async 
   assert.match(authorization, /oai-authenticated-user-email/);
   assert.match(authorization, /archive_manager/);
   assert.match(authorization, /canAccessUnit/);
-  assert.match(documents, /document\.upload/);
+  assert.match(uploads, /document\.upload/);
   assert.match(detail, /document\.read/);
   assert.match(fileRoute, /document\.read/);
   assert.match(fields, /document\.review/);

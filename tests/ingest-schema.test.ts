@@ -10,8 +10,8 @@ const SHA_C = "c".repeat(64);
 
 function insertSession(db: ReturnType<typeof createSqliteD1>, id: string, key: string) {
   db.raw.prepare(`INSERT INTO upload_sessions
-    (id, user_id, unit, idempotency_key, expected_byte_size, declared_media_type, expires_at)
-    VALUES (?, 'user@sivas.bel.tr', 'Yazı İşleri', ?, 1024, 'application/pdf', '2026-08-01T00:00:00Z')`)
+    (id, user_id, unit, original_name, requested_document_type, idempotency_key, expected_byte_size, declared_media_type, expires_at)
+    VALUES (?, 'user@sivas.bel.tr', 'Yazı İşleri', 'ornek.pdf', 'EVRAK', ?, 1024, 'application/pdf', '2026-08-01T00:00:00Z')`)
     .run(id, key);
 }
 

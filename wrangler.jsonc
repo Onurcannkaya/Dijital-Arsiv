@@ -27,7 +27,8 @@
     ]
   },
 
-  // DB ve ARCHIVE_FILES, .openai/hosting.json içindeki mantıksal bağlardır.
+  // DB, ARCHIVE_FILES, TEMPORARY_FILES ve QUARANTINE_FILES .openai/hosting.json
+  // içindeki mantıksal bağlardır; son ikisi F1.3 için fiziksel olarak ayrıdır.
   // Gerçek D1/R2 kaynak kimlikleri Sites tarafından yönetilir; bu dosyaya sahte
   // ya da başka ortama ait kimlik yazılmaz.
   "env": {

@@ -1,7 +1,9 @@
 import { processNextOcrJob } from "../app/api/jobs/process/route.ts";
 import { assertSchemaReady, runMaintenanceSlice } from "./archive-schema.ts";
 import type { ArchiveBindings } from "./archive-storage.ts";
-import { R2ObjectReader } from "./r2-object-storage.ts";
+import { R2ObjectReader, R2StagingStorage } from "./r2-object-storage.ts";
+import { createDigestStreamHasher } from "./content-hasher.ts";
+import { expireIncompleteUploads } from "./ingest-service.ts";
 import { runIntegritySlice } from "./integrity.ts";
 import { logEvent, measured } from "./observability.ts";
 
@@ -58,7 +60,17 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
   if (cron === MAINTENANCE_CRON) {
     await measured("cron.maintenance", { cron }, async () => {
       const result = await runMaintenanceSlice(bindings.DB, { batchSize: 200, maxBatches: 3 });
-      logEvent("info", "cron.maintenance-result", result);
+      let ingestLifecycle = { expired: 0, skipped: true };
+      if (bindings.TEMPORARY_FILES && bindings.QUARANTINE_FILES) {
+        const lifecycle = await expireIncompleteUploads({
+          db: bindings.DB,
+          temporary: new R2StagingStorage(bindings.TEMPORARY_FILES),
+          quarantine: new R2StagingStorage(bindings.QUARANTINE_FILES),
+          hasher: createDigestStreamHasher(),
+        });
+        ingestLifecycle = { ...lifecycle, skipped: false };
+      }
+      logEvent("info", "cron.maintenance-result", { ...result, ingestLifecycle });
     });
     return;
   }
