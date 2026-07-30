@@ -52,6 +52,7 @@ function toObjectStat(object: R2Object): ObjectStat {
     etag: object.etag ?? null,
     providerVersionId: object.version ?? null,
     providerChecksumSha256: sha256 ? toHex(sha256) : null,
+    uploadedAt: object.uploaded?.toISOString() ?? null,
     customMetadata: object.customMetadata,
   };
 }

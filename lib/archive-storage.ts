@@ -27,7 +27,11 @@ export {
   R2StorageInventory, R2DispositionStorage,
 } from "./r2-object-storage.ts";
 export { createDigestStreamHasher, type StreamingHasher, type StreamDigest } from "./content-hasher.ts";
-export { INTEGRITY_SCAN_TASK, readIntegrityProgress, runIntegritySlice } from "./integrity.ts";
+export { INTEGRITY_SCAN_TASK, readIntegrityProgress, readIntegritySummary, runIntegritySlice } from "./integrity.ts";
+export {
+  RECONCILIATION_TASK, readReconciliationSummary, runReconciliationSlice,
+  type ReconciliationDependencies,
+} from "./reconciliation.ts";
 
 export type ArchiveBindings = {
   DB: D1Database;

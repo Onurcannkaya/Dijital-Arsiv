@@ -97,6 +97,12 @@ export type ObjectStat = {
   etag: string | null;
   providerVersionId: string | null;
   providerChecksumSha256: string | null;
+  /**
+   * Sağlayıcının nesne oluşturma/yükleme zamanı. Uzlaştırma bunu kabul
+   * sonlandırması ile depo görünürlüğü arasındaki doğal pencereyi sahipsiz
+   * nesne sanmamak için kullanır. Sağlayıcı sunmuyorsa `null` döner.
+   */
+  uploadedAt: string | null;
   customMetadata?: Record<string, string>;
 };
 

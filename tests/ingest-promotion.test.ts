@@ -110,6 +110,7 @@ class MemoryVaultWriter implements ImmutableVaultWriter {
       etag: `etag-${this.objects.size + 1}`,
       providerVersionId: `version-${this.objects.size + 1}`,
       providerChecksumSha256: null,
+      uploadedAt: NOW.toISOString(),
       customMetadata: options.customMetadata,
     };
     this.objects.set(key, { bytes, stat });
@@ -170,6 +171,7 @@ function seedVerifiedSession(
       etag: `quarantine-${id}`,
       providerVersionId: `quarantine-version-${id}`,
       providerChecksumSha256: null,
+      uploadedAt: NOW.toISOString(),
     },
   });
   return digest;

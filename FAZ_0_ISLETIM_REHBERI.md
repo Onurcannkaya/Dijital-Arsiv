@@ -61,7 +61,7 @@ anlamına gelmez.
 |---|---|---|
 | `*/2 * * * *` | OCR kuyruğu tüketimi | En çok 5 iş / 8 dakika |
 | `*/5 * * * *` | Arama dizini bakım işi | 3 × 200 kayıt |
-| `17 */6 * * *` | Nesne bütünlük taraması | 20 nesne |
+| `17 */6 * * *` | Hızlı/tam bütünlük ve üç yönlü uzlaştırma | Hızlı 20, tam 5, uzlaştırma 50 kayıt/nesne |
 
 OCR hataları 30 saniyeden başlayan üstel geri çekilmeyle en fazla bir saate kadar
 ertelenir. Azami deneme sayısını aşan işler dead-letter olarak görünür. Kuyruk

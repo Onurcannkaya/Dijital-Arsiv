@@ -164,8 +164,10 @@ Sentetik dosyalar depo içinde tutulacaksa içeriklerinin SHA-256 değerleri ve
 - Veri/uygulama: Ayrı test adaptöründe metadata aynı bırakılarak kontrollü içerik
   uyuşmazlığı oluşturulur.
 - Beklenen: Tam akış SHA taraması uyuşmazlığı bulur, kalıcı bulgu ve alarm
-  üretir; otomatik sessiz onarım yapmaz.
-- Kanıt: `integrity_run`, `integrity_finding`, alarm kimliği ve işletim teyidi.
+  üretir; geçici sağlayıcı kesintisini bozulma saymaz ve otomatik sessiz onarım
+  yapmaz.
+- Kanıt: `integrity_run`, `integrity_finding`, bulgu kimliğiyle aynı alarm
+  korelasyon kimliği, sabit kapsam su işareti ve işletim teyidi.
 - Yürüten: Kalite Güvence.
 - Onaylayan: Bilgi Güvenliği ve Depolama İşletimi.
 
@@ -208,8 +210,9 @@ Sentetik dosyalar depo içinde tutulacaksa içeriklerinin SHA-256 değerleri ve
 - Ön koşul: F1.6 depo envanteri ve veritabanı uzlaştırması hazırdır.
 - Veri/uygulama: Bir sahipsiz nesne ve bir dosyasız kayıt kontrollü oluşturulur.
 - Beklenen: İki ayrı kalıcı bulgu doğru sınıf ve nesne/kayıt kimliğiyle oluşur;
-  normal uygulama aslı otomatik silmez.
-- Kanıt: `reconciliation_run`, iki bulgu, sayımlar ve yetkili çözüm durumları.
+  genç nesne yaş toleransında yanlış alarm olmaz; normal uygulama aslı otomatik
+  silmez.
+- Kanıt: `reconciliation_run`, iki bulgu, kapsam su işaretleri, sayımlar ve yetkili çözüm durumları.
 - Yürüten: Kalite Güvence.
 - Onaylayan: Depolama İşletimi ve Arşiv.
 

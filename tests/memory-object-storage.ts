@@ -42,6 +42,7 @@ type StoredEntry = {
   etag: string;
   providerVersionId: string;
   providerChecksumSha256: string | null;
+  uploadedAt: string;
 };
 
 type MultipartSession = {
@@ -96,10 +97,18 @@ export class MemoryNamespace {
   readonly entries = new Map<string, StoredEntry>();
   readonly reservations = new Set<string>();
   private sequence = 0;
+  private readonly now: () => Date;
 
-  nextVersion(): { etag: string; providerVersionId: string } {
+  constructor(now: () => Date = () => new Date()) {
+    this.now = now;
+  }
+
+  nextVersion(): { etag: string; providerVersionId: string; uploadedAt: string } {
     this.sequence += 1;
-    return { etag: `"mem-${this.sequence}"`, providerVersionId: `v${this.sequence}` };
+    return {
+      etag: `"mem-${this.sequence}"`, providerVersionId: `v${this.sequence}`,
+      uploadedAt: this.now().toISOString(),
+    };
   }
 
   stat(key: string): ObjectStat | null {
@@ -111,6 +120,7 @@ export class MemoryNamespace {
       etag: entry.etag,
       providerVersionId: entry.providerVersionId,
       providerChecksumSha256: entry.providerChecksumSha256,
+      uploadedAt: entry.uploadedAt,
       customMetadata: entry.customMetadata,
     };
   }

@@ -3,10 +3,11 @@ import { processNextContentScanJob } from "./content-scan.ts";
 import { assertSchemaReady, runMaintenanceSlice } from "./archive-schema.ts";
 import { getPromotionStorages, type ArchiveBindings } from "./archive-storage.ts";
 import { processNextPromotionJob } from "./ingest-promotion.ts";
-import { R2ObjectReader, R2StagingStorage } from "./r2-object-storage.ts";
+import { R2ObjectReader, R2StagingStorage, R2StorageInventory } from "./r2-object-storage.ts";
 import { createDigestStreamHasher } from "./content-hasher.ts";
 import { expireIncompleteUploads } from "./ingest-service.ts";
 import { runIntegritySlice } from "./integrity.ts";
+import { runReconciliationSlice } from "./reconciliation.ts";
 import { logEvent, measured } from "./observability.ts";
 
 export const CONTENT_SCAN_CRON = "* * * * *";
@@ -135,7 +136,29 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
   }
   if (cron === INTEGRITY_CRON) {
     await measured("cron.integrity", { cron }, async () => {
-      await runIntegritySlice(bindings.DB, new R2ObjectReader(bindings.ARCHIVE_FILES));
+      const reader = new R2ObjectReader(bindings.ARCHIVE_FILES);
+      const integrity = await runIntegritySlice(bindings.DB, reader, createDigestStreamHasher());
+      const reconciliation = await runReconciliationSlice({
+        db: bindings.DB,
+        inventory: new R2StorageInventory(bindings.ARCHIVE_FILES),
+        reader,
+      });
+      logEvent("info", "cron.integrity-result", {
+        integrity: {
+          claimed: integrity.claimed,
+          profile: "profile" in integrity ? integrity.profile : null,
+          checked: integrity.checked,
+          findings: integrity.findings,
+          done: integrity.done,
+        },
+        reconciliation: {
+          claimed: reconciliation.claimed,
+          phase: "phase" in reconciliation ? reconciliation.phase : null,
+          checked: reconciliation.checked,
+          findings: reconciliation.findings,
+          done: reconciliation.done,
+        },
+      });
     });
     return;
   }

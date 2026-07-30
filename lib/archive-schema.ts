@@ -41,7 +41,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 14;
+export const ARCHIVE_SCHEMA_VERSION = 16;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -74,6 +74,7 @@ const tableStatements: string[] = [
     processed INTEGER NOT NULL DEFAULT 0,
     total INTEGER,
     locked_until TEXT,
+    lease_token TEXT,
     last_error TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -713,6 +714,42 @@ async function migrateOriginalShaUniqueness(db: D1Database) {
   await db.prepare("DROP INDEX IF EXISTS archive_documents_sha256_unique").run();
 }
 
+/** F1.6: hızlı (metadata) ve tam (akışlı SHA) tarama koşuları ayrışır. */
+async function migrateIntegrityRunProfile(db: D1Database) {
+  if (!(await tableExists(db, "integrity_runs"))) return;
+  const columns = await columnNames(db, "integrity_runs");
+  if (!columns.has("profile")) {
+    await db.prepare(
+      "ALTER TABLE integrity_runs ADD COLUMN profile TEXT NOT NULL DEFAULT 'quick' CHECK (profile IN ('quick', 'full'))",
+    ).run();
+  }
+}
+
+/** F1.6 güvenlik sertleştirmesi: kiralı iş ve sabit tarama anlık görüntüleri. */
+async function hardenIntegrityAndReconciliationRuns(db: D1Database) {
+  if (await tableExists(db, "maintenance_tasks")) {
+    const columns = await columnNames(db, "maintenance_tasks");
+    if (!columns.has("lease_token")) {
+      await db.prepare("ALTER TABLE maintenance_tasks ADD COLUMN lease_token TEXT").run();
+    }
+  }
+  if (await tableExists(db, "integrity_runs")) {
+    const columns = await columnNames(db, "integrity_runs");
+    if (!columns.has("snapshot_max_rowid")) {
+      await db.prepare("ALTER TABLE integrity_runs ADD COLUMN snapshot_max_rowid INTEGER").run();
+    }
+  }
+  if (await tableExists(db, "reconciliation_runs")) {
+    const columns = await columnNames(db, "reconciliation_runs");
+    if (!columns.has("binary_snapshot_max_rowid")) {
+      await db.prepare("ALTER TABLE reconciliation_runs ADD COLUMN binary_snapshot_max_rowid INTEGER").run();
+    }
+    if (!columns.has("document_snapshot_max_rowid")) {
+      await db.prepare("ALTER TABLE reconciliation_runs ADD COLUMN document_snapshot_max_rowid INTEGER").run();
+    }
+  }
+}
+
 /**
  * Mevcut belgelerin asıl dosyaları için nesne kaydı üretir.
  * `archive_documents` kabul alındısını, `binary_objects` depolama kaydını tutar.
@@ -1007,6 +1044,10 @@ const structuralMigrations: MigrationStep[] = [
   { version: 13, run: migrateContentScanEvidence },
   // 13 -> 14: conditional promotion and post-write full SHA verification.
   { version: 14, run: createPromotionEvidenceTables },
+  // 14 → 15: bütünlük koşuları hızlı/tam profil ayrımı kazanır.
+  { version: 15, run: migrateIntegrityRunProfile },
+  // 15 → 16: çökme kurtarma kirası ve deterministik tarama su işaretleri.
+  { version: 16, run: hardenIntegrityAndReconciliationRuns },
 ];
 
 /**

@@ -396,6 +396,7 @@ export const maintenanceTasks = sqliteTable("maintenance_tasks", {
   processed: integer("processed").notNull().default(0),
   total: integer("total"),
   lockedUntil: text("locked_until"),
+  leaseToken: text("lease_token"),
   lastError: text("last_error"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -613,6 +614,8 @@ export const promotionReceipts = sqliteTable("promotion_receipts", {
 export const integrityRuns = sqliteTable("integrity_runs", {
   id: text("id").primaryKey(),
   status: text("status").notNull().default("RUNNING"),
+  profile: text("profile").notNull().default("quick"),
+  snapshotMaxRowid: integer("snapshot_max_rowid"),
   cursor: text("cursor"),
   checkedCount: integer("checked_count").notNull().default(0),
   findingCount: integer("finding_count").notNull().default(0),
@@ -621,6 +624,7 @@ export const integrityRuns = sqliteTable("integrity_runs", {
 }, (table) => [
   index("integrity_runs_status_started_idx").on(table.status, table.startedAt),
   check("integrity_runs_status_check", sql`${table.status} IN ('RUNNING', 'COMPLETED', 'FAILED')`),
+  check("integrity_runs_profile_check", sql`${table.profile} IN ('quick', 'full')`),
   check("integrity_runs_checked_check", sql`${table.checkedCount} >= 0`),
   check("integrity_runs_finding_check", sql`${table.findingCount} >= 0`),
 ]);
@@ -649,6 +653,8 @@ export const reconciliationRuns = sqliteTable("reconciliation_runs", {
   id: text("id").primaryKey(),
   status: text("status").notNull().default("RUNNING"),
   cursor: text("cursor"),
+  binarySnapshotMaxRowid: integer("binary_snapshot_max_rowid"),
+  documentSnapshotMaxRowid: integer("document_snapshot_max_rowid"),
   checkedCount: integer("checked_count").notNull().default(0),
   findingCount: integer("finding_count").notNull().default(0),
   startedAt: text("started_at").notNull().default(sql`CURRENT_TIMESTAMP`),

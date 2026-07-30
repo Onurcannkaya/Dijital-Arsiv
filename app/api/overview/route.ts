@@ -1,5 +1,8 @@
 import { authorizeRequest } from "../../../lib/authorization";
-import { readIntegrityProgress, readMaintenanceProgress, requireArchiveSchema, getArchiveBindings } from "../../../lib/archive-storage";
+import {
+  readIntegrityProgress, readIntegritySummary, readMaintenanceProgress,
+  readReconciliationSummary, requireArchiveSchema, getArchiveBindings,
+} from "../../../lib/archive-storage";
 import { failure } from "../../../lib/errors";
 
 export const dynamic = "force-dynamic";
@@ -111,6 +114,10 @@ export async function GET(request: Request) {
       // bir yenileme aramayı sessizce eksik bırakır.
       maintenance: await readMaintenanceProgress(bindings.DB),
       integrity: await readIntegrityProgress(bindings.DB),
+      // F1.6: bulgular kalıcıdır; sayılar `integrity_findings` ve
+      // `reconciliation_findings` tablolarından gelir, dilim log'undan değil.
+      integrityFindings: await readIntegritySummary(bindings.DB),
+      reconciliation: await readReconciliationSummary(bindings.DB),
       // Kapasite kotası, yedekleme durumu ve servis sağlığı henüz ölçülmüyor;
       // uydurma değer döndürmek yerine açıkça bildirilmez.
       unmeasured: ["storageQuota", "lastBackup", "serviceHealth"],

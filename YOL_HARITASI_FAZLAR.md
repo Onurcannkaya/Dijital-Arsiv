@@ -478,10 +478,11 @@ Her koşu `integrity_runs`, her sorun `integrity_findings` kaydı üretir.
 `maintenance_tasks.last_error` yalnız son çalışma durumu için kullanılabilir;
 bulgu kaynağı değildir.
 
-Uzlaştırma iki yönde çalışır:
+Uzlaştırma üç yönde çalışır:
 
 - Depoda var, yetkili veritabanı kaydı yok: sahipsiz nesne.
 - Veritabanı kaydı var, depoda nesne yok: dosyasız kayıt.
+- Belge alındısı var, yetkili asıl `binary_objects` kaydı yok: eksik kayıt.
 
 **Kabul ölçütleri:**
 
@@ -491,7 +492,33 @@ Uzlaştırma iki yönde çalışır:
 - Bulgu kalıcı alarm/olay kaydı üretir ve çözümlenmeden kapanmaz.
 - Uzlaştırma sayfalı, kaldığı yerden devam eden ve yaş toleranslıdır.
 - Uzlaştırma kendiliğinden asıl nesne silmez veya veritabanı kaydını düşürmez.
+- Koşu kapsamı sabit su işaretlidir; süresi dolmuş iş kirası fencing belirteciyle
+  devralınır ve eski Worker yeni ilerlemeyi ezemez.
 - Koşu kapsamı, süre, taranan nesne sayısı ve sonuç raporlanır.
+
+**Uygulama durumu (F1.6):** Şema v16 ile bütünlük koşuları hızlı/tam profil,
+sabit `rowid` su işareti ve fencing belirteçli iş kirası kazandı. Hızlı profil
+Hızlı profil varlık, boyut, sağlayıcı checksum'ı ve custom metadata SHA'sını;
+tam profil nesneyi akışla okuyup SHA-256'yı yetkili kayıtla
+karşılaştırır; koşular profiller arasında sırayla döner. Her koşu
+`integrity_runs`, her sorun kalıcı `integrity_findings` kaydı ve bulgu kimliğiyle
+korelasyonlu alarm sinyali üretir; aynı nesne/tür için çözülmemiş bulgu yinelenmez,
+fakat koşu özeti yeniden gözlenen ihlali sayar. `lib/reconciliation.ts` üç yönlü,
+sayfalı ve kaldığı yerden devam
+eden uzlaştırmayı çalıştırır: sahipsiz nesne, dosyasız kayıt ve eksik asıl kayıt
+bulguları sağlayıcının yükleme zamanına dayalı yaş toleransı ile terfi penceresini
+tanır; hiçbir nesne silinmez, hiçbir kayıt düşürülmez ve nesne anahtarları loglara
+yazılmaz. Sonuçlar `INTEGRITY_CRON` diliminde koşar ve genel bakış
+uç noktasında `integrityFindings`/`reconciliation` alanlarıyla raporlanır.
+Sürüm kayması bulgu taksonomisine girmez; uyarı olayı üretir ve tam profil
+içerik SHA'sını ayrıca doğrular. Gerçek R2 kaynağıyla T-08/T-12 kanıtları
+F1.11 staging koşusuna aittir.
+
+**İşletim kapasite kapısı:** Mevcut `17 */6 * * *` periyodu ve tam profil başına
+en çok beş nesneyle teorik tam tur süresi `ceil(nesne_sayısı / 5) × 6 saat`tir;
+dosya boyutu ve yeniden denemeler bu süreyi uzatır. Üretim öncesinde envanter
+büyüklüğüne göre hedef tam tur süresi, cron/queue paralelliği ve en büyük 2 GB
+nesnenin süre ölçümü sayısal olarak kararlaştırılmalıdır.
 
 ### F1.7 — PDF erişim türevi ve geri dolum
 
@@ -782,7 +809,7 @@ Faz 1 tamamlandı denebilmesi için:
   rotasında kullanılmaz.
 - Karantina, tarama, koşullu terfi ve tam SHA doğrulaması çalışır.
 - Asıl kasa uygulama rolünde silme yetkisi yoktur.
-- Tam bütünlük taraması ve iki yönlü uzlaştırma kalıcı bulgu üretir.
+- Tam bütünlük taraması ve üç yönlü uzlaştırma kalıcı bulgu üretir.
 - PDF görüntüleme asıl nesneye geri düşmez; geri dolum tamamlanmıştır.
 - Doğrulanmış kişisel veri içeren eski anahtar/metadata kalmamıştır.
 - Süresi dolmuş bilet ve yetkisiz rol negatif testleri geçer.
