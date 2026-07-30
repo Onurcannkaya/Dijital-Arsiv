@@ -468,6 +468,18 @@ export const uploadParts = sqliteTable("upload_parts", {
   check("upload_parts_attempt_check", sql`${table.attemptCount} >= 1`),
 ]);
 
+export const uploadPartLeases = sqliteTable("upload_part_leases", {
+  id: text("id").primaryKey(),
+  uploadSessionId: text("upload_session_id").notNull().references(() => uploadSessions.id, { onDelete: "cascade" }),
+  partNumber: integer("part_number").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("upload_part_leases_session_part_unique").on(table.uploadSessionId, table.partNumber),
+  index("upload_part_leases_session_expiry_idx").on(table.uploadSessionId, table.expiresAt),
+  check("upload_part_leases_number_check", sql`${table.partNumber} BETWEEN 1 AND 10000`),
+]);
+
 export const ingestObjects = sqliteTable("ingest_objects", {
   id: text("id").primaryKey(),
   uploadSessionId: text("upload_session_id").notNull().references(() => uploadSessions.id, { onDelete: "cascade" }),
@@ -499,6 +511,9 @@ export const ingestReceipts = sqliteTable("ingest_receipts", {
   declaredMediaType: text("declared_media_type").notNull(),
   detectedMediaType: text("detected_media_type").notNull(),
   typeValidationResult: text("type_validation_result").notNull(),
+  parserName: text("parser_name").notNull(),
+  parserVersion: text("parser_version").notNull(),
+  parserResult: text("parser_result").notNull(),
   scannerEngine: text("scanner_engine").notNull(),
   scannerVersion: text("scanner_version").notNull(),
   scannerSignatureVersion: text("scanner_signature_version").notNull(),
@@ -514,8 +529,27 @@ export const ingestReceipts = sqliteTable("ingest_receipts", {
   check("ingest_receipts_hash_check", sql`length(${table.sha256}) = 64`),
   check("ingest_receipts_size_check", sql`${table.byteSize} > 0`),
   check("ingest_receipts_type_check", sql`${table.typeValidationResult} IN ('MATCH', 'MISMATCH', 'UNSUPPORTED')`),
+  check("ingest_receipts_parser_check", sql`${table.parserResult} IN ('VALID', 'INVALID', 'ERROR')`),
   check("ingest_receipts_scanner_check", sql`${table.scannerResult} IN ('CLEAN', 'MALICIOUS', 'ERROR')`),
   check("ingest_receipts_vault_hash_check", sql`${table.vaultSha256} IS NULL OR length(${table.vaultSha256}) = 64`),
+]);
+
+export const contentScanJobs = sqliteTable("content_scan_jobs", {
+  id: text("id").primaryKey(),
+  uploadSessionId: text("upload_session_id").notNull().unique().references(() => uploadSessions.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("QUEUED"),
+  attempt: integer("attempt").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  nextAttemptAt: text("next_attempt_at"),
+  leaseToken: text("lease_token"),
+  leaseExpiresAt: text("lease_expires_at"),
+  lastError: text("last_error"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("content_scan_jobs_claim_idx").on(table.status, table.nextAttemptAt, table.leaseExpiresAt, table.createdAt),
+  check("content_scan_jobs_status_check", sql`${table.status} IN ('QUEUED', 'SCANNING', 'RETRY', 'COMPLETED', 'FAILED')`),
+  check("content_scan_jobs_attempt_check", sql`${table.attempt} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 20`),
 ]);
 
 export const integrityRuns = sqliteTable("integrity_runs", {

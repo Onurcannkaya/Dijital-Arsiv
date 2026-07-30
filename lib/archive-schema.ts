@@ -41,7 +41,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 11;
+export const ARCHIVE_SCHEMA_VERSION = 13;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -668,6 +668,27 @@ async function migrateIngestSessionPartLease(db: D1Database) {
     await db.prepare("ALTER TABLE upload_sessions ADD COLUMN parts_lease_expires_at TEXT").run();
   }
 }
+/** F1.3 düzeltmesi: her aktif parça isteği kendi kira/fencing kimliğini taşır. */
+async function createUploadPartLeases(db: D1Database) {
+  for (const statement of ingestTableStatements.filter((sql) => sql.includes("upload_part_leases"))) {
+    await db.prepare(statement).run();
+  }
+}
+/** F1.4: ayrıştırıcı kanıtı ve kiralı/dead-letter görünür tarama işi. */
+async function migrateContentScanEvidence(db: D1Database) {
+  if (await tableExists(db, "ingest_receipts")) {
+    const columns = await columnNames(db, "ingest_receipts");
+    const additions: Array<[string, string]> = [
+      ["parser_name", "ALTER TABLE ingest_receipts ADD COLUMN parser_name TEXT NOT NULL DEFAULT 'unknown'"],
+      ["parser_version", "ALTER TABLE ingest_receipts ADD COLUMN parser_version TEXT NOT NULL DEFAULT 'unknown'"],
+      ["parser_result", "ALTER TABLE ingest_receipts ADD COLUMN parser_result TEXT NOT NULL DEFAULT 'ERROR' CHECK (parser_result IN ('VALID', 'INVALID', 'ERROR'))"],
+    ];
+    for (const [column, sql] of additions) if (!columns.has(column)) await db.prepare(sql).run();
+  }
+  for (const statement of ingestTableStatements.filter((sql) => sql.includes("content_scan_jobs"))) {
+    await db.prepare(statement).run();
+  }
+}
 /** F1.2 düzeltmesi: deneme geçmişi korunur, yalnız VERIFIED sonuç tekildir. */
 async function migrateIngestReceiptHistory(db: D1Database) {
   await db.prepare("DROP INDEX IF EXISTS ingest_receipts_session_unique").run();
@@ -965,6 +986,10 @@ const structuralMigrations: MigrationStep[] = [
   { version: 10, run: migrateIngestSessionDocumentMetadata },
   // 10 → 11: parça slotları kira damgasıyla kurtarılabilir olur.
   { version: 11, run: migrateIngestSessionPartLease },
+  // 11 → 12: ortak sayaç kirası yerine istek başına fencing kaydı.
+  { version: 12, run: createUploadPartLeases },
+  // 12 → 13: tür/ayrıştırıcı/tarayıcı kanıtı ve tarama işi.
+  { version: 13, run: migrateContentScanEvidence },
 ];
 
 /**

@@ -18,4 +18,7 @@ test("eski doğrudan-asıl HTTP POST yolu güvenli kabul hattını atlayamaz", a
   const route = await read("app/api/documents/route.ts");
   assert.match(route, /export async function POST\(\)\s*\{\s*return jsonError\("[^"\r\n]+",\s*410\);\s*\}/);
   assert.doesNotMatch(route, /legacyDirectUpload|request\.formData\(\)|objectStorage\.put/);
+  const ingest = await read("lib/ingest-service.ts");
+  assert.match(ingest, /DELETE FROM upload_part_leases WHERE id = \? AND upload_session_id = \?/);
+  assert.doesNotMatch(ingest, /in_flight_parts\s*-\s*1/);
 });

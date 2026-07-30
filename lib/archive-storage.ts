@@ -36,6 +36,8 @@ export type ArchiveBindings = {
   QUARANTINE_FILES?: R2Bucket;
   OCR_SERVICE_URL?: string;
   OCR_SERVICE_TOKEN?: string;
+  CONTENT_SCAN_SERVICE_URL?: string;
+  CONTENT_SCAN_SERVICE_TOKEN?: string;
   ARCHIVE_ADMIN_EMAILS?: string;
   /** Şema göç uç noktasının anahtarı; tanımlı değilse uç nokta kapalıdır. */
   ARCHIVE_MIGRATION_TOKEN?: string;
@@ -65,6 +67,12 @@ export function getIngestStorages(bindings: Pick<ArchiveBindings, "TEMPORARY_FIL
 /** Çalışma zamanı nesne kasasını ADR-012 arayüzüne dönüştürür. */
 export function getArchiveObjectStorage(bindings: Pick<ArchiveBindings, "ARCHIVE_FILES">): ObjectStorage {
   return createObjectStorage(bindings.ARCHIVE_FILES);
+}
+
+export function localContentScanServiceUrl(request: Request, configured?: string) {
+  if (configured) return configured.replace(/\/$/, "");
+  const hostname = new URL(request.url).hostname;
+  return hostname === "localhost" || hostname === "127.0.0.1" ? "http://127.0.0.1:8091" : null;
 }
 
 export function localOcrServiceUrl(request: Request, configured?: string) {

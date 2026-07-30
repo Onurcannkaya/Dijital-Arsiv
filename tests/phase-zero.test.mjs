@@ -72,6 +72,7 @@ test("dağıtım sözleşmesi sırları, şema göçünü ve readiness kontrolü
     read("build/sites-vite-plugin.ts"),
   ]);
   for (const secret of [
+    "CONTENT_SCAN_SERVICE_URL", "CONTENT_SCAN_SERVICE_TOKEN",
     "OCR_SERVICE_URL", "OCR_SERVICE_TOKEN", "ARCHIVE_MIGRATION_TOKEN", "ARCHIVE_ADMIN_EMAILS",
   ]) {
     assert.ok(config.includes(secret), `${secret} zorunlu sır sözleşmesinde yok`);
@@ -81,8 +82,10 @@ test("dağıtım sözleşmesi sırları, şema göçünü ve readiness kontrolü
   assert.match(verifier, /\/api\/health/);
   assert.match(health, /status: ready \? "ready" : "degraded"/);
   assert.match(health, /state\.modelReady !== true/);
+  assert.match(health, /state\.scannerReady !== true/);
   assert.match(workflow, /npm run typecheck/);
   assert.match(workflow, /npm run lint/);
+  assert.match(workflow, /unittest discover services\/content-scan\/tests/);
   assert.match(workflow, /npm test/);
   assert.doesNotMatch(sitesPlugin, /cp\(drizzleSource/);
   assert.match(sitesPlugin, /dist", "server", "\.dev\.vars/);

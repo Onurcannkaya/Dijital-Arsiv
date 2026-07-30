@@ -34,7 +34,8 @@ export function createSqliteD1(location = ":memory:"): FakeD1 {
       },
       /** D1 `batch()` içinde çalıştırılabilmesi için ham SQL ve argümanlar. */
       __execute() {
-        database.prepare(sql).run(...(args as never[]));
+        const result = database.prepare(sql).run(...(args as never[]));
+        return Number(result.changes);
       },
     };
     return statement;
@@ -43,16 +44,17 @@ export function createSqliteD1(location = ":memory:"): FakeD1 {
   const db = {
     prepare,
     /** D1 `batch()` tek işlemdir: bir ifade başarısız olursa tümü geri alınır. */
-    async batch(statements: Array<{ __execute(): void }>) {
+    async batch(statements: Array<{ __execute(): number }>) {
       database.exec("BEGIN");
+      const changes: number[] = [];
       try {
-        for (const statement of statements) statement.__execute();
+        for (const statement of statements) changes.push(statement.__execute());
         database.exec("COMMIT");
       } catch (error) {
         database.exec("ROLLBACK");
         throw error;
       }
-      return statements.map(() => ({ success: true }));
+      return changes.map((count) => ({ success: true, meta: { changes: count } }));
     },
     close() {
       database.close();

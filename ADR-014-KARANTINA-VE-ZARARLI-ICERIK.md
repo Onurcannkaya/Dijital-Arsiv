@@ -50,6 +50,11 @@ Tarama servisi:
 Tarama servisinin geçici disk kapasitesi en az *eşzamanlı tarama sayısı × azami
 belge boyutu* artı güvenli baş boşluğu olarak planlanır; eşzamanlı tarama sınırı
 ve disk boyutu işletim rehberinde sabitlenir.
+Tarama çağrıları `content_scan_jobs` tablosunda istek başına kira, azami deneme,
+exponential backoff ve dead-letter durumuyla izlenir. Servis veya imza veritabanı
+kullanılamadığında oturum ve nesne `QUARANTINED` kalır; başarısız deneme ayrı,
+değiştirilemez `FAILED` alındısı üretir. Yalnız magic-byte, uzantı, güvenli
+ayrıştırıcı ve ClamAV sonucu birlikte temizse `VERIFIED` geçişi yapılır.
 
 ClamAV sonucu tek başına tür güvenliği değildir. Magic-byte doğrulaması ve güvenli
 ayrıştırıcı profili ayrıca çalışır. PDF içeriğinin güvenli erişim türevine

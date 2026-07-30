@@ -416,6 +416,14 @@ Kontroller:
 - Karantina nesnesi normal görüntüleme/indirme rolüyle okunamaz.
 - OCR yalnız tarama ve tür doğrulaması tamamlandıktan sonra kuyruğa alınır.
 
+**Uygulama durumu (F1.4):** `services/content-scan` sabit karantina kovasından
+salt-okunur kimlikle akışlı indirme, tam boyut/SHA-256 kontrolü, PDF/JPEG/PNG/TIFF
+magic-byte ve uzantı eşleştirmesi, qpdf/Pillow güvenli ayrıştırması ve ClamAV tam
+nesne taraması uygular. İmza yaşı 24 saati geçerse fail-closed davranır. Kiralı
+`content_scan_jobs` kuyruğu exponential backoff/dead-letter görünürlüğü sağlar;
+her deneme değiştirilemez alındıdır ve yalnız dört kontrol birlikte geçerse
+`VERIFIED` olur. Kod kabul ölçütleri tamamdır; EICAR ve gerçek imza güncelleme
+kanıtı F1.11 staging koşusuna bağlıdır.
 ### F1.5 — Koşullu terfi ve yazma sonrası doğrulama
 
 **Amaç:** Doğrulanmış karantina nesnesini değişmez asıl kasaya güvenli biçimde

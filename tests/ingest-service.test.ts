@@ -144,10 +144,15 @@ test("parça checksum ve dört eşzamanlı istek kapıları sunucu tarafında uy
       sessionId: created.id, userId: "user@sivas.bel.tr", partNumber: 1,
       byteSize: 4, checksumSha256: "0".repeat(64), body: stream(bytes),
     }));
-    // Kirası canlı dolu slotlar yeni parçayı reddeder (fikstür saati 10:00'da sabittir).
+    // Kirası canlı dört ayrı istek yeni parçayı reddeder (fikstür saati 10:00'da sabittir).
+    const seedLeases = (prefix: string, expiresAt: string) => {
+      target.db.raw.prepare("DELETE FROM upload_part_leases WHERE upload_session_id = ?").run(created.id);
+      const insert = target.db.raw.prepare(`INSERT INTO upload_part_leases
+        (id, upload_session_id, part_number, expires_at) VALUES (?, ?, ?, ?)`);
+      for (let part = 1; part <= 4; part += 1) insert.run(`${prefix}-${part}`, created.id, part, expiresAt);
+    };
     const liveLease = "2026-07-30T10:10:00.000Z";
-    target.db.raw.prepare("UPDATE upload_sessions SET in_flight_parts = 4, parts_lease_expires_at = ? WHERE id = ?")
-      .run(liveLease, created.id);
+    seedLeases("live", liveLease);
     await assert.rejects(
       () => uploadPart(target.dependencies, {
         sessionId: created.id, userId: "user@sivas.bel.tr", partNumber: 1,
@@ -156,10 +161,9 @@ test("parça checksum ve dört eşzamanlı istek kapıları sunucu tarafında uy
       (error: unknown) => error instanceof IngestOperationError && error.code === "PART_CONCURRENCY_LIMIT",
     );
 
-    // Çökme sızıntısı senaryosu: kira dolduğunda slotlar kurtarılır, oturum kilitlenmez.
+    // Çökme sızıntısı senaryosu: süresi dolan istek kiraları temizlenir, oturum kilitlenmez.
     const staleLease = "2026-07-30T09:59:00.000Z";
-    target.db.raw.prepare("UPDATE upload_sessions SET in_flight_parts = 4, parts_lease_expires_at = ? WHERE id = ?")
-      .run(staleLease, created.id);
+    seedLeases("stale", staleLease);
     const recovered = await uploadPart(target.dependencies, {
       sessionId: created.id, userId: "user@sivas.bel.tr", partNumber: 1,
       byteSize: 4, checksumSha256: sha256(bytes), body: stream(bytes),
@@ -169,6 +173,9 @@ test("parça checksum ve dört eşzamanlı istek kapıları sunucu tarafında uy
       "SELECT in_flight_parts, parts_lease_expires_at FROM upload_sessions WHERE id = ?",
     ).get(created.id) as { in_flight_parts: number; parts_lease_expires_at: string | null };
     assert.equal(counters.in_flight_parts, 0, "başarılı parça slotu geri bırakmalı");
+    const leases = target.db.raw.prepare("SELECT COUNT(*) AS count FROM upload_part_leases WHERE upload_session_id = ?")
+      .get(created.id) as { count: number };
+    assert.equal(leases.count, 0, "tamamlanan veya süresi dolan istek kirası kalmamalı");
   } finally {
     target.db.close();
   }
@@ -217,8 +224,8 @@ test("tarama hata alındıları çoğalabilir; yalnız bir VERIFIED alındı var
     const insert = (id: string, result: "FAILED" | "VERIFIED", scanner: "ERROR" | "CLEAN") =>
       target.db.raw.prepare(`INSERT INTO ingest_receipts
         (id, upload_session_id, result, sha256, byte_size, declared_media_type, detected_media_type,
-         type_validation_result, scanner_engine, scanner_version, scanner_signature_version, scanner_result)
-        VALUES (?, ?, ?, ?, 4, 'application/pdf', 'application/pdf', 'MATCH', 'clamav', '1.4', 'daily', ?)`)
+         type_validation_result, parser_name, parser_version, parser_result, scanner_engine, scanner_version, scanner_signature_version, scanner_result)
+        VALUES (?, ?, ?, ?, 4, 'application/pdf', 'application/pdf', 'MATCH', 'qpdf', '12.2', 'VALID', 'clamav', '1.4', 'daily', ?)`)
         .run(id, created.id, result, "a".repeat(64), scanner);
     insert("r1", "FAILED", "ERROR");
     insert("r2", "FAILED", "ERROR");

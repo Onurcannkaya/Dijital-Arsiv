@@ -102,9 +102,9 @@ test("FAILED -> PROMOTING geçişi temiz VERIFIED alındısı ve karantina nesne
       VALUES ('q1', 's1', 'quarantine', 'quarantine/s1', 'r2', 'QUARANTINE', 'application/pdf', 1024, ?)`).run(SHA_A);
     db.raw.prepare(`INSERT INTO ingest_receipts
       (id, upload_session_id, result, sha256, byte_size, declared_media_type, detected_media_type,
-       type_validation_result, scanner_engine, scanner_version, scanner_signature_version, scanner_result, verified_at)
+       type_validation_result, parser_name, parser_version, parser_result, scanner_engine, scanner_version, scanner_signature_version, scanner_result, verified_at)
       VALUES ('r1', 's1', 'VERIFIED', ?, 1024, 'application/pdf', 'application/pdf',
-        'MATCH', 'clamav', '1.4', 'daily-1', 'CLEAN', CURRENT_TIMESTAMP)`).run(SHA_A);
+        'MATCH', 'qpdf', '12.2', 'VALID', 'clamav', '1.4', 'daily-1', 'CLEAN', CURRENT_TIMESTAMP)`).run(SHA_A);
 
     assert.throws(() => db.raw.prepare(`INSERT INTO upload_session_events
       (id, upload_session_id, event_number, from_status, to_status, actor_kind, actor_id, reason, ingest_receipt_id, event_hash)

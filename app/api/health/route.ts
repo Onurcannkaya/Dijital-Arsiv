@@ -1,6 +1,6 @@
 import {
   ARCHIVE_SCHEMA_VERSION, getArchiveBindings, getArchiveObjectStorage,
-  localOcrServiceUrl, readSchemaVersion,
+  localContentScanServiceUrl, localOcrServiceUrl, readSchemaVersion,
 } from "../../../lib/archive-storage";
 import { correlationId, logEvent } from "../../../lib/observability";
 
@@ -25,7 +25,8 @@ export async function GET(request: Request) {
     const bindings = getArchiveBindings();
     const storage = getArchiveObjectStorage(bindings);
     const ocrUrl = localOcrServiceUrl(request, bindings.OCR_SERVICE_URL);
-    const [database, objectStorage, ocr] = await Promise.all([
+    const contentScanUrl = localContentScanServiceUrl(request, bindings.CONTENT_SCAN_SERVICE_URL);
+    const [database, objectStorage, ocr, contentScan] = await Promise.all([
       check(() => bindings.DB.prepare("SELECT 1 AS ok").first()),
       check(() => storage.check()),
       ocrUrl
@@ -36,10 +37,18 @@ export async function GET(request: Request) {
             if (state.modelReady !== true) throw new Error("OCR model is not ready");
           })
         : Promise.resolve({ ok: false, latencyMs: 0 }),
+      contentScanUrl
+        ? check(async () => {
+            const response = await fetch(`${contentScanUrl}/health`, { signal: AbortSignal.timeout(5_000) });
+            if (!response.ok) throw new Error("Content scan health check failed");
+            const state = await response.json() as { scannerReady?: boolean };
+            if (state.scannerReady !== true) throw new Error("Content scanner is not ready");
+          })
+        : Promise.resolve({ ok: false, latencyMs: 0 }),
     ]);
     const schemaVersion = database.ok ? await readSchemaVersion(bindings.DB).catch(() => -1) : -1;
     const schema = { ok: schemaVersion === ARCHIVE_SCHEMA_VERSION, version: schemaVersion };
-    const ready = database.ok && objectStorage.ok && ocr.ok && schema.ok;
+    const ready = database.ok && objectStorage.ok && ocr.ok && contentScan.ok && schema.ok;
 
     logEvent(ready ? "info" : "warn", "health.checked", {
       correlationId: requestId,
@@ -47,11 +56,12 @@ export async function GET(request: Request) {
       database: database.ok,
       objectStorage: objectStorage.ok,
       ocr: ocr.ok,
+      contentScan: contentScan.ok,
       schemaVersion,
     });
     return Response.json({
       status: ready ? "ready" : "degraded",
-      checks: { database, objectStorage, ocr, schema },
+      checks: { database, objectStorage, ocr, contentScan, schema },
       timestamp: new Date().toISOString(),
       correlationId: requestId,
     }, {

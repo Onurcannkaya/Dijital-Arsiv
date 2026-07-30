@@ -12,6 +12,8 @@ interface Env {
   QUARANTINE_FILES?: R2Bucket;
   OCR_SERVICE_URL?: string;
   OCR_SERVICE_TOKEN?: string;
+  CONTENT_SCAN_SERVICE_URL?: string;
+  CONTENT_SCAN_SERVICE_TOKEN?: string;
   ARCHIVE_ADMIN_EMAILS?: string;
   ARCHIVE_MIGRATION_TOKEN?: string;
   APP_ENV?: string;

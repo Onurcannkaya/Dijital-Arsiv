@@ -58,6 +58,17 @@ export const ingestTableStatements: readonly string[] = [
   "CREATE UNIQUE INDEX IF NOT EXISTS upload_parts_session_number_unique ON upload_parts (upload_session_id, part_number)",
   "CREATE INDEX IF NOT EXISTS upload_parts_session_status_idx ON upload_parts (upload_session_id, status)",
 
+  `CREATE TABLE IF NOT EXISTS upload_part_leases (
+    id TEXT PRIMARY KEY NOT NULL,
+    upload_session_id TEXT NOT NULL REFERENCES upload_sessions(id) ON DELETE CASCADE,
+    part_number INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (part_number BETWEEN 1 AND 10000)
+  )`,
+  "CREATE UNIQUE INDEX IF NOT EXISTS upload_part_leases_session_part_unique ON upload_part_leases (upload_session_id, part_number)",
+  "CREATE INDEX IF NOT EXISTS upload_part_leases_session_expiry_idx ON upload_part_leases (upload_session_id, expires_at)",
+
   `CREATE TABLE IF NOT EXISTS ingest_objects (
     id TEXT PRIMARY KEY NOT NULL,
     upload_session_id TEXT NOT NULL REFERENCES upload_sessions(id) ON DELETE CASCADE,
@@ -89,6 +100,9 @@ export const ingestTableStatements: readonly string[] = [
     declared_media_type TEXT NOT NULL,
     detected_media_type TEXT NOT NULL,
     type_validation_result TEXT NOT NULL,
+    parser_name TEXT NOT NULL,
+    parser_version TEXT NOT NULL,
+    parser_result TEXT NOT NULL,
     scanner_engine TEXT NOT NULL,
     scanner_version TEXT NOT NULL,
     scanner_signature_version TEXT NOT NULL,
@@ -101,11 +115,29 @@ export const ingestTableStatements: readonly string[] = [
     CHECK (length(sha256) = 64),
     CHECK (byte_size > 0),
     CHECK (type_validation_result IN ('MATCH', 'MISMATCH', 'UNSUPPORTED')),
+    CHECK (parser_result IN ('VALID', 'INVALID', 'ERROR')),
     CHECK (scanner_result IN ('CLEAN', 'MALICIOUS', 'ERROR')),
     CHECK (vault_sha256 IS NULL OR length(vault_sha256) = 64)
   )`,
   "CREATE UNIQUE INDEX IF NOT EXISTS ingest_receipts_session_verified_unique ON ingest_receipts (upload_session_id) WHERE result = 'VERIFIED'",
   "CREATE INDEX IF NOT EXISTS ingest_receipts_result_created_idx ON ingest_receipts (result, created_at)",
+
+  `CREATE TABLE IF NOT EXISTS content_scan_jobs (
+    id TEXT PRIMARY KEY NOT NULL,
+    upload_session_id TEXT NOT NULL UNIQUE REFERENCES upload_sessions(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'QUEUED',
+    attempt INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 5,
+    next_attempt_at TEXT,
+    lease_token TEXT,
+    lease_expires_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (status IN ('QUEUED', 'SCANNING', 'RETRY', 'COMPLETED', 'FAILED')),
+    CHECK (attempt >= 0 AND max_attempts BETWEEN 1 AND 20)
+  )`,
+  "CREATE INDEX IF NOT EXISTS content_scan_jobs_claim_idx ON content_scan_jobs (status, next_attempt_at, lease_expires_at, created_at)",
   `CREATE TRIGGER IF NOT EXISTS ingest_receipts_no_update
     BEFORE UPDATE ON ingest_receipts BEGIN SELECT RAISE(ABORT, 'Ingest receipt is immutable'); END`,
   `CREATE TRIGGER IF NOT EXISTS ingest_receipts_no_delete

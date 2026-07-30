@@ -223,35 +223,59 @@ export async function createUploadSession(dependencies: IngestDependencies, inpu
 }
 
 /**
- * Slot sayacı süresiz değil, kiralıdır: her edinim kira damgasını ileri alır.
- * Worker isolate'i parça ortasında düşer ve `finally` çalışmazsa sayaç sızar;
- * kira dolduğunda (ADR-014'teki 15 dakikalık parça yazma yetkisi) sayaç bir
- * sonraki edinimde güvenle 1'e sıfırlanır. Oturum 24 saat 429'a kilitlenmez.
+ * Her aktif parça isteği kendi kira kimliğini taşır. Böylece çöken isteğin
+ * süresi dolmuş kaydı temizlenebilir; eski bir `finally` yalnız kendi kirasını
+ * siler ve daha yeni isteklerin sayacını azaltamaz.
  */
-async function acquirePartSlot(dependencies: IngestDependencies, sessionId: string) {
+async function acquirePartSlot(dependencies: IngestDependencies, sessionId: string, partNumber: number) {
   const now = clock(dependencies);
   const nowIso = now.toISOString();
   const leaseUntil = new Date(now.getTime() + PART_SLOT_LEASE_MS).toISOString();
-  const result = await dependencies.db.prepare(`UPDATE upload_sessions SET
-      in_flight_parts = CASE
-        WHEN parts_lease_expires_at IS NULL OR parts_lease_expires_at <= ? THEN 1
-        ELSE in_flight_parts + 1 END,
-      parts_lease_expires_at = ?,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ? AND status = 'UPLOADING'
-      AND (in_flight_parts < ? OR parts_lease_expires_at IS NULL OR parts_lease_expires_at <= ?)`)
-    .bind(nowIso, leaseUntil, sessionId, MAX_CONCURRENT_PARTS, nowIso).run();
-  if (!result.meta.changes) {
-    throw new IngestOperationError("PART_CONCURRENCY_LIMIT", "Aynı anda en fazla dört parça yüklenebilir.", 429);
+  const leaseId = randomId(dependencies);
+  const results = await dependencies.db.batch([
+    dependencies.db.prepare(
+      "DELETE FROM upload_part_leases WHERE upload_session_id = ? AND expires_at <= ?",
+    ).bind(sessionId, nowIso),
+    dependencies.db.prepare(`INSERT INTO upload_part_leases
+        (id, upload_session_id, part_number, expires_at, created_at)
+      SELECT ?, ?, ?, ?, ?
+      WHERE EXISTS (SELECT 1 FROM upload_sessions WHERE id = ? AND status = 'UPLOADING')
+        AND (SELECT COUNT(*) FROM upload_part_leases
+          WHERE upload_session_id = ? AND expires_at > ?) < ?
+      ON CONFLICT(upload_session_id, part_number) DO NOTHING`)
+      .bind(leaseId, sessionId, partNumber, leaseUntil, nowIso,
+        sessionId, sessionId, nowIso, MAX_CONCURRENT_PARTS),
+    dependencies.db.prepare(`UPDATE upload_sessions SET
+        in_flight_parts = (SELECT COUNT(*) FROM upload_part_leases
+          WHERE upload_session_id = ? AND expires_at > ?),
+        parts_lease_expires_at = (SELECT MAX(expires_at) FROM upload_part_leases
+          WHERE upload_session_id = ? AND expires_at > ?),
+        updated_at = ? WHERE id = ?`)
+      .bind(sessionId, nowIso, sessionId, nowIso, nowIso, sessionId),
+  ]);
+  if (!results[1]?.meta.changes) {
+    throw new IngestOperationError("PART_CONCURRENCY_LIMIT", "Aynı anda en fazla dört parça yüklenebilir veya aynı parça için canlı bir yazma kirası vardır.", 429);
   }
+  return leaseId;
 }
 
-async function releasePartSlot(db: D1Database, sessionId: string) {
-  await db.prepare(`UPDATE upload_sessions SET in_flight_parts =
-      CASE WHEN in_flight_parts > 0 THEN in_flight_parts - 1 ELSE 0 END,
-      updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(sessionId).run();
+async function releasePartSlot(dependencies: IngestDependencies, sessionId: string, leaseId: string) {
+  const nowIso = clock(dependencies).toISOString();
+  await dependencies.db.batch([
+    dependencies.db.prepare("DELETE FROM upload_part_leases WHERE id = ? AND upload_session_id = ?")
+      .bind(leaseId, sessionId),
+    dependencies.db.prepare(
+      "DELETE FROM upload_part_leases WHERE upload_session_id = ? AND expires_at <= ?",
+    ).bind(sessionId, nowIso),
+    dependencies.db.prepare(`UPDATE upload_sessions SET
+        in_flight_parts = (SELECT COUNT(*) FROM upload_part_leases
+          WHERE upload_session_id = ? AND expires_at > ?),
+        parts_lease_expires_at = (SELECT MAX(expires_at) FROM upload_part_leases
+          WHERE upload_session_id = ? AND expires_at > ?),
+        updated_at = ? WHERE id = ?`)
+      .bind(sessionId, nowIso, sessionId, nowIso, nowIso, sessionId),
+  ]);
 }
-
 export type UploadPartInput = {
   sessionId: string;
   userId: string;
@@ -278,7 +302,7 @@ export async function uploadPart(dependencies: IngestDependencies, input: Upload
     throw new IngestOperationError("INVALID_PART_CHECKSUM", "Parça SHA-256 değeri 64 karakterli hex olmalıdır.");
   }
 
-  await acquirePartSlot(dependencies, session.id);
+  const leaseId = await acquirePartSlot(dependencies, session.id, input.partNumber);
   try {
     const key = temporaryKey(session.id);
     const [storageStream, hashStream] = input.body.tee();
@@ -318,7 +342,7 @@ export async function uploadPart(dependencies: IngestDependencies, input: Upload
       .bind(state.uploadedByteSize, session.id).run();
     return state;
   } finally {
-    await releasePartSlot(dependencies.db, session.id);
+    await releasePartSlot(dependencies, session.id, leaseId);
   }
 }
 
@@ -395,6 +419,9 @@ export async function completeUploadSession(
     actor: { kind: "service", id: "ingest-completer" },
     eventId: randomId(dependencies),
   });
+  await dependencies.db.prepare(`INSERT OR IGNORE INTO content_scan_jobs
+      (id, upload_session_id, status, attempt, max_attempts)
+    VALUES (?, ?, 'QUEUED', 0, 5)`).bind(randomId(dependencies), session.id).run();
   await dependencies.temporary.delete(tempKey);
   return { ...(await getUploadSession(dependencies, session.id, userId)), sha256: digest.sha256Hex };
 }
@@ -431,9 +458,12 @@ export async function expireIncompleteUploads(
     await dependencies.temporary.delete(key);
     await dependencies.db.prepare(`UPDATE ingest_objects SET deleted_at = ? WHERE upload_session_id = ?
       AND object_class = 'temporary' AND deleted_at IS NULL`).bind(now, session.id).run();
-    await dependencies.db.prepare(
-      "UPDATE upload_sessions SET in_flight_parts = 0, parts_lease_expires_at = NULL WHERE id = ?",
-    ).bind(session.id).run();
+    await dependencies.db.batch([
+      dependencies.db.prepare("DELETE FROM upload_part_leases WHERE upload_session_id = ?").bind(session.id),
+      dependencies.db.prepare(
+        "UPDATE upload_sessions SET in_flight_parts = 0, parts_lease_expires_at = NULL WHERE id = ?",
+      ).bind(session.id),
+    ]);
     await transitionIngestSession(dependencies.db, {
       sessionId: session.id,
       to: "EXPIRED",
