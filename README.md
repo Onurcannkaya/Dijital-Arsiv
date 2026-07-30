@@ -191,4 +191,6 @@ OCR servisi testleri ayrı çalışır (`fastapi` ve `paddleocr` kurulu bir orta
 cd services/ocr && PYTHONPATH=. python -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
-Mimari ve yol haritası için `PROJE_PLANI.md`, diğer modellerle eşit koşullu karşılaştırma için `MODEL_KARSILASTIRMA_PROMPTU.md` dosyasına bakın.
+Mimari ve yol haritası için `PROJE_PLANI.md` ile `YOL_HARITASI_FAZLAR.md`;
+Faz 1 kararları için ADR-013–017 ve `FAZ_1_KANIT_REHBERI.md`; diğer modellerle
+eşit koşullu karşılaştırma için `MODEL_KARSILASTIRMA_PROMPTU.md` dosyasına bakın.

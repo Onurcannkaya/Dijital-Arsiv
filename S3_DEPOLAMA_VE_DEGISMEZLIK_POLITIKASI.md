@@ -45,8 +45,8 @@ Nesne deposu belge yönetim sisteminin kendisi değildir. Dosya planı, saklama,
 | Çok parçalı yükleme | Zorunlu | Büyük dosya ve yeniden başlatma |
 | Koşullu yazma | Zorunlu | Yanlışlıkla üzerine yazmayı önleme |
 | Sunucu taraflı şifreleme | Zorunlu | Kurumun anahtar politikasına göre |
-| Sürümleme | Üretimde güçlü öneri | Silme/üzerine yazma riskine karşı |
-| Object Lock/WORM | Karar bekliyor; hedef | Saklama kilidi gerekiyorsa |
+| Sürümleme | Üretim asıl kasasında zorunlu | Silme/üzerine yazma riskine karşı; ADR-016 |
+| Object Lock/WORM | Üretim asıl kasasında zorunlu | ADR-016; R2 bucket lock mevzuatsal WORM sayılmaz |
 | Yaşam döngüsü kuralları | Zorunlu | Türev/karantina ve maliyet yönetimi |
 | Olay bildirimi | Önerilen | İşleme ve izleme entegrasyonu |
 | Kısa süreli imzalı erişim | Zorunlu | Güvenli görüntüleme/indirme |
@@ -156,19 +156,24 @@ S3 nesne etiketleri veya metadata alanları kolaylık sağlar; tek doğruluk kay
 
 ### 9.2 Depolama düzeyi
 
-Sağlayıcı destekliyorsa sürümleme ve Object Lock/WORM değerlendirilir. Kesin karar öncesi:
+ADR-016 gereği üretim asıl kasasında sürümleme ve nesne bazlı Object Lock/WORM
+zorunludur. Kabul edilmiş asıllar compliance mode veya bağımsız testle aynı sonucu
+veren eşdeğer WORM altında tutulur; saklama süresi onaylı dosya planından gelir ve
+yasal bekletme belge bazında uygulanabilir. Üretim sağlayıcısında:
 
-- Yönetişim ve uyum kilidi modları
-- Saklama süresini uzatma/kısaltma yetkileri
-- Yasal bekletme
-- Yönetici hesabı ve olağanüstü erişim
-- Saat senkronizasyonu
-- Çoğaltmada kilitlerin korunması
-- Sağlayıcıdan çıkış/göç senaryosu
+- uyum kilidi ve sürümleme;
+- saklama süresini yalnız uzatma, kısaltmayı reddetme;
+- yasal bekletme;
+- yönetici hesabı ve olağanüstü erişim;
+- saat senkronizasyonu;
+- çoğaltmada kilitlerin korunması;
+- sağlayıcıdan çıkış/göç senaryosu
 
-test edilir.
+test edilir. R2 bucket lock pilotta silme/üzerine yazmaya karşı telafi kontrolüdür;
+S3 Object Lock veya mevzuatsal WORM kanıtı sayılmaz.
 
-Object Lock kullanılması tek başına arşiv mevzuatına uyum anlamına gelmez; kurul kararı, dosya planı, saklama ve denetim süreçleri ayrıca uygulanır.
+Object Lock kullanılması tek başına arşiv mevzuatına uyum anlamına gelmez; kurul
+kararı, dosya planı, saklama ve denetim süreçleri ayrıca uygulanır.
 
 ## 10. Şifreleme ve anahtar yönetimi
 
@@ -299,23 +304,32 @@ En az şu göstergeler izlenir:
 4. Kullanıcı doğrudan bucket erişim anahtarı alamaz.
 5. Süresi dolan görüntüleme bileti çalışmaz.
 6. Yetkisiz rol asıl nesneyi okuyamaz veya silemez.
-7. Sürümleme/Object Lock seçildiyse kilit ve yasal bekletme testleri geçer.
+7. Üretim asıl kasasında sürümleme/Object Lock kilit ve yasal bekletme testleri
+   geçer; R2 pilotunda ADR-016 gereği Object Lock bölümü gerekçeli
+   `NOT_APPLICABLE`, bucket lock telafi kontrolü başarılı olur.
 8. Bütünlük taraması kontrollü bozulma/uyuşmazlık senaryosunu yakalar.
 9. Yedekten seçili belge; üst veri, ilişkiler ve denetim kaydıyla geri yüklenir.
 10. Sağlayıcı taşınabilirlik denemesinde SHA-256 manifesti eksiksiz doğrulanır.
 11. Nesne anahtarlarında ve erişim loglarında kişisel veri bulunmadığı kontrol edilir.
 12. Sahipsiz nesne ve dosyasız kayıt uzlaştırma işi rapor üretir.
 
-## 20. Açık kararlar
+## 20. Kararlar ve kurumsal onay kapıları
+
+Faz 1 teknik pilot kararları:
+
+- Bucket/namespace ve servis kimliği ayrımı: ADR-014
+- Azami 2 GiB belge ve 16 MiB multipart parça profili: ADR-014
+- PDF erişim türevi ile görüntüleme/indirme bileti: ADR-015
+- Üretim Object Lock/WORM gereksinimi ve R2 pilot sınırı: ADR-016
+- Pilot RPO/RTO, ikinci hata alanı ve taşınabilirlik: ADR-017
+
+Üretim öncesinde kurum sahiplerince ayrıca onaylanacak kararlar:
 
 - Üretim S3 sağlayıcısı ve kurum içi/bulut yerleşimi
-- Bucket/namespace ayrım modeli
-- Object Lock/WORM gereksinimi ve modu
-- KMS/anahtar sahipliği ve dönüşüm süresi
-- RPO, RTO, kapasite ve büyüme tahmini
-- İkinci hata alanı ve çevrimdışı yedek yaklaşımı
-- Asıl/türev saklama süreleri
-- Görüntüleme bileti süresi ve indirme politikası
-- Bütünlük tarama sıklığı
-- Sağlayıcıdan çıkış ve veri imha prosedürü
+- KMS/anahtar sahipliği ve anahtar dönüşüm süresi
+- İş etki analizine göre nihai RPO/RTO, kapasite ve büyüme hedefi
+- İkinci hata alanının ve çevrimdışı yedek hedefinin fiziksel sağlayıcısı
+- Dosya planına bağlı asıl/türev/yedek saklama süreleri
+- Bütünlük tarama sıklığı ve hizmet seviyesi eşikleri
+- Sağlayıcıdan çıkış ve kurumsal veri imha prosedürünün yetkilileri
 

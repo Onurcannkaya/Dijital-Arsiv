@@ -85,8 +85,13 @@ doğrulaması, kalıcı bütünlük/uzlaştırma bulguları, PDF erişim türevi
 anahtarlarının yetkili taşınması, görüntüleme bileti, görev ayrılığı, yedek geri
 yükleme ve sağlayıcı taşınabilirlik tatbikatı.
 
+F1.0 karar kapısı ADR-013–017 ve `FAZ_1_KANIT_REHBERI.md` ile
+belgelendi. Pilot sayısal profilleri teknik kabul hedefidir; kurumsal saklama
+süreleri, üretim sağlayıcısı ve KMS sahipliği yetkili birim onayı olmadan
+kesinleşmiş sayılmaz.
+
 Çıkış kapısı ve dosya/test/kanıt ayrıntıları `YOL_HARITASI_FAZLAR.md` içinde
-tutulur. Faz; S3 politikasının 12 kabul testi ve kabul hattının altı güvenlik
+tutulur. Faz; S3 politikasının 12 kabul testi ve kabul hattının yedi güvenlik
 testi kanıtla geçmeden tamamlanmış sayılmaz.
 
 ### Aşama 1 — Çalışan ürün kabuğu

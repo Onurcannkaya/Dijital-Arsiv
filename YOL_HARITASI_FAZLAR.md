@@ -107,8 +107,9 @@ senaryolarında güvenli hâle getirmektir.
 Faz 1 yalnız aşağıdakilerin tamamı kanıtla geçtiğinde kapanır:
 
 1. `S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md` §19 içindeki 12 kabul testi:
-   **12/12**.
-2. Bu belgede tanımlanan altı kabul hattı güvenlik testi: **6/6**.
+   **12/12 sonuçlandırılmış**, uygulanabilir testlerin tamamı geçmiş ve yalnız
+   yetkili ADR ile uygulanamaz sayılan testler `NOT_APPLICABLE`.
+2. Bu belgede tanımlanan yedi kabul hattı güvenlik testi: **7/7**.
 3. Faz 0 staging uçtan uca teslim kanıtı: **geçti**.
 4. Kritik veya yüksek seviyeli açık güvenlik/bütünlük bulgusu: **0**.
 5. Kanıt paketindeki her sonuç; commit, ortam, sağlayıcı adaptörü, zaman,
@@ -129,13 +130,17 @@ stateDiagram-v2
     QUARANTINED --> SCANNING
     SCANNING --> REJECTED: Tür, ayrıştırıcı veya zararlı içerik reddi
     SCANNING --> VERIFIED: Tür + zararlı içerik + SHA-256 doğrulandı
+    VERIFIED --> DUPLICATE: Sunucu SHA-256 mevcut asılla eşleşti
     VERIFIED --> PROMOTING
     PROMOTING --> ACCEPTED: Koşullu yaz + tam okuma doğrulaması
     PROMOTING --> FAILED: Yazma veya doğrulama hatası
+    FAILED --> PROMOTING: Yetkili operatör yeniden denemesi
     CREATED --> EXPIRED: Süre doldu
     UPLOADING --> EXPIRED: Süre doldu
     REJECTED --> [*]
+    DUPLICATE --> [*]
     EXPIRED --> [*]
+    FAILED --> [*]
     ACCEPTED --> [*]
 ```
 
@@ -148,10 +153,15 @@ Kurallar:
 - İstemcinin önceden bildirdiği SHA-256 yalnız erken uyarıdır; mükerrer içerik
   kararı sunucu tarafından hesaplanan SHA ile verilir ve veritabanındaki
   benzersiz indeks son güvenlik kapısı olarak korunur.
-- Mükerrer içerik `VERIFIED` sonrasında sonlandırılır; terminal gösterim
-  F1.0'daki ADR kararına göre ayrı `DUPLICATE` durumu veya
-  `REJECTED` + `failure_code=DUPLICATE_CONTENT` olur.
+- Mükerrer içerik `VERIFIED` sonrasında ayrı `DUPLICATE` terminal durumuyla
+  sonlandırılır; yeni belge, asıl nesne veya OCR işi oluşturulmaz. Kullanıcı
+  mevcut belgeye yetkiliyse kimliği gösterilir, değilse yalnız genel mükerrer
+  içerik yanıtı verilir.
 - Asıl anahtar daha önce varsa terfi başarısız olur.
+- `FAILED` kullanıcı için terminaldir; kullanıcı eylemiyle yeniden açılmaz.
+  Karantina nesnesi ve `VERIFIED` alındısı hâlâ geçerliyken yalnız yetkili
+  operatör komutu, gerekçe ve denetim olayıyla `PROMOTING`'e yeniden alınabilir;
+  pencere karantina saklama süresiyle sınırlıdır, dolunca yeni oturum gerekir.
 - Asıl yazıldıktan sonra uygulama rolü onu silerek geri alma yapmaz.
 - Son veritabanı adımı başarısız olursa nesne sahipsiz olarak raporlanır ve
   yalnız yetkili uzlaştırma süreci karar verir.
@@ -187,28 +197,39 @@ flowchart TD
 **Amaç:** Uygulamaya başlamadan kabul sonucunun nasıl ölçüleceğini ve açık
 altyapı kararlarını sabitlemek.
 
-**Kararlar:**
+**Durum:** Karar belgeleri 30 Temmuz 2026 tarihinde oluşturuldu. Kurumsal saklama
+süreleri, üretim sağlayıcısı ve KMS sahipliği ilgili kurum sahiplerinin üretim
+onayı olmadan teknik ekip tarafından belirlenmez.
 
-- ADR-013: Kabul durum makinesi ve çalışma zamanı bağımsızlığı
-- ADR-014: Karantina ayrımı ve zararlı içerik tarama servisi
-- ADR-015: PDF erişim türevi ve renderer güvenlik profili
-- ADR-016: Asıl nesne rol ayrımı, sürümleme ve Object Lock/WORM kararı
-- ADR-017: Yedek, RPO/RTO ve sağlayıcı taşınabilirlik profili
-- Mükerrer içerik politikası: ayrı `DUPLICATE` terminal durumu veya
-  `REJECTED` + `failure_code=DUPLICATE_CONTENT` seçimi
+**Teknik olarak sabitlenen kararlar:**
+
+- `ADR-013-KABUL-DURUM-MAKINESI.md`: kabul durumları, idempotency, sabit hata
+  kodları, `DUPLICATE` ve çalışma zamanı bağımsızlığı
+- `ADR-014-KARANTINA-VE-ZARARLI-ICERIK.md`: dört fiziksel yetki alanı, ClamAV
+  başlangıç motoru, fail-closed tarama ve 2 GiB/16 MiB multipart pilot profili
+- `ADR-015-PDF-ERISIM-TUREVI.md`: izole PDFium renderer, 150 DPI raster erişim
+  PDF'si, sınırlar ve 60 saniyelik tek kullanımlık bilet değişimi
+- `ADR-016-ASIL-NESNE-DEGISMEZLIK.md`: üretim asıl kasasında sürümleme,
+  compliance mode Object Lock/eşdeğer WORM ve legal hold zorunluluğu; R2 bucket
+  lock'ın yalnız pilot telafi kontrolü sayılması
+- `ADR-017-YEDEK-VE-TASINABILIRLIK.md`: veri sınıfına göre pilot RPO/RTO,
+  ikinci hata alanı, geri yükleme ve sağlayıcı taşınabilirlik tatbikatı
+- Mükerrer içerik politikası: `DUPLICATE` terminal durumu, yetki kontrollü
+  mevcut belge bağlantısı ve yetkisiz kapsamda bilgi sızdırmayan genel yanıt
 - Karantina–asıl yetki topolojisi: ayrı kova/namespace, ayrı Worker/servis
-  kimliği ve kova+işlem kapsamıyla sınırlandırılmış S3 kimlik bilgileri
-  birlikte kararlaştırılır; TypeScript arayüzünden metot kaldırmak tek başına
-  depolama yetkisi ayrımı sayılmaz
-- Görüntüleme bileti süresi, tek kullanımlılık ve indirme politikası
-- Azami belge boyutu ve multipart parça profili
+  kimliği ve kova+işlem kapsamıyla sınırlandırılmış S3 kimlik bilgileri birlikte
+  uygulanır; TypeScript arayüzünden metot kaldırmak tek başına depolama yetkisi
+  ayrımı sayılmaz
+- Ayrıntılı test, veri, kanıt ve sorumluluk sözleşmesi:
+  `FAZ_1_KANIT_REHBERI.md`
 
 **Kabul ölçütleri:**
 
-- Her §19 testi için ön koşul, test verisi, beklenen sonuç, kanıt türü ve sorumlu
-  tanımlıdır.
-- Object Lock kullanılmayacaksa test 7, yetkili ADR kararıyla “uygulanamaz”
-  sayılır; karar verilmemiş durum başarı sayılmaz.
+- Her §19 testi için ön koşul, test verisi, beklenen sonuç, kanıt türü, yürüten
+  ve onaylayan `FAZ_1_KANIT_REHBERI.md` içinde tanımlıdır.
+- R2 pilotunda Object Lock/legal hold bölümü ADR-016 ile `NOT_APPLICABLE`
+  sayılır ve bucket lock telafi testi geçer; üretim sağlayıcısında Test 7'nin
+  tamamı geçmeden üretim açılmaz.
 - Kanıt paketinde gerçek belge içeriği, kişisel veri, erişim anahtarı veya sır
   bulunmaz.
 
@@ -261,7 +282,7 @@ Yeni tablolar:
 
 | Tablo | Amaç |
 |---|---|
-| `upload_sessions` | Kullanıcı, müdürlük, idempotency anahtarı, durum, beklenen boyut, bildirilen/algılanan tür ve zaman aşımı |
+| `upload_sessions` | Kullanıcı, müdürlük, idempotency anahtarı, durum, beklenen boyut, bildirilen/algılanan tür, `duplicate_of_document_id` ve zaman aşımı |
 | `upload_parts` | Parça numarası, boyut, checksum, ETag ve tekrar yükleme durumu |
 | `ingest_objects` | Kabul öncesi `temporary`/`quarantine` nesnelerinin yetkili envanteri |
 | `ingest_receipts` | SHA-256, tarayıcı motor/sürüm/imza, tür doğrulaması, kasa sürümü, doğrulama zamanı ve sonuç |
@@ -276,22 +297,26 @@ Yeni tablolar:
 envanteri olarak kalır. Terfi sırasında iki kayıt aynı kabul oturumu ve denetim
 olayıyla bağlanır.
 
-`archive_documents.storage_key` için açık bir genişlet–taşı–daralt kararı bu iş
-paketinde verilir. Sorun doğrudan bir NOT NULL çakışması değil, `binary_objects`
-yetkili kaynak ilan edilmişken kolonun ve fallback okumasının yaşamaya devam
-etmesiyle oluşan çift doğruluk kaynağıdır:
+`archive_documents.storage_key` genişlet–taşı–daralt göçüyle kaldırılır. Sorun
+doğrudan bir NOT NULL çakışması değil, `binary_objects` yetkili kaynak ilan
+edilmişken kolonun ve fallback okumasının yaşamaya devam etmesiyle oluşan çift
+doğruluk kaynağıdır:
 
 1. Bütün okumalar `binary_objects` üzerine geçirilir.
 2. Eski kayıtlar doğrulanır.
 3. Fallback okuması kaldırılır.
-4. Kolonun geçici kabul makbuzu olarak tutulması, yeniden adlandırılması veya
-   kaldırılması göç adımında karara bağlanır.
-5. İçerik mükerrerliği için SHA benzersizliği yetkili tabloya taşınır.
+4. En az bir geriye uyumlu sürümden sonra kolon ve fallback kodu şema göçüyle
+   kaldırılır.
+5. İçerik mükerrerliği için `original` sınıfında SHA-256 benzersizliği
+   `binary_objects` üzerindeki kısmi benzersiz indekse taşınır; yarış durumunda
+   bu indeks son güvenlik kapısıdır.
 
 **Kabul ölçütleri:**
 
 - Durum geçişleri izinli geçiş listesi dışında güncellenemez.
 - Aynı idempotency anahtarı ikinci belge veya ikinci asıl üretmez.
+- Aynı sunucu SHA-256 değerine sahip ikinci oturum `DUPLICATE` olur; yeni belge,
+  asıl nesne veya OCR işi üretmez.
 - Şema, `lib/archive-schema.ts` ve `db/schema.ts` içinde aynı anda güncellenir.
 - Göç testi taze veritabanı, mevcut sürümden yükseltme, yarıda kalma ve yeniden
   çalıştırma senaryolarını geçer.
@@ -311,6 +336,11 @@ API akışı:
 4. Eksik parçaları sorgula ve yüklemeyi sürdür.
 5. Tamamlanan nesneyi `quarantine` durumuna geçir.
 6. Süresi dolan veya iptal edilen yüklemeyi yaşam döngüsü işiyle temizle.
+
+Pilot profili ADR-014 gereği azami 2 GiB belge, 32 MiB multipart eşiği, son parça
+hariç 16 MiB parça, istemci başına dört eşzamanlı parça ve 24 saatlik oturumdur.
+Profil değişikliği büyük dosya, tarama ve bellek kabul testlerinin yeniden
+koşulmasını gerektirir.
 
 Bellek disiplini yalnız yükleme yönünü değil OCR aktarımını da kapsar. Bugün
 Worker nesneyi `app/api/jobs/process/route.ts` içinde `object.arrayBuffer()` ile
@@ -416,25 +446,31 @@ Uzlaştırma iki yönde çalışır:
 
 **Amaç:** Görüntüleme yetkisinde asıl PDF'yi sunma zorunluluğunu kaldırmak.
 
-ADR-015 aşağıdaki kararı kesinleştirir:
+ADR-015 aşağıdaki kararları kesinleştirmiştir:
 
-- renderer/sanitizer servisi Worker içinde değil, izole belge işleme servisinde
-  çalışır;
+- renderer/sanitizer, Worker dışında izole, sürümü ve imaj özeti sabitlenmiş
+  PDFium tabanlı `services/document-render` servisidir;
 - aktif içerik, ek dosya ve betikler erişim türevine taşınmaz;
-- çıktı türü, çözünürlük, OCR metin katmanı, erişilebilirlik ve azami boyut
-  tanımlanır;
+- sayfalar 150 DPI raster olarak yeniden çizilir ve web görüntülemeye uygun
+  doğrusallaştırılmış (linearized) erişim PDF'sinde birleştirilir;
+- 512 MiB türev sınırını tek bölümde aşacak belgeler sayfa aralıklı birden çok
+  erişim bölümü olarak üretilir; her bölüm `derived_from_id`, sayfa aralığı ve
+  SHA-256 değeriyle ayrı `binary_objects` kaydıdır;
+- bölümleme dahil hiçbir güvenli yol üretilemiyorsa iş
+  `DERIVATIVE_REVIEW_REQUIRED` durumuna alınır; asıl PDF'ye görüntüleme
+  fallback'i yine açılmaz;
 - `access` ile uzun dönem `preservation`/PDF-A çıktısı aynı şey sayılmaz;
-- renderer adı, sürümü ve kaynak asıl nesne kimliği kaydedilir.
-
-İlk önerilen profil, sayfaları güvenli biçimde yeniden çizilmiş ve aktif içeriği
-taşımayan erişim PDF'sidir. Nihai araç kararı güvenlik ve kalite testinden sonra
-ADR ile verilir.
+- renderer adı, sürümü, profil sürümü ve kaynak asıl nesne kimliği kaydedilir.
 
 **Kabul ölçütleri:**
 
 - PDF görüntüleme isteği hiçbir durumda `original` sınıfına düşmez.
 - Türev, `derived_from_id` ve üretici sürümüyle yeni nesne olarak yazılır.
 - Asıl nesnenin sürümü, SHA'sı ve anahtarı değişmez.
+- 512 MiB'ı aşan kontrollü test belgesi sayfa aralıklı bölümlerle
+  görüntülenebilir kalır; yalnız boyut nedeniyle görüntülenemeyen belge oluşmaz.
+- Türev işi durumları (`DERIVATIVE_REVIEW_REQUIRED` dahil) türev sözleşmesinde
+  tanımlıdır; kabul durum makinesine karışmaz ve işletim metriği olarak izlenir.
 - Mevcut belgeler için kaldığı yerden devam eden, idempotent geri dolum işi
   bütün eksik türevleri üretir.
 - Başarısız türevler retry/dead-letter görünürlüğüne sahiptir.
@@ -458,8 +494,8 @@ Taşıma:
 1. Güvenli hedef anahtar üret.
 2. Hedefin bulunmadığı koşuluyla kopyala/terfi ettir.
 3. Hedefi tam okuyup SHA-256 doğrula.
-4. `binary_objects` ve geçiş dönemindeki `archive_documents.storage_key`
-   referansını atomik değiştir.
+4. `binary_objects.object_key` referansını atomik değiştir; kaldırılmış
+   `archive_documents.storage_key` alanına yeniden çift yazma ekleme.
 5. Denetim ve taşıma alındısı yaz.
 6. Eski nesneyi geri dönüş süresi boyunca erişime kapalı tut.
 7. Silme gerekiyorsa normal uygulama rolüyle değil, ayrı yetkili tasfiye
@@ -497,6 +533,11 @@ Bilet veritabanında açık değerle tutulmaz; özeti saklanır. Belge, nesne s�
 kullanıcı, amaç, müdürlük kapsamı, son kullanma ve gerekiyorsa tek kullanım
 bilgisiyle sınırlandırılır.
 
+ADR-015 uyarınca görüntüleme değişim bileti 60 saniye ve tek kullanımlıdır.
+Başarılı değişim, range istekleri için 15 dakika boşta kalma ve 30 dakika mutlak
+süreli kullanıcı+belge kapsamlı oturum üretir. Açık indirme bileti ayrı yetkiyle
+60 saniye ve tek kullanımlıdır.
+
 **Kabul ölçütleri:**
 
 - Süresi dolmuş veya tüketilmiş bilet reddedilir.
@@ -506,6 +547,10 @@ bilgisiyle sınırlandırılır.
   karantina ve asıl ayrı kova/namespace'te tutulur, ayrı servis kimlikleriyle
   erişilir ve S3 kimlik bilgileri kova+işlem kapsamıyla sınırlandırılır. Aynı
   servis kimliğinin iki kovaya birden bağlanması ayrım sayılmaz.
+- Pilot topolojisi en az `TEMPORARY_FILES`, `QUARANTINE_FILES`,
+  `ORIGINAL_FILES` ve `DERIVATIVE_FILES` yetki alanlarını kullanır. Yükleme,
+  tarama, terfi, görüntüleme ve asıl indirme ayrı servis kimlikleriyle
+  yürütülür; normal uygulama Worker'ı bütün bağları aynı anda alamaz.
 - Kullanıcı veya tarayıcı kalıcı bucket erişim anahtarı alamaz.
 - Yetki reddi ve başarılı erişim, hassas veri sızdırmadan denetim kaydına girer.
 
@@ -575,10 +620,13 @@ namespace/bucket, ayrı servis kimlikleri ve süreli yaşam döngüsüyle tutulu
 | `app/api/overview/route.ts` | Kalıcı bütünlük/uzlaştırma, karantina ve türev geri dolum metrikleri |
 | `app/api/jobs/process/route.ts` | `object.arrayBuffer()` tam tamponlamasını kaldırma; OCR'a bayt yerine nesne referansı aktarma |
 | `app/archive/upload-dialog.tsx` | Multipart oturum arayüzü: parça ilerlemesi, durdur/devam, karantina ve tarama durumu, mükerrer bildirimi, red nedeni, süre dolumu/yeniden başlatma, pencere kapatma davranışı |
+| `app/archive/workspace.tsx` | Aktif/yakın zamanda tamamlanan yükleme oturumları, karantina, tarama ve mükerrer durumlarının görünürlüğü |
+| `app/archive/archive.css` | Multipart ilerleme, duraklatma, tarama, mükerrerlik ve hata durumlarının erişilebilir görsel stilleri |
 | `lib/scheduled-jobs.ts` | Tarama, uzlaştırma, türev geri dolum ve süre dolumu dilimleri |
 | `worker/index.ts` | Yalnız zamanlayıcı ve adaptör bağları; kabul iş kuralı eklenmez |
 | `services/content-scan/` | İzole zararlı içerik tarama servisi ve sağlık ucu |
-| `services/ocr/app/main.py` | Güvenli PDF erişim türevi üretimi; belgeyi nesne referansıyla, salt-okunur kimlikle akışlı okuma |
+| `services/document-render/` | ADR-015 gereği izole, sürümü sabitlenmiş PDFium renderer servisi; 150 DPI doğrusallaştırılmış erişim PDF'si, bölümleme ve sağlık ucu |
+| `services/ocr/app/main.py` | Yalnız OCR üretimi; belgeyi nesne referansıyla, salt-okunur kimlikle akışlı okuma. PDF erişim türevi üretimi bu servisten `services/document-render`'a taşınır |
 | `tests/object-storage-contract.test.ts` | Sağlayıcıdan bağımsız depolama sözleşme paketi |
 | `tests/ingest-state-machine.test.ts` | Durum, idempotency ve kesinti testleri |
 | `tests/content-validation.test.ts` | Magic-byte/ayrıştırıcı testleri |
@@ -601,7 +649,7 @@ kabul ölçütleri değişiklik yönetimi olmadan daraltılamaz.
 | 4 | Kullanıcı bucket erişim anahtarı alamaz | Tasarımda mevcut | F1.9 | Yanıt/ağ izi denetimi ve erişim politikası |
 | 5 | Süresi dolan görüntüleme bileti çalışmaz | Eksik | F1.9 | Zaman kontrollü negatif test ve denetim olayı |
 | 6 | Yetkisiz rol aslı okuyamaz veya silemez | Uygulamada kısmi | F1.1, F1.9 | Uygulama ve depolama düzeyinde read/delete negatif testleri |
-| 7 | Seçildiyse sürümleme/Object Lock testleri geçer | Karar bekliyor | F1.0, F1.9 | ADR ve seçime göre kilit/yasal bekletme test raporu |
+| 7 | Sürümleme/Object Lock profili sonuçlandırılır | ADR-016 teknik kararı yazıldı; kurumsal onay bekliyor, R2 pilot Object Lock/legal hold için uygulanamaz | F1.0, F1.9 | Üretimde kilit/yasal bekletme test raporu; R2 pilotta gerekçeli `NOT_APPLICABLE` + bucket lock telafi testi |
 | 8 | Bütünlük taraması kontrollü uyuşmazlığı yakalar | Eksik | F1.6 | Metadata aynıyken SHA uyuşmazlığı ve kalıcı bulgu/alarm |
 | 9 | Belge bağlamıyla yedekten geri yüklenir | Eksik | F1.10 | Belge+üst veri+ilişki+denetim geri yükleme raporu |
 | 10 | Sağlayıcı taşınabilirlik manifesti doğrulanır | Eksik | F1.10 | Kaynak/hedef SHA-256 manifest sonuçları |
@@ -618,6 +666,7 @@ kabul ölçütleri değişiklik yönetimi olmadan daraltılamaz.
 | K-4 | Normal kullanıcı karantina nesnesini okumayı dener | Uygulama ve depolama rolü erişimi reddeder |
 | K-5 | DB sonlandırması asıl terfiden sonra kontrollü olarak başarısız olur | Asıl silinmez; uzlaştırma sahipsiz nesneyi raporlar |
 | K-6 | Azami profil içindeki büyük dosya eşzamanlı yüklenir | Bellek kullanımı dosya boyutuyla doğrusal artmaz; tanımlı eşzamanlı yük altında güvenli baş boşluğuyla çalışma zamanı sınırının altında kalır ve `exceededMemory` benzeri hata oluşmaz. "Azami boyut × eşzamanlılık < isolate sınırı" formülü kabul ölçütü değildir |
+| K-7 | Sunucu SHA-256 değeri mevcut asılla eşleşen içerik yeniden yüklenir | Oturum `DUPLICATE` olur; yeni belge/asıl/OCR işi oluşmaz. Yetkili kapsam mevcut belgeyi gösterebilir, yetkisiz kapsam varlık bilgisi sızdırmaz; istemcinin sahte SHA beyanı kararı değiştirmez |
 
 ## 10. Kanıt paketi
 
@@ -657,13 +706,16 @@ Faz 1 sonunda en az şu ölçümler görünür olmalıdır:
 - aktif, yarım, süresi dolmuş ve karantinadaki yükleme oturumları;
 - multipart başarı, yeniden başlatma ve hata oranı;
 - tür uyuşmazlığı ve zararlı içerik reddi;
+- zararlı içerik imza yaşı, tarama servisi sağlığı ve `SCAN_UNAVAILABLE`
+  nedeniyle bekleyen oturum sayısı;
 - kabul süresi P50/P95 ve dosya boyutu dağılımı;
 - koşullu yazma çakışması;
 - yazma sonrası doğrulama başarı/hata oranı;
 - bütünlük tarama kapsamı, son başarılı koşu ve açık bulgu sayısı;
 - sahipsiz nesne ve dosyasız kayıt sayısı;
 - erişim bileti reddi ve yetkisiz asıl erişim denemesi;
-- erişim türevi eksik belge ve geri dolum kuyruğu;
+- erişim türevi eksik belge, geri dolum kuyruğu, bölümlü türev üretilen ve
+  `DERIVATIVE_REVIEW_REQUIRED` durumundaki belge oranı;
 - son başarılı yedek/geri yükleme ve taşınabilirlik tatbikatı.
 
 Kesin hizmet seviyesi eşikleri gerçek pilot belge seti ölçülmeden uydurulmaz.
@@ -684,7 +736,8 @@ Faz 1 tamamlandı denebilmesi için:
 - Süresi dolmuş bilet ve yetkisiz rol negatif testleri geçer.
 - Seçili belge bağlamıyla geri yüklenmiş, SHA manifesti başka hedefte
   doğrulanmıştır.
-- §19 matrisi 12/12, kabul hattı matrisi 6/6 geçmiştir.
+- §19 matrisi 12/12 sonuçlandırılmış, uygulanabilir testlerin tamamı geçmiş ve
+  kabul hattı matrisi 7/7 geçmiştir.
 - Açık kritik/yüksek bulgu yoktur.
 - Bilgi işlem, arşiv ve güvenlik sorumluları kanıt paketini onaylamıştır.
 
