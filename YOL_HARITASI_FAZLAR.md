@@ -1,0 +1,692 @@
+# Sivas Belediyesi Dijital Arşiv — Teslim Fazları Yol Haritası
+
+**Belge durumu:** Uygulama iş paketi  
+**Sürüm:** 1.0  
+**Tarih:** 30 Temmuz 2026  
+**Kapsam:** Faz 0 çıkış kapısı ve Faz 1 güvenli belge kabul hattı
+
+## 1. Amaç
+
+Bu belge, çalışan dikey pilotu ilk mimaride tanımlanan güvenli ve taşınabilir
+arşiv omurgasına yaklaştıran teslim işlerini sıralar. Müdürlük belge profilleri,
+Kent Rehberi ve diğer kurumsal entegrasyonlar bu fazın dışında tutulur; önce
+ortak kabul, depolama, bütünlük ve kanıt hattı olgunlaştırılır.
+
+Bu belge aşağıdaki kaynaklarla birlikte uygulanır:
+
+- `ANA_SISTEM_TASARIM_BELGESI.md`
+- `S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md`
+- `ADR-012-NESNE-DEPOLAMA-SOYUTLAMASI.md`
+- `FAZ_0_ISLETIM_REHBERI.md`
+- `VERI_SOZLUGU.md`
+
+## 2. Terimler ve mimari sınır
+
+Bu belgede **faz**, ölçülebilir teslim kapısını ifade eder. `PROJE_PLANI.md`
+içindeki ürün olgunluk adımları ise **aşama** olarak anılır. Böylece “Faz 1
+kabul hattı” ile “Aşama 1 ürün kabuğu” birbirine karıştırılmaz.
+
+Mevcut D1/R2/Vinext uygulaması dikey pilottur. Faz 1:
+
+- Next.js/Vinext'i kurumsal çekirdek kararı hâline getirmez.
+- Üretim API teknolojisini seçmez.
+- Çalışma zamanına özgü R2/Workers kodunu kabul alanına yaymaz.
+- Durum makinesini ve kabul kanıtını veritabanında, sağlayıcı işlemlerini
+  adaptörde tutar.
+- Aynı sözleşmelerin ileride .NET, Java veya eşdeğer kurumsal servis üzerinde
+  uygulanabilmesini zorunlu kılar.
+
+**Kural:** Çalışma zamanına ve sağlayıcıya özgü kod yalnız adaptör ve dağıtım
+katmanında bulunur. Kabul durumları, hata kodları, kanıt modeli ve iş kuralları
+sağlayıcıdan bağımsızdır.
+
+## 3. Faz 0 — Gerçek kalan çıkış kapısı
+
+Faz 0'ın geliştirme omurgasının büyük bölümü kodlanmıştır; canlı teslim ve
+kanıt kapısı henüz tamamlanmamıştır. Kodlanan omurga:
+
+- geliştirme, staging ve production ortam sözleşmesi;
+- zorunlu sır listesi ve sır sızıntısı kontrolü;
+- CI üzerinde typecheck, lint, build ve test;
+- OCR, bakım ve bütünlük cron tetikleyicileri;
+- exponential backoff ve dead-letter görünürlüğü;
+- yapılandırılmış log, korelasyon kimliği ve `/api/health`;
+- ADR-012 depolama soyutlaması;
+- model dosyalarını içeren, ayrıcalıksız kullanıcıyla çalışan OCR imajı.
+
+İki sınır açıkça bilinmelidir:
+
+- Backoff süresi veritabanı kolonu değildir; `app/api/jobs/process/route.ts`
+  içinde hesaplanır. Zamanlama alanları `next_attempt_at`, `last_attempt_at` ve
+  `dead_lettered_at` kolonlarında tutulur.
+- CI workflow'u bugün yalnız doğrulama yapar. Dağıtım, `deploy:verify`
+  koşusu ve başarısızlıkta rollback adımları workflow'a bağlı değildir;
+  `scripts/verify-deployment.mjs` betiğinin mevcut olması CI/CD hattının
+  tamamlandığını tek başına göstermez.
+
+`vite.config.ts` içindeki yer tutucu veritabanı kimliği yalnız yerel
+Miniflare/Vite çalışması içindir. Gerçek D1/R2 kaynakları Sites kontrol düzlemi
+veya seçilen dağıtım platformu tarafından bağlanır; bu değer üretim kaynağı
+olarak değiştirilmez.
+
+Faz 0 aşağıdaki dört kanıt tamamlanmadan kapanmış sayılmaz:
+
+1. OCR servisi kurum içi veya özel konteyner ortamında TLS ve servis kimliğiyle
+   barındırılır.
+2. Staging uygulaması gerçek çalışma zamanı değerleriyle canlı dağıtılır;
+   şema göçü ve readiness denetimi geçer.
+3. Dağıtım, `deploy:verify` doğrulaması ve başarısızlıkta rollback adımları
+   CI/CD workflow'una bağlanır ve en az bir gerçek koşuda çalıştığı gösterilir.
+4. Gerçek bir pilot belge kullanıcı tarafından yüklenir, cron tarafından
+   otomatik OCR'a alınır, doğrulama kuyruğuna düşer ve arşivlenir. Belge
+   kimliği, iş kimliği, model sürümü, korelasyon kimliği, şema sürümü ve
+   denetim olayı kanıt paketine girer.
+
+Faz 1 geliştirmesi Faz 0'ın kalan altyapı işleriyle paralel ilerleyebilir; ancak
+Faz 1 staging kabul koşuları başlamadan Faz 0 çıkış kapısı kapanmalıdır.
+
+## 4. Faz 1 — Kabul hattı sağlamlaştırma
+
+### 4.1 Amaç
+
+Güvenilmeyen dosyanın kabul API'sine gelişinden, doğrulanmış ve değiştirilemez
+asıl nesne olarak arşivlenmesine kadar tüm hattı; büyük dosya, kesinti, zararlı
+içerik, yanlış tür, eşzamanlı yazma, kısmi hata ve sağlayıcı değişimi
+senaryolarında güvenli hâle getirmektir.
+
+### 4.2 Kapsam dışı
+
+- Müdürlük belge türlerinin ayrıntılı envanteri
+- Kent Rehberi, EBYS, KEP ve e-imza entegrasyonları
+- Öğrenen tasnif ve aktif öğrenme
+- Nihai üretim API programlama dili seçimi
+- Kurumsal saklama sürelerinin hukuk/arşiv birimleri adına belirlenmesi
+
+### 4.3 Çıkış ölçütü
+
+Faz 1 yalnız aşağıdakilerin tamamı kanıtla geçtiğinde kapanır:
+
+1. `S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md` §19 içindeki 12 kabul testi:
+   **12/12**.
+2. Bu belgede tanımlanan altı kabul hattı güvenlik testi: **6/6**.
+3. Faz 0 staging uçtan uca teslim kanıtı: **geçti**.
+4. Kritik veya yüksek seviyeli açık güvenlik/bütünlük bulgusu: **0**.
+5. Kanıt paketindeki her sonuç; commit, ortam, sağlayıcı adaptörü, zaman,
+   korelasyon kimliği ve test koşusuyla ilişkilidir.
+
+Kodda bir fonksiyonun veya ifadenin bulunması kabul kanıtı değildir. Sağlayıcı
+sözleşmesi, yetki reddi, kesinti, geri yükleme ve taşınabilirlik testleri çalışan
+ortamda yürütülür.
+
+## 5. Hedef kabul akışı
+
+```mermaid
+stateDiagram-v2
+    [*] --> CREATED
+    CREATED --> UPLOADING
+    UPLOADING --> UPLOADING: Parça yükle / yeniden dene
+    UPLOADING --> QUARANTINED: Çok parçalı yüklemeyi tamamla
+    QUARANTINED --> SCANNING
+    SCANNING --> REJECTED: Tür, ayrıştırıcı veya zararlı içerik reddi
+    SCANNING --> VERIFIED: Tür + zararlı içerik + SHA-256 doğrulandı
+    VERIFIED --> PROMOTING
+    PROMOTING --> ACCEPTED: Koşullu yaz + tam okuma doğrulaması
+    PROMOTING --> FAILED: Yazma veya doğrulama hatası
+    CREATED --> EXPIRED: Süre doldu
+    UPLOADING --> EXPIRED: Süre doldu
+    REJECTED --> [*]
+    EXPIRED --> [*]
+    ACCEPTED --> [*]
+```
+
+Kurallar:
+
+- OCR işi yalnız `ACCEPTED` durumundan sonra oluşturulur.
+- Kullanıcı ve görüntüleme servisi `temporary` veya `quarantine` nesnesini
+  okuyamaz.
+- İstemcinin bildirdiği MIME türü yalnız ipucudur; karar değildir.
+- İstemcinin önceden bildirdiği SHA-256 yalnız erken uyarıdır; mükerrer içerik
+  kararı sunucu tarafından hesaplanan SHA ile verilir ve veritabanındaki
+  benzersiz indeks son güvenlik kapısı olarak korunur.
+- Mükerrer içerik `VERIFIED` sonrasında sonlandırılır; terminal gösterim
+  F1.0'daki ADR kararına göre ayrı `DUPLICATE` durumu veya
+  `REJECTED` + `failure_code=DUPLICATE_CONTENT` olur.
+- Asıl anahtar daha önce varsa terfi başarısız olur.
+- Asıl yazıldıktan sonra uygulama rolü onu silerek geri alma yapmaz.
+- Son veritabanı adımı başarısız olursa nesne sahipsiz olarak raporlanır ve
+  yalnız yetkili uzlaştırma süreci karar verir.
+- Her durum geçişi idempotency anahtarı ve denetim olayıyla ilişkilidir.
+
+## 6. İş paketleri ve bağımlılıklar
+
+```mermaid
+flowchart TD
+    F0["Faz 0: canlı staging + OCR + kanıt"] --> GATE["Faz 1 staging kabul koşuları"]
+    P10["F1.0 karar ve kanıt sözleşmesi"] --> P11["F1.1 depolama sözleşmesi v2"]
+    P11 --> P12["F1.2 kabul veri modeli"]
+    P12 --> P13["F1.3 multipart karantina kabulü"]
+    P13 --> P14["F1.4 tür ve zararlı içerik taraması"]
+    P14 --> P15["F1.5 koşullu terfi ve yazma sonrası doğrulama"]
+    P15 --> P16["F1.6 bütünlük ve uzlaştırma"]
+    P15 --> P18["F1.8 eski anahtar taşıma"]
+    P11 --> P18
+    P10 --> P17["F1.7 PDF erişim türevi"]
+    P17 --> P171["Türev geri dolumu"]
+    P11 --> P19["F1.9 erişim bileti ve görev ayrılığı"]
+    P11 --> P110["F1.10 yedek ve taşınabilirlik"]
+    GATE --> P111["F1.11 kanıt ve çıkış kapısı"]
+    P16 --> P111
+    P18 --> P111
+    P171 --> P111
+    P19 --> P111
+    P110 --> P111
+```
+
+### F1.0 — Karar ve kanıt sözleşmesi
+
+**Amaç:** Uygulamaya başlamadan kabul sonucunun nasıl ölçüleceğini ve açık
+altyapı kararlarını sabitlemek.
+
+**Kararlar:**
+
+- ADR-013: Kabul durum makinesi ve çalışma zamanı bağımsızlığı
+- ADR-014: Karantina ayrımı ve zararlı içerik tarama servisi
+- ADR-015: PDF erişim türevi ve renderer güvenlik profili
+- ADR-016: Asıl nesne rol ayrımı, sürümleme ve Object Lock/WORM kararı
+- ADR-017: Yedek, RPO/RTO ve sağlayıcı taşınabilirlik profili
+- Mükerrer içerik politikası: ayrı `DUPLICATE` terminal durumu veya
+  `REJECTED` + `failure_code=DUPLICATE_CONTENT` seçimi
+- Karantina–asıl yetki topolojisi: ayrı kova/namespace, ayrı Worker/servis
+  kimliği ve kova+işlem kapsamıyla sınırlandırılmış S3 kimlik bilgileri
+  birlikte kararlaştırılır; TypeScript arayüzünden metot kaldırmak tek başına
+  depolama yetkisi ayrımı sayılmaz
+- Görüntüleme bileti süresi, tek kullanımlılık ve indirme politikası
+- Azami belge boyutu ve multipart parça profili
+
+**Kabul ölçütleri:**
+
+- Her §19 testi için ön koşul, test verisi, beklenen sonuç, kanıt türü ve sorumlu
+  tanımlıdır.
+- Object Lock kullanılmayacaksa test 7, yetkili ADR kararıyla “uygulanamaz”
+  sayılır; karar verilmemiş durum başarı sayılmaz.
+- Kanıt paketinde gerçek belge içeriği, kişisel veri, erişim anahtarı veya sır
+  bulunmaz.
+
+### F1.1 — Depolama sözleşmesi v2 ve görev ayrılığı
+
+**Amaç:** ADR-012'yi büyük dosya, değişmezlik ve sağlayıcı taşınabilirliği için
+genişletmek.
+
+Tek geniş `ObjectStorage` rolü yerine yetenekleri ayrılmış sözleşmeler
+tanımlanır:
+
+- `ObjectReader`: akışlı `get`, `head` ve aralıklı okuma
+- `StagingStorage`: multipart başlat/sürdür/parça yükle/tamamla/iptal et,
+  listele ve geçici nesne sil
+- `ImmutableVaultWriter`: yalnız koşullu `putIfAbsent` veya koşullu `promote`
+- `StorageInventory`: sayfalı liste ve sağlayıcı sürüm/checksum bilgisi
+- `DispositionStorage`: normal uygulama kimliğinde bulunmayan, kurul/onay
+  sürecine bağlı ayrı tasfiye yetkisi
+- `StreamingHasher`: akışlı SHA-256 için ayrı çalışma zamanı sözleşmesi.
+  Cloudflare uygulaması `crypto.DigestStream` kullanır; bu yetenek depolama
+  adaptörüne değil çalışma zamanı katmanına aittir ve taşınabilir tasarımda
+  sözleşmenin arkasında tutulur.
+
+Checksum sınırı: tek parça `put` çağrısı sağlayıcıya SHA-256 verebilir; multipart
+tamamlama aynı alanı sunmaz ve sağlayıcı checksum'ı bileşik (composite) olabilir.
+Uçtan uca içerik SHA'sı her durumda uygulamanın akışlı hesabıyla üretilir;
+adaptör yalnız verilen checksum'ı iletir ve sağlayıcı sonucunu döndürür.
+
+Mevcut akışlı `get` davranışı korunur. Sağlayıcı sürümü, ETag ve checksum sonucu
+genel dönüş tiplerine eklenir. R2'ye özgü `uploadId`, koşul ve hata tipleri
+adaptörün dışında görünmez; sağlayıcı belirteçleri veri modelinde opak tutulur.
+
+**Kabul ölçütleri:**
+
+- Aynı anahtara ikinci koşullu yazma sözleşme testinde reddedilir.
+- Asıl kasa sözleşmesinde `delete` metodu yoktur.
+- Uygulama rotalarında doğrudan `R2Bucket` çağrısı yoktur.
+- R2 ve en az bir S3 uyumlu test adaptörü aynı sözleşme paketini geçer.
+- Akışlı SHA hesabı depolama adaptöründen bağımsız sözleşme testini geçer;
+  multipart yüklemede içerik SHA kararı sağlayıcı checksum'ına dayanmaz.
+- Eski anahtar taşıma işi, hem koşullu yazma hem `copy/promote` yeteneğine
+  bağımlıdır; bu iki yetenek olmadan çalışmaz.
+
+### F1.2 — Kabul veri modeli ve şema göçü
+
+**Amaç:** Kesinti sonrası devam edebilen, her adımı kanıtlanabilir kabul
+durumunu veritabanında tutmak.
+
+Yeni tablolar:
+
+| Tablo | Amaç |
+|---|---|
+| `upload_sessions` | Kullanıcı, müdürlük, idempotency anahtarı, durum, beklenen boyut, bildirilen/algılanan tür ve zaman aşımı |
+| `upload_parts` | Parça numarası, boyut, checksum, ETag ve tekrar yükleme durumu |
+| `ingest_objects` | Kabul öncesi `temporary`/`quarantine` nesnelerinin yetkili envanteri |
+| `ingest_receipts` | SHA-256, tarayıcı motor/sürüm/imza, tür doğrulaması, kasa sürümü, doğrulama zamanı ve sonuç |
+| `integrity_runs` | Tam tarama koşusu, kapsam, başlangıç/bitiş ve özet |
+| `integrity_findings` | Nesne bazlı kalıcı bütünlük bulgusu ve çözüm durumu |
+| `reconciliation_runs` | Depo–veritabanı uzlaştırma koşusu ve sayısal sonuç |
+| `reconciliation_findings` | Sahipsiz nesne/dosyasız kayıt ve yetkili karar |
+| `access_tickets` | Özetlenmiş bilet, kapsam, amaç, son kullanma ve tüketilme zamanı |
+
+`ingest_objects`, kabul öncesindeki nesnelerin tek doğruluk kaynağıdır.
+`binary_objects` yalnız kabul edilmiş asıl ve türev nesnelerin yetkili
+envanteri olarak kalır. Terfi sırasında iki kayıt aynı kabul oturumu ve denetim
+olayıyla bağlanır.
+
+`archive_documents.storage_key` için açık bir genişlet–taşı–daralt kararı bu iş
+paketinde verilir. Sorun doğrudan bir NOT NULL çakışması değil, `binary_objects`
+yetkili kaynak ilan edilmişken kolonun ve fallback okumasının yaşamaya devam
+etmesiyle oluşan çift doğruluk kaynağıdır:
+
+1. Bütün okumalar `binary_objects` üzerine geçirilir.
+2. Eski kayıtlar doğrulanır.
+3. Fallback okuması kaldırılır.
+4. Kolonun geçici kabul makbuzu olarak tutulması, yeniden adlandırılması veya
+   kaldırılması göç adımında karara bağlanır.
+5. İçerik mükerrerliği için SHA benzersizliği yetkili tabloya taşınır.
+
+**Kabul ölçütleri:**
+
+- Durum geçişleri izinli geçiş listesi dışında güncellenemez.
+- Aynı idempotency anahtarı ikinci belge veya ikinci asıl üretmez.
+- Şema, `lib/archive-schema.ts` ve `db/schema.ts` içinde aynı anda güncellenir.
+- Göç testi taze veritabanı, mevcut sürümden yükseltme, yarıda kalma ve yeniden
+  çalıştırma senaryolarını geçer.
+- Depolama anahtarı için çift doğruluk kaynağı kalmaz; `storage_key` fallback
+  okuması üretim yolunda bulunmaz.
+
+### F1.3 — Çok parçalı ve yeniden başlatılabilir karantina yüklemesi
+
+**Amaç:** Büyük tarama dosyalarını uygulama belleğinde bütün olarak tutmadan
+almak ve kesinti sonrası devam ettirmek.
+
+API akışı:
+
+1. Yükleme oturumu oluştur.
+2. Yetkilendirilmiş parçayı `temporary` alana aktar.
+3. Parça ETag/checksum sonucunu kaydet.
+4. Eksik parçaları sorgula ve yüklemeyi sürdür.
+5. Tamamlanan nesneyi `quarantine` durumuna geçir.
+6. Süresi dolan veya iptal edilen yüklemeyi yaşam döngüsü işiyle temizle.
+
+Bellek disiplini yalnız yükleme yönünü değil OCR aktarımını da kapsar. Bugün
+Worker nesneyi `app/api/jobs/process/route.ts` içinde `object.arrayBuffer()` ile
+belleğe alıyor ve OCR servisi `services/ocr/app/main.py` içinde dosyanın
+tamamını ikinci kez okuyor. Hedef tasarımda OCR servisine belge baytları Worker
+üzerinden taşınmaz; servis yalnız nesne kimliği alır ve aslı ayrı, salt-okunur
+servis kimliğiyle akışla okur.
+
+**Kabul ölçütleri:**
+
+- API `request.formData()` ve `file.arrayBuffer()` ile tam dosya tamponlamaz.
+- Worker, OCR aktarımında nesne gövdesini belleğe almaz; OCR servisi belgeyi
+  nesne referansıyla, salt-okunur kimlikle ve akışla okur.
+- Yükleme, süreç yeniden başladıktan sonra eksik parçadan devam eder.
+- Aynı parça güvenli biçimde yeniden gönderilebilir; çelişen checksum
+  reddedilir.
+- Boyut sınırı hem oturum başında hem tamamlanan nesne başlığında doğrulanır.
+- Yarım yüklemeler belirlenen süre sonunda raporlanır ve yalnız geçici alandan
+  temizlenir.
+
+### F1.4 — Magic-byte, ayrıştırıcı ve zararlı içerik taraması
+
+**Amaç:** İstemci MIME beyanına güvenmeden dosya türünü doğrulamak ve kabul
+edilmemiş içeriği izole tutmak.
+
+Kontroller:
+
+- İstemci türü, dosya uzantısı, magic-byte sonucu ve güvenli ayrıştırıcı sonucu
+  birlikte değerlendirilir.
+- PDF, JPEG, PNG ve TIFF için izinli imza ve ayrıştırma profili uygulanır.
+- Bozuk, çok biçimli veya tanınmayan içerik reddedilir.
+- Zararlı içerik taraması izole servis rolüyle tüm nesne üzerinde çalışır.
+- Tarayıcı motoru, sürümü, imza/veritabanı sürümü ve sonuç kabul alındısına
+  yazılır.
+- Testte güvenli EICAR örneği kullanılır; gerçek zararlı yazılım saklanmaz.
+
+**Kabul ölçütleri:**
+
+- `application/pdf` beyan edilen yürütülebilir içerik reddedilir.
+- Zararlı veya taranamayan içerik `original` alana geçmez.
+- Tarama servisi kullanılamıyorsa sistem açık geçmez; oturum karantinada kalır.
+- Karantina nesnesi normal görüntüleme/indirme rolüyle okunamaz.
+- OCR yalnız tarama ve tür doğrulaması tamamlandıktan sonra kuyruğa alınır.
+
+### F1.5 — Koşullu terfi ve yazma sonrası doğrulama
+
+**Amaç:** Doğrulanmış karantina nesnesini değişmez asıl kasaya güvenli biçimde
+almak.
+
+Akış:
+
+1. Belge ve asıl nesne kimliği rezerve edilir.
+2. Karantina nesnesi benzersiz asıl anahtarına `if-absent` koşuluyla terfi eder.
+3. Sağlayıcı boyut, sürüm, ETag ve checksum sonucu alınır.
+4. Asıl nesne yeniden akışla okunur ve SHA-256 tekrar hesaplanır.
+5. Boyut ve SHA eşleşirse `archive_documents`, `binary_objects`, kabul alındısı,
+   denetim olayı ve OCR işi tek sonlandırma adımında yazılır.
+6. Sonlandırma başarısızsa asıl silinmez; uzlaştırma işi sahipsiz nesneyi bulur.
+
+**Kabul ölçütleri:**
+
+- Aynı hedef anahtara ikinci terfi depolama katmanında başarısız olur.
+- Kabul alındısındaki SHA, karantina SHA'sı, asıl tam okuma SHA'sı ve veritabanı
+  SHA'sı aynıdır.
+- Uygulamanın normal servis rolü kabul edilmiş aslı silemez.
+- `documents/route.ts` içindeki asıl nesneyi geri alma amacıyla yapılan
+  `objectStorage.delete(storageKey)` davranışı kaldırılmıştır; yalnız geçici veya
+  karantina nesnesi ayrı rol tarafından temizlenebilir.
+- Sağlayıcı sürümü ve şifreleme durumu `binary_objects` kaydına yazılır.
+
+### F1.6 — Kalıcı bütünlük taraması, alarm ve uzlaştırma
+
+**Amaç:** Metadata karşılaştırmasını gerçek dosya bütünlüğü denetimine
+dönüştürmek ve bulguların sonraki dilimlerde kaybolmasını engellemek.
+
+İki tarama profili bulunur:
+
+- **Hızlı tarama:** varlık, boyut, sürüm ve sağlayıcı checksum/metadata
+  karşılaştırması.
+- **Tam tarama:** nesneyi akışla okur, SHA-256 hesaplar ve yetkili kayıtla
+  karşılaştırır.
+
+Her koşu `integrity_runs`, her sorun `integrity_findings` kaydı üretir.
+`maintenance_tasks.last_error` yalnız son çalışma durumu için kullanılabilir;
+bulgu kaynağı değildir.
+
+Uzlaştırma iki yönde çalışır:
+
+- Depoda var, yetkili veritabanı kaydı yok: sahipsiz nesne.
+- Veritabanı kaydı var, depoda nesne yok: dosyasız kayıt.
+
+**Kabul ölçütleri:**
+
+- Boyutu ve custom metadata değeri değiştirilmeden oluşturulan kontrollü SHA
+  uyuşmazlığı tam taramada yakalanır.
+- Bir dilimde bulunan bulgu sonraki temiz dilimde silinmez.
+- Bulgu kalıcı alarm/olay kaydı üretir ve çözümlenmeden kapanmaz.
+- Uzlaştırma sayfalı, kaldığı yerden devam eden ve yaş toleranslıdır.
+- Uzlaştırma kendiliğinden asıl nesne silmez veya veritabanı kaydını düşürmez.
+- Koşu kapsamı, süre, taranan nesne sayısı ve sonuç raporlanır.
+
+### F1.7 — PDF erişim türevi ve geri dolum
+
+**Amaç:** Görüntüleme yetkisinde asıl PDF'yi sunma zorunluluğunu kaldırmak.
+
+ADR-015 aşağıdaki kararı kesinleştirir:
+
+- renderer/sanitizer servisi Worker içinde değil, izole belge işleme servisinde
+  çalışır;
+- aktif içerik, ek dosya ve betikler erişim türevine taşınmaz;
+- çıktı türü, çözünürlük, OCR metin katmanı, erişilebilirlik ve azami boyut
+  tanımlanır;
+- `access` ile uzun dönem `preservation`/PDF-A çıktısı aynı şey sayılmaz;
+- renderer adı, sürümü ve kaynak asıl nesne kimliği kaydedilir.
+
+İlk önerilen profil, sayfaları güvenli biçimde yeniden çizilmiş ve aktif içeriği
+taşımayan erişim PDF'sidir. Nihai araç kararı güvenlik ve kalite testinden sonra
+ADR ile verilir.
+
+**Kabul ölçütleri:**
+
+- PDF görüntüleme isteği hiçbir durumda `original` sınıfına düşmez.
+- Türev, `derived_from_id` ve üretici sürümüyle yeni nesne olarak yazılır.
+- Asıl nesnenin sürümü, SHA'sı ve anahtarı değişmez.
+- Mevcut belgeler için kaldığı yerden devam eden, idempotent geri dolum işi
+  bütün eksik türevleri üretir.
+- Başarısız türevler retry/dead-letter görünürlüğüne sahiptir.
+
+### F1.8 — Eski nesne anahtarlarının yetkili taşınması
+
+**Amaç:** Anahtar veya custom metadata içinde kişisel veri taşıma ihtimali olan
+politika öncesi nesneleri güvenli anahtara almak.
+
+`storage.legacyKeys` sayısı yalnız `LIKE '%.%'` göstergesidir; doğrulanmış kişisel
+veri vakası değildir. Önce maskelenmiş envanter çıkarılır:
+
+- anahtar biçimi;
+- custom metadata alan adları ve veri sınıflandırma sonucu;
+- bağlı belge/nesne kimliği;
+- kaynak ve hedef SHA-256;
+- taşıma ve doğrulama durumu.
+
+Taşıma:
+
+1. Güvenli hedef anahtar üret.
+2. Hedefin bulunmadığı koşuluyla kopyala/terfi ettir.
+3. Hedefi tam okuyup SHA-256 doğrula.
+4. `binary_objects` ve geçiş dönemindeki `archive_documents.storage_key`
+   referansını atomik değiştir.
+5. Denetim ve taşıma alındısı yaz.
+6. Eski nesneyi geri dönüş süresi boyunca erişime kapalı tut.
+7. Silme gerekiyorsa normal uygulama rolüyle değil, ayrı yetkili tasfiye
+   prosedürüyle gerçekleştir.
+
+**Bağımlılık:** F1.1 içindeki hem koşullu yazma hem `copy/promote`, F1.5 içindeki
+tam doğrulama tamamlanmadan bu iş çalıştırılmaz.
+
+**Kabul ölçütleri:**
+
+- Hedef anahtar varsa üzerine yazılmaz.
+- Taşıma öncesi ve sonrası SHA aynıdır.
+- Kullanıcı isteği taşıma sırasında eski aslı veya yanlış nesneyi sunmaz.
+- Anahtar ve custom metadata taramasında doğrulanmış kişisel veri kalmaz.
+- Loglarda özgün dosya adı, açık adres, kişi adı veya erişim belirteci bulunmaz.
+
+### F1.9 — Görüntüleme bileti ve depolama görev ayrılığı
+
+**Amaç:** Görüntüleme/indirme erişimini kısa ömürlü, amaç bağlı ve denetlenebilir
+hâle getirmek; tek servis kimliğinin bütün nesne sınıflarında tam yetkili
+olmasını engellemek.
+
+Roller en az şu yeteneklere ayrılır:
+
+- kabul/geçici yazma;
+- karantina tarama;
+- asıl kasaya koşullu yazma;
+- erişim türevi okuma;
+- yetkili asıl indirme;
+- bütünlük/koruma okuma;
+- yedekleme;
+- kurul/onay kontrollü tasfiye.
+
+Bilet veritabanında açık değerle tutulmaz; özeti saklanır. Belge, nesne sınıfı,
+kullanıcı, amaç, müdürlük kapsamı, son kullanma ve gerekiyorsa tek kullanım
+bilgisiyle sınırlandırılır.
+
+**Kabul ölçütleri:**
+
+- Süresi dolmuş veya tüketilmiş bilet reddedilir.
+- Erişim bileti başka belge, kullanıcı veya nesne sınıfında kullanılamaz.
+- Viewer asıl nesneyi okuyamaz; normal uygulama kimliği aslı silemez.
+- Rol ayrımı yalnız uygulama kodunda değil depolama düzleminde doğrulanır:
+  karantina ve asıl ayrı kova/namespace'te tutulur, ayrı servis kimlikleriyle
+  erişilir ve S3 kimlik bilgileri kova+işlem kapsamıyla sınırlandırılır. Aynı
+  servis kimliğinin iki kovaya birden bağlanması ayrım sayılmaz.
+- Kullanıcı veya tarayıcı kalıcı bucket erişim anahtarı alamaz.
+- Yetki reddi ve başarılı erişim, hassas veri sızdırmadan denetim kaydına girer.
+
+### F1.10 — Yedek geri yükleme ve sağlayıcı taşınabilirliği
+
+**Amaç:** Depolama sağlayıcısı veya ortam kaybında belgeyi yalnız dosya olarak
+değil, arşiv bağlamıyla geri kazanabilmek.
+
+Taşınabilir paket en az şunları içerir:
+
+- nesne anahtarı yerine taşınabilir mantıksal kimlik;
+- nesne sınıfı, boyut, medya türü ve SHA-256 manifesti;
+- belge üst verisi ve profil sürümü;
+- doğrulanmış adres/ada-parsel/diğer varlık ilişkileri;
+- OCR ve türev bağlantıları;
+- denetim zincirinin doğrulama için gereken bölümü;
+- paket ve şema sürümü.
+
+**Kabul ölçütleri:**
+
+- Seçili belge, üst veri, ilişkiler, türevler ve denetim iziyle bağımsız geri
+  yükleme alanına alınır.
+- Geri yüklenen her nesnenin SHA'sı manifestle eşleşir.
+- Paket başka bir S3 uyumlu test hedefine aktarılır ve uygulama adaptörüyle
+  okunur.
+- Kaynak sağlayıcıya özgü ETag/sürüm kimliği taşınabilir bütünlük kanıtı
+  sayılmaz.
+- Tatbikat RPO/RTO hedefleri ve gerçek sürelerle raporlanır.
+
+### F1.11 — Otomatik kabul ve kanıt kapısı
+
+**Amaç:** “Kod var” ile “politika kanıtla geçiyor” arasındaki farkı CI ve
+staging kapısıyla kapatmak.
+
+Test katmanları:
+
+- birim testleri: durum makinesi, magic-byte, bilet, yetki ve hata eşleme;
+- sözleşme testleri: koşullu yazma, multipart, liste, promote ve rol ayrımı;
+- yerel entegrasyon: şema, idempotency, kesinti ve uzlaştırma;
+- staging sağlayıcı testleri: gerçek nesne deposu, IAM, alarm ve zaman aşımı;
+- tatbikat: geri yükleme ve sağlayıcı taşınabilirliği.
+
+Faz 1 staging koşuları production verisi kullanmaz. Test nesneleri ayrı
+namespace/bucket, ayrı servis kimlikleri ve süreli yaşam döngüsüyle tutulur.
+
+## 7. Dosya bazında planlanan değişiklikler
+
+| Dosya/alan | Değişiklik |
+|---|---|
+| `lib/object-storage.ts` | Rol bazlı sözleşmeler, koşullu yazma, multipart, liste, promote/copy, sürüm/checksum dönüşleri |
+| `lib/r2-object-storage.ts` | R2'ye özgü v2 adaptör uygulaması ve hata eşleme |
+| `lib/content-hasher.ts` | Çalışma zamanı bağımsız akışlı SHA-256 sözleşmesi; Cloudflare uygulamasında `DigestStream` |
+| `lib/ingest-contract.ts` | Sağlayıcı bağımsız durumlar, hata kodları ve kabul alındısı |
+| `lib/ingest-state-machine.ts` | İzinli, idempotent durum geçişleri |
+| `lib/content-validation.ts` | Magic-byte ve bildirilen/algılanan tür politikası |
+| `lib/integrity.ts` | Tam akış SHA taraması ve kalıcı koşu/bulgu kayıtları |
+| `lib/reconciliation.ts` | Sahipsiz nesne ve dosyasız kayıt taraması |
+| `lib/access-tickets.ts` | Süreli/tek kullanımlık bilet üretme ve tüketme |
+| `lib/storage-manifest.ts` | SHA-256 taşınabilirlik manifesti üretme/doğrulama |
+| `lib/archive-schema.ts` | Yeni tablolar, kısıtlar ve sürümlü göç adımları |
+| `db/schema.ts` | Çalışma zamanı DDL'sinin Drizzle aynası |
+| `app/api/uploads/route.ts` | Yükleme oturumu başlatma ve durum sorgulama |
+| `app/api/uploads/[id]/parts/route.ts` | Parça yükleme ve eksik parça sorgulama |
+| `app/api/uploads/[id]/complete/route.ts` | Multipart tamamlama ve karantinaya geçiş |
+| `app/api/documents/route.ts` | Eski tam tamponlu kabulü kaldırma; yalnız kabul edilmiş belgeyi listeleme |
+| `app/api/documents/[id]/file/route.ts` | Bilet doğrulama ve asıl PDF'ye fallback'i kaldırma |
+| `app/api/overview/route.ts` | Kalıcı bütünlük/uzlaştırma, karantina ve türev geri dolum metrikleri |
+| `app/api/jobs/process/route.ts` | `object.arrayBuffer()` tam tamponlamasını kaldırma; OCR'a bayt yerine nesne referansı aktarma |
+| `app/archive/upload-dialog.tsx` | Multipart oturum arayüzü: parça ilerlemesi, durdur/devam, karantina ve tarama durumu, mükerrer bildirimi, red nedeni, süre dolumu/yeniden başlatma, pencere kapatma davranışı |
+| `lib/scheduled-jobs.ts` | Tarama, uzlaştırma, türev geri dolum ve süre dolumu dilimleri |
+| `worker/index.ts` | Yalnız zamanlayıcı ve adaptör bağları; kabul iş kuralı eklenmez |
+| `services/content-scan/` | İzole zararlı içerik tarama servisi ve sağlık ucu |
+| `services/ocr/app/main.py` | Güvenli PDF erişim türevi üretimi; belgeyi nesne referansıyla, salt-okunur kimlikle akışlı okuma |
+| `tests/object-storage-contract.test.ts` | Sağlayıcıdan bağımsız depolama sözleşme paketi |
+| `tests/ingest-state-machine.test.ts` | Durum, idempotency ve kesinti testleri |
+| `tests/content-validation.test.ts` | Magic-byte/ayrıştırıcı testleri |
+| `tests/phase-one-acceptance.test.ts` | §19 testlerinin otomatik bölümü |
+| `scripts/run-phase-one-acceptance.mjs` | Staging kabul koşusu ve maskelenmiş kanıt çıktısı |
+| `scripts/verify-storage-manifest.mjs` | Dışa aktarım/geri yükleme SHA doğrulaması |
+| `.github/workflows/phase-one-acceptance.yml` | Kontrollü staging kabul ve kanıt işi |
+| `FAZ_1_KANIT_REHBERI.md` | Koşu, saklama, maskeleme, onay ve başarısızlık prosedürü |
+
+Dosya adları uygulama sırasında küçük ölçüde değişebilir; sözleşme sınırları ve
+kabul ölçütleri değişiklik yönetimi olmadan daraltılamaz.
+
+## 8. S3 politikası §19 kabul matrisi
+
+| No | Kabul testi | Başlangıç durumu | İş paketi | Zorunlu kanıt |
+|---:|---|---|---|---|
+| 1 | Aynı nesne anahtarına ikinci yazma engellenir | Eksik | F1.1, F1.5 | Gerçek sağlayıcıda ikinci yazma reddi, nesne sürümü/SHA değişmedi |
+| 2 | Asıl SHA yazma sonrası doğrulanır | Eksik | F1.5 | Kabul alındısı ve tam yeniden okuma SHA sonucu |
+| 3 | Asıl güncellenmeden türev üretilir | Görselde mevcut, PDF eksik | F1.7 | Önce/sonra asıl SHA+sürüm ve yeni türev kaydı |
+| 4 | Kullanıcı bucket erişim anahtarı alamaz | Tasarımda mevcut | F1.9 | Yanıt/ağ izi denetimi ve erişim politikası |
+| 5 | Süresi dolan görüntüleme bileti çalışmaz | Eksik | F1.9 | Zaman kontrollü negatif test ve denetim olayı |
+| 6 | Yetkisiz rol aslı okuyamaz veya silemez | Uygulamada kısmi | F1.1, F1.9 | Uygulama ve depolama düzeyinde read/delete negatif testleri |
+| 7 | Seçildiyse sürümleme/Object Lock testleri geçer | Karar bekliyor | F1.0, F1.9 | ADR ve seçime göre kilit/yasal bekletme test raporu |
+| 8 | Bütünlük taraması kontrollü uyuşmazlığı yakalar | Eksik | F1.6 | Metadata aynıyken SHA uyuşmazlığı ve kalıcı bulgu/alarm |
+| 9 | Belge bağlamıyla yedekten geri yüklenir | Eksik | F1.10 | Belge+üst veri+ilişki+denetim geri yükleme raporu |
+| 10 | Sağlayıcı taşınabilirlik manifesti doğrulanır | Eksik | F1.10 | Kaynak/hedef SHA-256 manifest sonuçları |
+| 11 | Anahtar ve erişim logunda kişisel veri yoktur | Kısmi | F1.8, F1.9 | Maskelenmiş anahtar/metadata/log tarama raporu |
+| 12 | Sahipsiz/dosyasız uzlaştırma rapor üretir | Eksik | F1.6 | İki kontrollü bulgunun koşu raporu ve çözüm durumu |
+
+## 9. §19 dışındaki kabul hattı güvenlik testleri
+
+| No | Test | Beklenen sonuç |
+|---:|---|---|
+| K-1 | Bildirilen MIME ile magic-byte uyuşmaz | Dosya reddedilir; asıl ve OCR işi oluşmaz |
+| K-2 | Güvenli EICAR zararlı içerik testi | Karantinada reddedilir; tarayıcı sürümü alındıya yazılır |
+| K-3 | Multipart yükleme ortasında bağlantı kesilir | Oturum eksik parçadan sürer; ikinci asıl oluşmaz |
+| K-4 | Normal kullanıcı karantina nesnesini okumayı dener | Uygulama ve depolama rolü erişimi reddeder |
+| K-5 | DB sonlandırması asıl terfiden sonra kontrollü olarak başarısız olur | Asıl silinmez; uzlaştırma sahipsiz nesneyi raporlar |
+| K-6 | Azami profil içindeki büyük dosya eşzamanlı yüklenir | Bellek kullanımı dosya boyutuyla doğrusal artmaz; tanımlı eşzamanlı yük altında güvenli baş boşluğuyla çalışma zamanı sınırının altında kalır ve `exceededMemory` benzeri hata oluşmaz. "Azami boyut × eşzamanlılık < isolate sınırı" formülü kabul ölçütü değildir |
+
+## 10. Kanıt paketi
+
+Her staging kabul koşusu değiştirilemez bir `run_id` üretir. Kanıt paketinin
+manifesti en az şunları içerir:
+
+- Git commit SHA ve uygulama/şema sürümü;
+- ortam ve adaptör adı; gizli olmayan sağlayıcı profil sürümü;
+- başlangıç/bitiş zamanı ve testi başlatan yetkili kimlik;
+- her kabul testinin durumu, süre, korelasyon kimliği ve hata kodu;
+- kabul alındısı: nesne kimlikleri, sınıflar, boyutlar ve SHA-256 değerleri;
+- tarayıcı motor/sürüm/imza sürümü ve magic-byte sonucu;
+- koşullu yazma, tam okuma ve sağlayıcı sürüm/checksum sonucu;
+- bütünlük ve uzlaştırma koşu/bulgu kimlikleri;
+- görüntüleme bileti negatif test sonucu;
+- IAM/rol testlerinin maskelenmiş sonuçları;
+- yedek geri yükleme raporu;
+- kaynak ve hedef taşınabilirlik manifest özeti;
+- üretilen alarmın kimliği ve işletim teyidi;
+- onaylayan bilgi işlem, arşiv ve güvenlik sorumluları.
+
+Kanıt paketine aşağıdakiler girmez:
+
+- gerçek belge içeriği;
+- kişi adı, T.C. kimlik numarası, açık adres veya özgün dosya adı;
+- erişim bileti, bucket anahtarı, token veya secret;
+- maskelenmemiş sağlayıcı/IAM kimlik bilgisi;
+- hassas log gövdesi.
+
+CI çıktıları yardımcı kanıttır. Yedek geri yükleme, sağlayıcı taşınabilirliği,
+IAM reddi ve alarm teyidi yetkili tatbikat kaydı olmadan geçmiş sayılmaz.
+
+## 11. Ölçümler ve işletim eşikleri
+
+Faz 1 sonunda en az şu ölçümler görünür olmalıdır:
+
+- aktif, yarım, süresi dolmuş ve karantinadaki yükleme oturumları;
+- multipart başarı, yeniden başlatma ve hata oranı;
+- tür uyuşmazlığı ve zararlı içerik reddi;
+- kabul süresi P50/P95 ve dosya boyutu dağılımı;
+- koşullu yazma çakışması;
+- yazma sonrası doğrulama başarı/hata oranı;
+- bütünlük tarama kapsamı, son başarılı koşu ve açık bulgu sayısı;
+- sahipsiz nesne ve dosyasız kayıt sayısı;
+- erişim bileti reddi ve yetkisiz asıl erişim denemesi;
+- erişim türevi eksik belge ve geri dolum kuyruğu;
+- son başarılı yedek/geri yükleme ve taşınabilirlik tatbikatı.
+
+Kesin hizmet seviyesi eşikleri gerçek pilot belge seti ölçülmeden uydurulmaz.
+Eşikler ADR ve işletim rehberinde ölçüm sonucuyla sabitlenir.
+
+## 12. Faz 1 tamamlanma tanımı
+
+Faz 1 tamamlandı denebilmesi için:
+
+- Faz 0 staging uçtan uca kanıtı vardır.
+- Eski `request.formData()` + tam `arrayBuffer()` kabul yolu üretim/staging
+  rotasında kullanılmaz.
+- Karantina, tarama, koşullu terfi ve tam SHA doğrulaması çalışır.
+- Asıl kasa uygulama rolünde silme yetkisi yoktur.
+- Tam bütünlük taraması ve iki yönlü uzlaştırma kalıcı bulgu üretir.
+- PDF görüntüleme asıl nesneye geri düşmez; geri dolum tamamlanmıştır.
+- Doğrulanmış kişisel veri içeren eski anahtar/metadata kalmamıştır.
+- Süresi dolmuş bilet ve yetkisiz rol negatif testleri geçer.
+- Seçili belge bağlamıyla geri yüklenmiş, SHA manifesti başka hedefte
+  doğrulanmıştır.
+- §19 matrisi 12/12, kabul hattı matrisi 6/6 geçmiştir.
+- Açık kritik/yüksek bulgu yoktur.
+- Bilgi işlem, arşiv ve güvenlik sorumluları kanıt paketini onaylamıştır.
+
+Bu kapı kapanmadan yeni müdürlüklerin toplu devreye alınması veya sistemin
+kurumsal üretim çekirdeği ilan edilmesi uygun değildir.
