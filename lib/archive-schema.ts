@@ -28,6 +28,7 @@ import {
   seedDocumentTypes, seedFieldsFor, seedVocabularies,
 } from "./archive-seed.ts";
 import { jsonError } from "./http.ts";
+import { ingestTableStatements } from "./ingest-schema.ts";
 import { normalizeSearch } from "./text-search.ts";
 
 export { DEFAULT_DOCUMENT_TYPE_CODE };
@@ -40,7 +41,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 7;
+export const ARCHIVE_SCHEMA_VERSION = 8;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -80,6 +81,7 @@ const tableStatements: string[] = [
     CHECK (processed >= 0)
   )`,
   "CREATE INDEX IF NOT EXISTS maintenance_tasks_status_idx ON maintenance_tasks (status)",
+  ...ingestTableStatements,
   `CREATE TABLE IF NOT EXISTS archive_documents (
     id TEXT PRIMARY KEY NOT NULL,
     reference_no TEXT NOT NULL UNIQUE,
@@ -97,7 +99,6 @@ const tableStatements: string[] = [
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
-  "CREATE UNIQUE INDEX IF NOT EXISTS archive_documents_sha256_unique ON archive_documents (sha256)",
   "CREATE INDEX IF NOT EXISTS archive_documents_profile_idx ON archive_documents (document_type_id)",
   "CREATE INDEX IF NOT EXISTS archive_documents_status_idx ON archive_documents (status)",
   "CREATE INDEX IF NOT EXISTS archive_documents_created_at_idx ON archive_documents (created_at)",
@@ -134,6 +135,7 @@ const tableStatements: string[] = [
   "CREATE INDEX IF NOT EXISTS binary_objects_sha256_idx ON binary_objects (sha256)",
   // Bir belgenin yalnız bir asıl nesnesi olabilir; türevler serbesttir.
   "CREATE UNIQUE INDEX IF NOT EXISTS binary_objects_single_original_unique ON binary_objects (document_id) WHERE object_class = 'original'",
+  "CREATE UNIQUE INDEX IF NOT EXISTS binary_objects_original_sha256_unique ON binary_objects (sha256) WHERE object_class = 'original'",
 
   `CREATE TABLE IF NOT EXISTS processing_jobs (
     id TEXT PRIMARY KEY NOT NULL,
@@ -630,6 +632,11 @@ async function migrateProcessingJobOperationsColumns(db: D1Database) {
   }
 }
 
+/** Sürüm 8: içerik tekilliğinin yetkisini `binary_objects` tablosuna taşır. */
+async function migrateOriginalShaUniqueness(db: D1Database) {
+  await db.prepare("DROP INDEX IF EXISTS archive_documents_sha256_unique").run();
+}
+
 /**
  * Mevcut belgelerin asıl dosyaları için nesne kaydı üretir.
  * `archive_documents` kabul alındısını, `binary_objects` depolama kaydını tutar.
@@ -928,6 +935,8 @@ const dataMigrations: MigrationStep[] = [
   { version: 6, run: enqueueSearchReindex },
   // 6 → 7: otomatik OCR tüketimi için geri çekilme ve dead-letter alanları.
   { version: 7, run: migrateProcessingJobOperationsColumns },
+  // 7 → 8: kabul tabloları kurulur; SHA tekilliği yetkili nesne envanterine taşınır.
+  { version: 8, run: migrateOriginalShaUniqueness },
 ];
 
 /** Sürüm sözleşmesi denetimi ve raporlama için birleşik liste. */

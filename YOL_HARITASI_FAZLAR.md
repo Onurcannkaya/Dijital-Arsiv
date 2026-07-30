@@ -238,6 +238,12 @@ onayı olmadan teknik ekip tarafından belirlenmez.
 **Amaç:** ADR-012'yi büyük dosya, değişmezlik ve sağlayıcı taşınabilirliği için
 genişletmek.
 
+**Durum:** Rol sözleşmeleri, R2 adaptörleri, akışlı hasher, S3 anlamsallıklı bellek
+test adaptörü ve R2 hata/koşul testleri 30 Temmuz 2026 tarihinde uygulandı. Gerçek
+R2 ve ikinci S3 uyumlu sağlayıcı kanıtı F1.11 staging kapısında üretilecektir.
+Eski geniş `ObjectStorage` yalnız F1.3–F1.5 geçişi tamamlanana kadar uyumluluk
+katmanı olarak kalır; yeni kod dar rol sözleşmelerini kullanır.
+
 Tek geniş `ObjectStorage` rolü yerine yetenekleri ayrılmış sözleşmeler
 tanımlanır:
 
@@ -286,6 +292,7 @@ Yeni tablolar:
 | `upload_parts` | Parça numarası, boyut, checksum, ETag ve tekrar yükleme durumu |
 | `ingest_objects` | Kabul öncesi `temporary`/`quarantine` nesnelerinin yetkili envanteri |
 | `ingest_receipts` | SHA-256, tarayıcı motor/sürüm/imza, tür doğrulaması, kasa sürümü, doğrulama zamanı ve sonuç |
+| `upload_session_events` | Ardışık durum sürümü, aktör, gerekçe, kanıt alındısı ve değiştirilemez olay özeti |
 | `integrity_runs` | Tam tarama koşusu, kapsam, başlangıç/bitiş ve özet |
 | `integrity_findings` | Nesne bazlı kalıcı bütünlük bulgusu ve çözüm durumu |
 | `reconciliation_runs` | Depo–veritabanı uzlaştırma koşusu ve sayısal sonuç |
@@ -315,6 +322,8 @@ doğruluk kaynağıdır:
 
 - Durum geçişleri izinli geçiş listesi dışında güncellenemez.
 - Aynı idempotency anahtarı ikinci belge veya ikinci asıl üretmez.
+- `FAILED` → `PROMOTING` yalnız geçerli karantina/`VERIFIED` alındısı, yetkili
+  operatör, gerekçe ve denetim olayıyla yapılır; kullanıcı bu geçişi başlatamaz.
 - Aynı sunucu SHA-256 değerine sahip ikinci oturum `DUPLICATE` olur; yeni belge,
   asıl nesne veya OCR işi üretmez.
 - Şema, `lib/archive-schema.ts` ve `db/schema.ts` içinde aynı anda güncellenir.
@@ -322,6 +331,16 @@ doğruluk kaynağıdır:
   çalıştırma senaryolarını geçer.
 - Depolama anahtarı için çift doğruluk kaynağı kalmaz; `storage_key` fallback
   okuması üretim yolunda bulunmaz.
+
+**Uygulama durumu (F1.2):** Şema sürüm 8'e çıkarıldı; kabul oturumu, parça,
+nesne, alındı, değiştirilemez durum olayı, bütünlük/uzlaştırma ve erişim bileti
+tabloları hem yetkili DDL'de hem Drizzle aynasında tanımlandı. İzinli geçişler,
+`state_version`, olay zorunluluğu, operatör yeniden deneme kanıtı, idempotency ve
+asıl SHA-256 tekilliği D1 kısıt/tetikleyicileriyle korunuyor. Taze kurulum,
+yükseltme, yarıda kalma ve tekrar çalıştırma testleri vardır. Bütün nesne okumaları
+`binary_objects` üzerinden yapılır; `storage_key` yalnız geriye uyumlu yazma/kabul
+alındısı olarak bir sürüm daha tutulur ve daraltma göçünde fiziksel olarak kaldırılır.
+F1.3–F1.5 çalışma zamanı akışı bu sözleşmeyi kullanacaktır.
 
 ### F1.3 — Çok parçalı ve yeniden başlatılabilir karantina yüklemesi
 

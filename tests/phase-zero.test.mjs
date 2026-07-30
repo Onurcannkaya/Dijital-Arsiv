@@ -1,22 +1,33 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("R2 erişimleri ADR-012 depolama arayüzünün arkasındadır", async () => {
-  const [adapter, archiveStorage, documents, fileRoute, processor] = await Promise.all([
+  const [contract, adapter, archiveStorage, documents, fileRoute, processor] = await Promise.all([
     read("lib/object-storage.ts"),
+    read("lib/r2-object-storage.ts"),
     read("lib/archive-storage.ts"),
     read("app/api/documents/route.ts"),
     read("app/api/documents/[id]/file/route.ts"),
     read("app/api/jobs/process/route.ts"),
   ]);
-  assert.match(adapter, /export interface ObjectStorage/);
+  assert.match(contract, /export interface ObjectStorage/);
+  // F1.1: sözleşme dosyası sağlayıcıdan bağımsızdır; R2'ye özgü kod adaptör dosyasındadır.
+  assert.doesNotMatch(contract, /R2Bucket/);
   assert.match(adapter, /export class R2ObjectStorage implements ObjectStorage/);
   assert.match(archiveStorage, /getArchiveObjectStorage/);
   for (const source of [documents, fileRoute, processor]) {
     assert.doesNotMatch(source, /ARCHIVE_FILES\.(?:get|put|delete|head|list)\(/);
+  }
+  const apiRoot = new URL("../app/api/", import.meta.url);
+  const routeFiles = (await readdir(apiRoot, { recursive: true }))
+    .filter((path) => path.endsWith(".ts"));
+  for (const routeFile of routeFiles) {
+    const source = await readFile(new URL(routeFile.replaceAll("\\", "/"), apiRoot), "utf8");
+    assert.doesNotMatch(source, /\bR2Bucket\b|ARCHIVE_FILES\.(?:get|put|delete|head|list)\(/,
+      `${routeFile} sağlayıcı adaptörünü atlıyor`);
   }
 });
 

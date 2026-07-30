@@ -21,15 +21,13 @@ export type ResolvedObject = { object: StoredObject; objectClass: "original" | "
 /**
  * Belgenin asıl nesnesini çözer.
  *
- * `archive_documents` kolonları yalnız geri dönüş yoludur: nesne kaydı olmayan
- * tarihsel kayıtlar için kabul alındısındaki konum kullanılır.
+ * Yetkili kayıt yalnız `binary_objects` tablosundadır. Sürüm 8 göçü tarihsel
+ * belgeleri geriye dönük doldurur; `archive_documents.storage_key` artık okuma
+ * yolu değildir ve fiziksel sütun sonraki uyumlu sürümde kaldırılacaktır.
  */
 export async function resolveOriginalObject(db: D1Database, documentId: string): Promise<StoredObject | null> {
-  const object = await db.prepare(`SELECT object_key, media_type, byte_size, sha256 FROM binary_objects
+  return await db.prepare(`SELECT object_key, media_type, byte_size, sha256 FROM binary_objects
     WHERE document_id = ? AND object_class = 'original' LIMIT 1`).bind(documentId).first<StoredObject>();
-  if (object) return object;
-  return await db.prepare(`SELECT storage_key AS object_key, media_type, byte_size, sha256
-    FROM archive_documents WHERE id = ?`).bind(documentId).first<StoredObject>();
 }
 
 /**

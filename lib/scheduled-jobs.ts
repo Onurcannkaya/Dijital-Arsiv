@@ -1,7 +1,7 @@
 import { processNextOcrJob } from "../app/api/jobs/process/route.ts";
 import { assertSchemaReady, runMaintenanceSlice } from "./archive-schema.ts";
 import type { ArchiveBindings } from "./archive-storage.ts";
-import { createObjectStorage } from "./object-storage.ts";
+import { R2ObjectReader } from "./r2-object-storage.ts";
 import { runIntegritySlice } from "./integrity.ts";
 import { logEvent, measured } from "./observability.ts";
 
@@ -64,7 +64,7 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
   }
   if (cron === INTEGRITY_CRON) {
     await measured("cron.integrity", { cron }, async () => {
-      await runIntegritySlice(bindings.DB, createObjectStorage(bindings.ARCHIVE_FILES));
+      await runIntegritySlice(bindings.DB, new R2ObjectReader(bindings.ARCHIVE_FILES));
     });
     return;
   }

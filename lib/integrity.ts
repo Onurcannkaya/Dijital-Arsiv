@@ -1,4 +1,4 @@
-import type { ObjectStorage } from "./object-storage.ts";
+import type { ObjectReader } from "./object-storage.ts";
 import { logEvent } from "./observability.ts";
 
 export const INTEGRITY_SCAN_TASK = "integrity-scan";
@@ -54,7 +54,7 @@ async function ensureIntegrityTask(db: D1Database) {
  * metadatasını denetler. Baytların yeniden okunup özetlenmesi daha pahalı tam
  * tarama profilinde ayrıca çalıştırılacaktır.
  */
-export async function runIntegritySlice(db: D1Database, storage: ObjectStorage, batchSize = 20) {
+export async function runIntegritySlice(db: D1Database, storage: Pick<ObjectReader, "head">, batchSize = 20) {
   const limit = Math.min(Math.max(Math.trunc(batchSize), 1), 100);
   await ensureIntegrityTask(db);
   const task = await db.prepare(`UPDATE maintenance_tasks

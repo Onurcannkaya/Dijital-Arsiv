@@ -340,9 +340,8 @@ test("görüntüleme erişim türevini, indirme aslı çözer", async () => {
     // Nesne kaydı olmayan tarihsel belge kabul alındısındaki konuma düşer.
     db.raw.prepare(`INSERT INTO archive_documents (id, reference_no, original_name, storage_key, media_type, byte_size, sha256, uploaded_by)
       VALUES ('d10', 'ARS-10', 'eski.pdf', 'originals/2026/d10/eski.pdf', 'application/pdf', 10, 'sha-eski', 'a@b')`).run();
-    const legacy = await resolveViewableObject(db, "d10");
-    assert.equal(legacy?.objectClass, "original");
-    assert.equal(legacy?.object.object_key, "originals/2026/d10/eski.pdf");
+    const missingInventory = await resolveViewableObject(db, "d10");
+    assert.equal(missingInventory, null);
   } finally {
     db.close();
   }

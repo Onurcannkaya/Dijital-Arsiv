@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
-import { createObjectStorage, type ObjectStorage } from "./object-storage.ts";
+import type { ObjectStorage } from "./object-storage.ts";
+import { createObjectStorage } from "./r2-object-storage.ts";
 
 export {
   ARCHIVE_SCHEMA_VERSION, applyArchiveMigrations, assertSchemaReady,
@@ -12,10 +13,20 @@ export {
   type ResolvedObject, type StoredObject,
 } from "./binary-objects.ts";
 export {
-  createObjectStorage, R2ObjectStorage,
+  ObjectStorageError, isObjectStorageError,
   type ObjectStorage, type ObjectStorageBody, type ObjectStorageHead,
   type ObjectStoragePutOptions, type ObjectStorageValue,
+  type ObjectReader, type StagingStorage, type ImmutableVaultWriter,
+  type StorageInventory, type DispositionStorage,
+  type ObjectStat, type ObjectBody, type PutObjectOptions, type ByteRange,
+  type MultipartUploadToken, type UploadedPart, type StorageErrorCode,
 } from "./object-storage.ts";
+export {
+  createObjectStorage, R2ObjectStorage,
+  R2ObjectReader, R2StagingStorage, R2ImmutableVaultWriter,
+  R2StorageInventory, R2DispositionStorage,
+} from "./r2-object-storage.ts";
+export { createDigestStreamHasher, type StreamingHasher, type StreamDigest } from "./content-hasher.ts";
 export { INTEGRITY_SCAN_TASK, readIntegrityProgress, runIntegritySlice } from "./integrity.ts";
 
 export type ArchiveBindings = {
