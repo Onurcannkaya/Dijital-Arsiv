@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import warnings
 from pathlib import Path
 
 MIME_EXTENSIONS = {

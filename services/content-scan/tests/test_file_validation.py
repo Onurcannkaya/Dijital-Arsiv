@@ -1,10 +1,16 @@
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "app"))
 
-from file_validation import classify_clamav_exit, detect_media_type, type_validation
+from file_validation import classify_clamav_exit, detect_media_type, type_validation, validate_parser
+
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 
 class FileValidationTests(unittest.TestCase):
@@ -25,6 +31,31 @@ class FileValidationTests(unittest.TestCase):
         self.assertEqual(classify_clamav_exit(0), "CLEAN")
         self.assertEqual(classify_clamav_exit(1), "MALICIOUS")
         self.assertEqual(classify_clamav_exit(2), "ERROR")
+
+    # Regresyon: görsel doğrulama yolu gerçekten çalıştırılmalıdır. Eksik
+    # `import warnings` her görsel taramasını NameError ile düşürüyordu ve
+    # yalnız magic-byte testleri koştuğu için görünmüyordu.
+    @unittest.skipUnless(Image, "Pillow kurulu değil")
+    def test_image_parser_validates_real_png(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sample.png"
+            Image.new("RGB", (4, 4), "white").save(path, "PNG")
+            name, version, result = validate_parser(path, "image/png")
+            self.assertEqual((name, result), ("pillow", "VALID"))
+            self.assertTrue(version)
+
+    @unittest.skipUnless(Image, "Pillow kurulu değil")
+    def test_image_parser_rejects_wrong_format_and_truncated_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            disguised = Path(directory) / "disguised.png"
+            Image.new("RGB", (4, 4), "white").save(disguised, "JPEG")
+            self.assertEqual(validate_parser(disguised, "image/png")[2], "INVALID")
+
+            truncated = Path(directory) / "truncated.png"
+            intact = Path(directory) / "intact.png"
+            Image.new("RGB", (64, 64), "white").save(intact, "PNG")
+            truncated.write_bytes(intact.read_bytes()[:40])
+            self.assertEqual(validate_parser(truncated, "image/png")[2], "INVALID")
 
 
 if __name__ == "__main__":
