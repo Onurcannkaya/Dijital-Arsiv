@@ -20,7 +20,7 @@ function fakeClient(plan) {
   const calls = [];
   return {
     calls,
-    async json(method, path, options) {
+    async json(method, path) {
       calls.push({ method, path });
       if (method === "POST" && path === "/api/uploads") return plan.create;
       if (method === "POST" && path.endsWith("/complete")) return plan.complete;

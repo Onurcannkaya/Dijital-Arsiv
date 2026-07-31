@@ -63,6 +63,23 @@ export function createAppClient({ baseUrl, identity, signal, fetcher = fetch }) 
     return { status: response.status, ok: response.ok, body: parsed };
   }
 
+  /** İkili gövde indirir (T-02 asıl doğrulaması). Yanıt gövdesi hash'lenir, kanıta yazılmaz. */
+  async function getBytes(path, { headers } = {}) {
+    const response = await fetcher(`${root}${path}`, {
+      method: "GET",
+      headers: { ...identityHeaders, ...headers },
+      signal,
+    });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return {
+      status: response.status,
+      ok: response.ok,
+      bytes,
+      contentType: response.headers.get("content-type"),
+      contentLength: Number(response.headers.get("content-length") ?? bytes.byteLength),
+    };
+  }
+
   async function putPart(path, { partNumber, sha256, bytes }) {
     const response = await fetcher(`${root}${path}`, {
       method: "PUT",
@@ -82,7 +99,7 @@ export function createAppClient({ baseUrl, identity, signal, fetcher = fetch }) 
     return { status: response.status, ok: response.ok, body: parsed };
   }
 
-  return { root, json, putPart };
+  return { root, json, putPart, getBytes };
 }
 
 /** Deterministik JSON kanıt dosyası yazar; koşu betiği okuyup özetler. */
