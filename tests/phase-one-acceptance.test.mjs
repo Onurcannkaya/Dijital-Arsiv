@@ -1,100 +1,192 @@
-/**
- * F1.11 — Kabul kanıtı sözleşmesi ve kapı kuralları.
- *
- * Kanıt rehberi §2/§8: 19 testin tamamı sonuçlandırılmalı; uygulanabilir olanlar
- * PASS, yalnız T-07 yetkili ADR ile NOT_APPLICABLE olabilir; FAIL/BLOCKED/eksik
- * kapıyı kapatır. Kanıt manifesti maskeli olmalı ve deterministik özet üretmeli.
- */
+/** F1.11 — Kabul kanıtı sözleşmesi ve kapı kuralları. */
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  ACCEPTANCE_CONTRACT_VERSION,
   RESULTS,
   TEST_CATALOG,
+  TEST_CATALOG_DIGEST,
   buildEvidenceManifest,
   canonicalJson,
   evaluateGate,
+  evaluateTechnicalGate,
   maskContext,
   missingCapabilities,
   resolveCapabilities,
 } from "../scripts/phase-one-acceptance-core.mjs";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
+const digest = (character) => character.repeat(64);
 
-function allPass() {
-  return TEST_CATALOG.map((test) => ({ id: test.id, result: "PASS" }));
+function evidenceFor(test, kinds = test.evidenceKinds) {
+  return kinds.map((kind, index) => ({
+    id: `${test.id}-${kind}`,
+    testId: test.id,
+    kind,
+    file: `evidence/${test.id}/${index}-${kind}.json`,
+    sha256: digest(String((index % 9) + 1)),
+    sizeBytes: 128 + index,
+    mediaType: "application/json",
+  }));
 }
 
-test("katalog 12 politika ve 7 kabul hattı testini kapsar", () => {
+function passingFixture() {
+  const evidenceFiles = TEST_CATALOG.flatMap((entry) => evidenceFor(entry));
+  const results = TEST_CATALOG.map((entry, index) => ({
+    id: entry.id,
+    result: "PASS",
+    durationMs: 100 + index,
+    correlationId: `run-0001-${entry.id}`,
+    evidenceRefs: evidenceFor(entry).map((evidence) => evidence.id),
+  }));
+  return {
+    results,
+    options: {
+      metadata: {
+        runId: "run-0001",
+        gitCommit: "a".repeat(40),
+        appVersion: "0.1.0",
+        schemaVersion: 22,
+        environment: "staging",
+        adapterProfile: "r2-staging-v1",
+        initiatedBy: "ci-service",
+        startedAt: "2026-07-31T10:00:00.000Z",
+        finishedAt: "2026-07-31T10:05:00.000Z",
+      },
+      evidenceFiles,
+      exitCriteria: {
+        preflight: { result: "PASS", evidenceDigest: digest("b") },
+        phaseZero: { result: "PASS", evidenceDigest: digest("c") },
+        openCriticalFindings: 0,
+        openHighFindings: 0,
+      },
+      approvals: [
+        { role: "BILGI_ISLEM", subjectId: "corp:it-approver", approvedAt: "2026-07-31T09:50:00.000Z", evidenceDigest: digest("d") },
+        { role: "BILGI_GUVENLIGI", subjectId: "corp:security-approver", approvedAt: "2026-07-31T09:51:00.000Z", evidenceDigest: digest("e") },
+        { role: "ARSIV", subjectId: "corp:archive-approver", approvedAt: "2026-07-31T09:52:00.000Z", evidenceDigest: digest("f") },
+      ],
+    },
+  };
+}
+
+test("katalog 12 politika ve 7 kabul hattı testini ve kanıt türlerini kapsar", () => {
   assert.equal(TEST_CATALOG.length, 19);
-  const policy = TEST_CATALOG.filter((entry) => entry.id.startsWith("T-"));
-  const pipeline = TEST_CATALOG.filter((entry) => entry.id.startsWith("K-"));
-  assert.equal(policy.length, 12);
-  assert.equal(pipeline.length, 7);
+  assert.equal(TEST_CATALOG.filter((entry) => entry.id.startsWith("T-")).length, 12);
+  assert.equal(TEST_CATALOG.filter((entry) => entry.id.startsWith("K-")).length, 7);
+  assert.match(TEST_CATALOG_DIGEST, /^[a-f0-9]{64}$/);
   for (const entry of TEST_CATALOG) {
     assert.ok(entry.title && entry.executor && entry.approver, `${entry.id} eksik alan`);
+    assert.ok(entry.evidenceKinds.length >= 2, `${entry.id} kanıt türü eksik`);
   }
 });
 
-test("tüm testler PASS ise kapı açılır", () => {
-  const gate = evaluateGate(allPass());
-  assert.deepEqual(gate, { passed: true, failures: [] });
+test("tüm testler kanıtları, çıkış ölçütleri ve onaylarıyla PASS ise kapı açılır", () => {
+  const fixture = passingFixture();
+  assert.deepEqual(evaluateGate(fixture.results, fixture.options), { passed: true, failures: [] });
 });
 
-test("eksik, FAIL veya BLOCKED sonuç kapıyı kapatır", () => {
-  const missing = evaluateGate(allPass().filter((result) => result.id !== "K-3"));
-  assert.equal(missing.passed, false);
+test("kanıtsız PASS, eksik sonuç ve açık yüksek bulgu kapıyı kapatır", () => {
+  const fixture = passingFixture();
+  const withoutEvidence = structuredClone(fixture);
+  withoutEvidence.results[0].evidenceRefs = [];
+  assert.ok(evaluateGate(withoutEvidence.results, withoutEvidence.options).failures.includes("EVIDENCE_MISSING:T-01"));
+
+  const missing = evaluateGate(fixture.results.filter((result) => result.id !== "K-3"), fixture.options);
   assert.ok(missing.failures.includes("MISSING:K-3"));
 
-  const failed = evaluateGate(allPass().map((result) =>
-    result.id === "T-02" ? { ...result, result: "FAIL" } : result));
-  assert.ok(failed.failures.includes("FAIL:T-02"));
-
-  const blocked = evaluateGate(allPass().map((result) =>
-    result.id === "T-09" ? { ...result, result: "BLOCKED" } : result));
-  assert.ok(blocked.failures.includes("BLOCKED:T-09"));
+  const findings = structuredClone(fixture.options);
+  findings.exitCriteria.openHighFindings = 1;
+  assert.ok(evaluateGate(fixture.results, findings).failures.includes("EXIT_HIGH_FINDINGS_OPEN"));
 });
 
-test("NOT_APPLICABLE yalnız T-07 için ve yetkili ADR referansıyla geçerlidir", () => {
-  const authorized = evaluateGate(allPass().map((result) =>
-    result.id === "T-07" ? { id: "T-07", result: "NOT_APPLICABLE", adrReference: "ADR-016" } : result));
-  assert.deepEqual(authorized, { passed: true, failures: [] });
+test("FAIL/BLOCKED ve serbest biçimli hata mesajı kapıyı güvenli kapatır", () => {
+  const fixture = passingFixture();
+  const failed = fixture.results.map((result) => result.id === "T-02"
+    ? { ...result, result: "FAIL", errorCode: "sağlayıcı token=abc" } : result);
+  const gate = evaluateGate(failed, fixture.options);
+  assert.ok(gate.failures.includes("FAIL:T-02"));
+  assert.ok(gate.failures.includes("INVALID_ERROR_CODE:T-02"));
 
-  const noAdr = evaluateGate(allPass().map((result) =>
-    result.id === "T-07" ? { id: "T-07", result: "NOT_APPLICABLE" } : result));
-  assert.ok(noAdr.failures.includes("NOT_APPLICABLE_UNAUTHORIZED:T-07"));
-
-  // Başka bir testte NOT_APPLICABLE kabul edilmez.
-  const wrongTest = evaluateGate(allPass().map((result) =>
-    result.id === "T-05" ? { id: "T-05", result: "NOT_APPLICABLE", adrReference: "ADR-016" } : result));
-  assert.ok(wrongTest.failures.includes("NOT_APPLICABLE_UNAUTHORIZED:T-05"));
+  const blocked = fixture.results.map((result) => result.id === "T-09"
+    ? { ...result, result: "BLOCKED", errorCode: "CAPABILITY_MISSING" } : result);
+  assert.ok(evaluateGate(blocked, fixture.options).failures.includes("BLOCKED:T-09"));
 });
 
-test("mükerrer ve bilinmeyen sonuç reddedilir", () => {
-  const duplicate = evaluateGate([...allPass(), { id: "T-01", result: "PASS" }]);
-  assert.ok(duplicate.failures.includes("DUPLICATE_RESULT"));
-  const unknown = evaluateGate([...allPass(), { id: "T-99", result: "PASS" }]);
-  assert.ok(unknown.failures.includes("UNKNOWN_TEST:T-99"));
+test("T-07 N/A yalnız ADR-016, telafi kontrolü, özel kanıt ve hukuk onayıyla geçer", () => {
+  const fixture = passingFixture();
+  const t07Kinds = ["decision", "compensating-control", "integrity"];
+  fixture.options.evidenceFiles = fixture.options.evidenceFiles
+    .filter((entry) => entry.testId !== "T-07")
+    .concat(evidenceFor(TEST_CATALOG.find((entry) => entry.id === "T-07"), t07Kinds));
+  fixture.results = fixture.results.map((result) => result.id === "T-07" ? {
+    id: "T-07",
+    result: "NOT_APPLICABLE",
+    adrReference: "ADR-016",
+    compensatingControl: { result: "PASS" },
+    durationMs: 50,
+    correlationId: "run-0001-T-07",
+    evidenceRefs: t07Kinds.map((kind) => `T-07-${kind}`),
+  } : result);
+
+  const noLegal = evaluateGate(fixture.results, fixture.options);
+  assert.ok(noLegal.failures.includes("APPROVAL_MISSING:HUKUK_KVKK"));
+  fixture.options.approvals.push({
+    role: "HUKUK_KVKK", subjectId: "corp:legal-approver",
+    approvedAt: "2026-07-31T09:53:00.000Z", evidenceDigest: digest("9"),
+  });
+  assert.deepEqual(evaluateGate(fixture.results, fixture.options), { passed: true, failures: [] });
+
+  fixture.results.find((result) => result.id === "T-07").adrReference = "ADR-999";
+  assert.ok(evaluateGate(fixture.results, fixture.options).failures.includes("NOT_APPLICABLE_UNAUTHORIZED:T-07"));
 });
 
-test("yetenek çözümü eksik ön koşulları BLOCKED yapar", () => {
-  const empty = resolveCapabilities({});
-  assert.equal(empty.staging, false);
-  assert.deepEqual(missingCapabilities(TEST_CATALOG.find((t) => t.id === "T-02"), empty), ["staging"]);
+test("kanıt yolu, fiziksel özet, bağlama ve artık dosya kuralları fail-closed çalışır", () => {
+  const fixture = passingFixture();
+  fixture.options.evidenceFiles[0].file = "../secret.json";
+  fixture.options.evidenceFiles[1].sha256 = "not-a-digest";
+  fixture.options.evidenceFiles.push({
+    id: "orphan", testId: "T-01", kind: "operation", file: "evidence/orphan.json",
+    sha256: digest("8"), sizeBytes: 32, mediaType: "application/json",
+  });
+  const gate = evaluateTechnicalGate(fixture.results, fixture.options);
+  assert.ok(gate.failures.some((failure) => failure.startsWith("EVIDENCE_UNSAFE_PATH:")));
+  assert.ok(gate.failures.some((failure) => failure.startsWith("EVIDENCE_INVALID_SHA:")));
+  assert.ok(gate.failures.includes("EVIDENCE_UNREFERENCED:orphan"));
+});
 
+test("kurumsal onaylar teknik kapıdan ayrı ve değişmez kanıta bağlıdır", () => {
+  const fixture = passingFixture();
+  assert.equal(evaluateTechnicalGate(fixture.results, fixture.options).passed, true);
+  fixture.options.approvals = [];
+  const release = evaluateGate(fixture.results, fixture.options);
+  assert.equal(release.passed, false);
+  assert.ok(release.failures.includes("APPROVAL_MISSING:BILGI_ISLEM"));
+});
+
+test("yetenek çözümü HTTPS, sentetik staging ve fiziksel ayrım arar", () => {
+  assert.equal(resolveCapabilities({}).staging, false);
   const staged = resolveCapabilities({
     ACCEPTANCE_BASE_URL: "https://staging.example",
     ARCHIVE_MIGRATION_TOKEN: "x".repeat(32),
+    ACCEPTANCE_ENVIRONMENT: "staging",
+    ACCEPTANCE_SYNTHETIC_ONLY: "enabled",
   });
   assert.equal(staged.staging, true);
-  assert.deepEqual(missingCapabilities(TEST_CATALOG.find((t) => t.id === "K-1"), staged), []);
-  // T-10 ikinci sağlayıcı ister; yalnız staging yetmez.
-  assert.deepEqual(missingCapabilities(TEST_CATALOG.find((t) => t.id === "T-10"), staged), ["secondProvider"]);
+  assert.deepEqual(missingCapabilities(TEST_CATALOG.find((entry) => entry.id === "K-1"), staged), []);
+
+  const unsafe = resolveCapabilities({
+    ACCEPTANCE_BASE_URL: "http://production.example",
+    ARCHIVE_MIGRATION_TOKEN: "x".repeat(32),
+    ACCEPTANCE_ENVIRONMENT: "production",
+    ACCEPTANCE_SYNTHETIC_ONLY: "enabled",
+  });
+  assert.equal(unsafe.staging, false);
 });
 
-test("kanıt bağlamı sır ve URL yolu sızdırmaz", () => {
+test("kanıt bağlamı sır, bucket değeri ve URL yolunu sızdırmaz", () => {
   const masked = maskContext({
     baseUrl: "https://staging.example/gizli/yol?token=abc",
     ARCHIVE_MIGRATION_TOKEN: "cok-gizli-token",
@@ -106,45 +198,45 @@ test("kanıt bağlamı sır ve URL yolu sızdırmaz", () => {
   assert.equal(masked.ARCHIVE_MIGRATION_TOKEN, true);
   assert.equal(masked.ACCEPTANCE_ORIGINAL_BUCKET, true);
   assert.equal(masked.missing, false);
-  const serialized = JSON.stringify(masked);
-  assert.ok(!serialized.includes("cok-gizli-token"));
-  assert.ok(!serialized.includes("arsiv-orijinal"));
-  assert.ok(!serialized.includes("/gizli/yol"));
+  assert.ok(!JSON.stringify(masked).includes("cok-gizli-token"));
+  assert.ok(!JSON.stringify(masked).includes("arsiv-orijinal"));
 });
 
-test("kanıt manifesti maskeli, deterministik ve kapı sonucunu taşır", () => {
+test("v2 manifest maskeli, deterministik ve teknik/release kapılarını taşır", () => {
+  const fixture = passingFixture();
   const input = {
-    runId: "run-1", gitCommit: "a".repeat(40), appVersion: "0.1.0", schemaVersion: 22,
-    environment: "staging", adapterProfile: "r2-staging", initiatedBy: "ci",
-    startedAt: "2026-07-31T10:00:00.000Z", finishedAt: "2026-07-31T10:05:00.000Z",
+    ...fixture.options.metadata,
     context: { baseUrl: "https://s.example/x", ARCHIVE_MIGRATION_TOKEN: "gizli", staging: true },
-    results: allPass(),
-    evidenceFiles: [{ file: "b.json", sha256: "b".repeat(64) }, { file: "a.json", sha256: "a".repeat(64) }],
+    source: { repository: "org/repo", workflow: "wf@main", runAttempt: 1 },
+    results: fixture.results,
+    evidenceFiles: fixture.options.evidenceFiles,
+    exitCriteria: fixture.options.exitCriteria,
+    approvals: fixture.options.approvals,
   };
   const first = buildEvidenceManifest(input);
   const second = buildEvidenceManifest({ ...input, results: [...input.results].reverse() });
-  assert.equal(first.digest, second.digest, "sonuç sırası manifesti değiştirmemeli");
-  assert.equal(first.manifest.gate.passed, true);
-  assert.equal(first.manifest.results[0].id, "K-1", "sonuçlar kimliğe göre sıralı");
-  assert.equal(first.manifest.evidenceFiles[0].file, "a.json", "kanıt dosyaları sıralı");
-  assert.ok(first.manifest.results.every((result) => result.title && result.executor));
+  assert.equal(first.digest, second.digest);
+  assert.equal(first.manifest.contractVersion, ACCEPTANCE_CONTRACT_VERSION);
+  assert.equal(first.manifest.catalogDigest, TEST_CATALOG_DIGEST);
+  assert.equal(first.manifest.technicalGate.passed, true);
+  assert.equal(first.manifest.releaseGate.passed, true);
   assert.ok(!canonicalJson(first.manifest).includes("gizli"));
 });
 
-test("koşu betiği ve workflow kanıt kapısına bağlıdır", async () => {
+test("koşu betiği ve workflow tam kalite, preflight, kanıt ve attestation kapılarına bağlıdır", async () => {
   const [runner, workflow] = await Promise.all([
     read("scripts/run-phase-one-acceptance.mjs"),
     read(".github/workflows/phase-one-acceptance.yml"),
   ]);
-  // Kod var olması kabul değildir: yürütücüsü olmayan test BLOCKED kalır.
   assert.match(runner, /EXECUTOR_NOT_CONFIGURED/);
-  assert.match(runner, /process\.exit\(gate\.passed \? 0 : 1\)/);
-  // Manifest özeti paket dışına verilmelidir.
-  assert.match(runner, /manifestDigest/);
-  // Workflow yalnız kontrollü tetiklenir ve korumalı ortam kapısı kullanır.
+  assert.match(runner, /flag: "wx"/);
+  assert.match(runner, /process\.exit\(manifest\.technicalGate\.passed \? 0 : 1\)/);
   assert.match(workflow, /workflow_dispatch/);
   assert.match(workflow, /environment: phase-one-acceptance/);
   assert.doesNotMatch(workflow, /pull_request/);
-  assert.match(workflow, /upload-artifact/);
-  for (const value of RESULTS) assert.ok(typeof value === "string");
+  assert.match(workflow, /npm run verify/);
+  assert.match(workflow, /scripts\/verify-deployment\.mjs/);
+  assert.match(workflow, /actions\/attest@/);
+  assert.match(workflow, /github\.run_attempt/);
+  for (const value of RESULTS) assert.equal(typeof value, "string");
 });

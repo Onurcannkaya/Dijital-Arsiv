@@ -55,6 +55,23 @@ Her staging koşusu rastgele bir `run_id` üretir. Kanıt manifesti en az:
 içerir. Manifest koşu sonunda koşullu yazmayla yalnız oluşturulur; üzerine
 yazılmaz. Düzeltme yeni `run_id` üretir.
 
+### 3.1. Otomatik kanıt kapısı v2
+
+- Her `PASS`, test kataloğunda tanımlı bütün kanıt türlerini en az bir fiziksel
+  JSON dosyasıyla karşılar; yalnız sonuç beyanı başarı sayılmaz.
+- Koşu betiği kanıtı güvenli koşu dizininden yeniden okur; byte boyutu ve SHA-256
+  özetini kendisi hesaplar. Yürütücünün bildirdiği özet değerine güvenmez.
+- Kanıt yolu göreli ve üst dizine çıkmayan bir yol olmalı; dosya 5 MiB sınırını,
+  JSON ayrıştırmasını ve sır taramasını geçmelidir.
+- Manifest sözleşme sürümünü ve test kataloğu özetini taşır. Paket commit SHA'sına
+  sabitlenmiş CI action'larıyla üretilir ve OIDC/Sigstore provenance attestation
+  ile commit/workflow kimliğine bağlanır.
+- Teknik kapı ile release kapısı ayrıdır. Teknik kapı 19 test, Faz 0 kanıtı ve
+  sıfır açık kritik/yüksek bulguyu; release kapısı bunlara değişmez kurumsal onay
+  kanıtlarını ekler.
+- T-07 R2 pilotunda yalnız `ADR-016`, ayrıca `PASS` bucket-lock telafi kontrolü,
+  karar/bütünlük kanıtı ve Hukuk/KVKK onayıyla `NOT_APPLICABLE` olabilir.
+
 ## 4. Test verisi
 
 Testler ayrı staging alanında sentetik veriyle çalışır:
@@ -255,4 +272,3 @@ Faz 1 çıkışında:
 
 zorunludur. Onay kişi adı yerine kurumsal kimlik, rol, zaman ve imza/kanıt
 özetiyle kaydedilir.
-
