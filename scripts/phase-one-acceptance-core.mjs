@@ -74,7 +74,9 @@ function isHttpsUrl(value) {
 /** Ortam değişkenlerinden yalnız güvenli kabul topolojisinin yeteneklerini çözer. */
 export function resolveCapabilities(env) {
   const staging = isHttpsUrl(env.ACCEPTANCE_BASE_URL) && hasText(env, "ARCHIVE_MIGRATION_TOKEN")
-    && env.ACCEPTANCE_ENVIRONMENT === "staging" && env.ACCEPTANCE_SYNTHETIC_ONLY === "enabled";
+    && env.ACCEPTANCE_ENVIRONMENT === "staging" && env.ACCEPTANCE_SYNTHETIC_ONLY === "enabled"
+    // Yürütücüler uygulamayı sentetik yükleyici kimliğiyle sürer; yoksa BLOCKED.
+    && hasText(env, "ACCEPTANCE_UPLOADER_IDENTITY") && env.ACCEPTANCE_UPLOADER_IDENTITY.includes("@");
   const s3 = isHttpsUrl(env.ACCEPTANCE_S3_ENDPOINT) && hasText(env, "ACCEPTANCE_ORIGINAL_BUCKET")
     && hasText(env, "ACCEPTANCE_QUARANTINE_BUCKET")
     && env.ACCEPTANCE_ORIGINAL_BUCKET !== env.ACCEPTANCE_QUARANTINE_BUCKET;

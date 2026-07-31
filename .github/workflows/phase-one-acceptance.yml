@@ -66,7 +66,10 @@ jobs:
           ACCEPTANCE_ADAPTER_PROFILE: ${{ vars.ACCEPTANCE_ADAPTER_PROFILE }}
           ACCEPTANCE_APP_VERSION: ${{ github.ref_name }}
           ACCEPTANCE_SCHEMA_VERSION: ${{ vars.ACCEPTANCE_SCHEMA_VERSION }}
-          ACCEPTANCE_EXECUTOR_MODULE: ${{ vars.ACCEPTANCE_EXECUTOR_MODULE }}
+          # Repoda sürümlenen kanıt yürütücüleri; boş bırakılırsa tüm testler BLOCKED.
+          ACCEPTANCE_EXECUTOR_MODULE: ${{ vars.ACCEPTANCE_EXECUTOR_MODULE || 'scripts/acceptance-executors/pipeline.mjs' }}
+          ACCEPTANCE_UPLOADER_IDENTITY: ${{ secrets.ACCEPTANCE_UPLOADER_IDENTITY }}
+          ACCEPTANCE_UPLOADER_UNIT: ${{ vars.ACCEPTANCE_UPLOADER_UNIT }}
           ACCEPTANCE_PREFLIGHT_RESULT: PASS
           ACCEPTANCE_PREFLIGHT_EVIDENCE_DIGEST: ${{ steps.preflight.outputs.digest }}
           ACCEPTANCE_PHASE_ZERO_RESULT: ${{ vars.ACCEPTANCE_PHASE_ZERO_RESULT }}

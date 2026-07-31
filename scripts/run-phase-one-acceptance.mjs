@@ -80,6 +80,12 @@ function scopedConfig(test) {
     baseUrl: process.env.ACCEPTANCE_BASE_URL,
     environment: process.env.ACCEPTANCE_ENVIRONMENT,
   };
+  if (test.requires.includes("staging")) {
+    // Sentetik yükleyici kimliği ve müdürlük kapsamı yalnız uygulamayı süren
+    // testlere verilir; kalıcı sır değildir, staging kimlik başlığıdır.
+    config.uploaderIdentity = process.env.ACCEPTANCE_UPLOADER_IDENTITY;
+    config.unit = process.env.ACCEPTANCE_UPLOADER_UNIT;
+  }
   if (test.requires.includes("s3") || test.requires.includes("providerLockProfile")
       || test.requires.includes("restoreDrill")) {
     config.s3 = {

@@ -168,14 +168,20 @@ test("kurumsal onaylar teknik kapıdan ayrı ve değişmez kanıta bağlıdır",
 
 test("yetenek çözümü HTTPS, sentetik staging ve fiziksel ayrım arar", () => {
   assert.equal(resolveCapabilities({}).staging, false);
-  const staged = resolveCapabilities({
+  const stagingEnv = {
     ACCEPTANCE_BASE_URL: "https://staging.example",
     ARCHIVE_MIGRATION_TOKEN: "x".repeat(32),
     ACCEPTANCE_ENVIRONMENT: "staging",
     ACCEPTANCE_SYNTHETIC_ONLY: "enabled",
-  });
+    ACCEPTANCE_UPLOADER_IDENTITY: "acceptance-uploader@sivas.bel.tr",
+  };
+  const staged = resolveCapabilities(stagingEnv);
   assert.equal(staged.staging, true);
   assert.deepEqual(missingCapabilities(TEST_CATALOG.find((entry) => entry.id === "K-1"), staged), []);
+
+  // Sentetik yükleyici kimliği olmadan staging yetenekleri BLOCKED kalır.
+  const noIdentity = resolveCapabilities({ ...stagingEnv, ACCEPTANCE_UPLOADER_IDENTITY: "" });
+  assert.equal(noIdentity.staging, false);
 
   const unsafe = resolveCapabilities({
     ACCEPTANCE_BASE_URL: "http://production.example",
