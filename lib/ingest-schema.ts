@@ -427,7 +427,9 @@ export const ingestTableStatements: readonly string[] = [
     id TEXT PRIMARY KEY NOT NULL,
     ticket_hash TEXT NOT NULL UNIQUE,
     user_id TEXT NOT NULL,
+    document_id TEXT NOT NULL REFERENCES archive_documents(id) ON DELETE CASCADE,
     binary_object_id TEXT NOT NULL REFERENCES binary_objects(id) ON DELETE CASCADE,
+    object_class TEXT NOT NULL,
     scope TEXT NOT NULL,
     purpose TEXT NOT NULL,
     expires_at TEXT NOT NULL,
@@ -435,8 +437,10 @@ export const ingestTableStatements: readonly string[] = [
     revoked_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (scope IN ('VIEW', 'DOWNLOAD')),
+    CHECK (object_class IN ('original', 'access')),
     CHECK (length(ticket_hash) = 64),
-    CHECK (length(trim(purpose)) > 0)
+    CHECK ((scope = 'VIEW' AND object_class = 'access' AND purpose = 'DOCUMENT_REVIEW')
+      OR (scope = 'DOWNLOAD' AND object_class = 'original' AND purpose = 'ORIGINAL_DOWNLOAD'))
   )`,
   "CREATE INDEX IF NOT EXISTS access_tickets_user_expiry_idx ON access_tickets (user_id, expires_at)",
   "CREATE INDEX IF NOT EXISTS access_tickets_object_idx ON access_tickets (binary_object_id)",
@@ -458,8 +462,26 @@ export const ingestTableStatements: readonly string[] = [
     revoked_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (length(session_hash) = 64),
-    CHECK (object_class IN ('original', 'access', 'ocr', 'preservation', 'thumbnail')),
-    CHECK (length(trim(purpose)) > 0)
+    CHECK (object_class = 'access'),
+    CHECK (purpose = 'DOCUMENT_REVIEW')
   )`,
   "CREATE INDEX IF NOT EXISTS access_sessions_user_absolute_idx ON access_sessions (user_id, absolute_expires_at)",
+  `CREATE TRIGGER IF NOT EXISTS access_tickets_binding_guard_insert
+    BEFORE INSERT ON access_tickets
+    WHEN NOT EXISTS (SELECT 1 FROM binary_objects o
+      WHERE o.id = NEW.binary_object_id AND o.document_id = NEW.document_id
+        AND o.object_class = NEW.object_class AND o.retention_status <> 'DISPOSED'
+        AND ((NEW.scope = 'VIEW' AND NEW.object_class = 'access'
+          AND NEW.purpose = 'DOCUMENT_REVIEW' AND o.bucket_or_namespace = 'DERIVATIVE_FILES')
+          OR (NEW.scope = 'DOWNLOAD' AND NEW.object_class = 'original'
+          AND NEW.purpose = 'ORIGINAL_DOWNLOAD' AND o.bucket_or_namespace = 'ARCHIVE_FILES')))
+    BEGIN SELECT RAISE(ABORT, 'Access ticket binding is invalid'); END`,
+  `CREATE TRIGGER IF NOT EXISTS access_tickets_binding_immutable
+    BEFORE UPDATE OF ticket_hash, user_id, document_id, binary_object_id, object_class,
+      scope, purpose, expires_at, created_at ON access_tickets
+    BEGIN SELECT RAISE(ABORT, 'Access ticket binding is immutable'); END`,
+  `CREATE TRIGGER IF NOT EXISTS access_sessions_binding_immutable
+    BEFORE UPDATE OF session_hash, access_ticket_id, user_id, document_id,
+      binary_object_id, object_class, purpose, absolute_expires_at, created_at ON access_sessions
+    BEGIN SELECT RAISE(ABORT, 'Access session binding is immutable'); END`,
 ];

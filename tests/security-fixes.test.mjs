@@ -46,7 +46,11 @@ test("görüntüleme ve indirme ayrı yetkilidir ve denetlenir", async () => {
   assert.match(authorization, /viewer: \["document\.read"\]/);
   // F1.9: yetki ayrımı bilet üretiminde uygulanır; dosya rotası bilet/oturum ister.
   assert.match(ticketRoute, /scope === "DOWNLOAD" \? "document\.download" : "document\.read"/);
-  assert.match(fileRoute, /TICKET_REQUIRED/);
+  assert.match(fileRoute, /isDownload \? "document\.download" : "document\.read"/);
+  assert.match(fileRoute, /CREDENTIAL_REQUIRED/);
+  assert.match(fileRoute, /authorization/);
+  assert.match(fileRoute, /URL_CREDENTIAL_REJECTED/);
+  assert.doesNotMatch(fileRoute, /searchParams\.get\("ticket"\)/);
   assert.match(fileRoute, /document\.access-denied/);
   assert.match(fileRoute, /document\.downloaded/);
   assert.match(fileRoute, /document\.viewed/);

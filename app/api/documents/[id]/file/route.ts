@@ -2,12 +2,15 @@ import { writeAuditEvent } from "../../../../../lib/audit";
 import { authorizeRequest, canAccessUnit } from "../../../../../lib/authorization";
 import {
   AccessTicketError, consumeDownloadTicket, exchangeViewTicket,
-  getObjectReaderForNamespace, requireArchiveSchema, getArchiveBindings,
-  jsonError, touchViewSession, type ViewSession,
+  getArchiveBindings, getDerivativeViewReader, getOriginalDownloadReader,
+  jsonError, requireArchiveSchema, revokeViewSession, touchViewSession,
+  type AccessScope, type ViewSession,
 } from "../../../../../lib/archive-storage";
+import { logEvent } from "../../../../../lib/observability";
 
 type RouteContext = { params: Promise<{ id: string }> };
-type FileRecord = { original_name: string; unit: string; reference_no: string };
+type FileRecord = { original_name: string; unit: string };
+type Credential = { kind: "TICKET" | "SESSION"; token: string };
 
 type ServableObject = {
   binary_object_id: string;
@@ -22,112 +25,139 @@ type ServableObject = {
   purpose: string;
 };
 
+function accessCredential(request: Request): Credential | null {
+  const value = request.headers.get("authorization")?.trim() ?? "";
+  const match = /^Archive(Ticket|Session) ([A-Za-z0-9_-]{43})$/.exec(value);
+  if (!match) return null;
+  return { kind: match[1] === "Ticket" ? "TICKET" : "SESSION", token: match[2] };
+}
+
 /**
- * F1.9 / ADR-015 — Belge içeriği yalnız tek kullanımlık bilet veya ondan
- * türeyen görüntüleme oturumuyla sunulur; kalıcı yetkiyle doğrudan indirme
- * yolu kapalıdır.
- *
- * - `?ticket=` (VIEW): bilet tek seferde tüketilir, süreli oturum açılır ve
- *   içerik döner; oturum tokenı yalnız yanıt başlığında görünür.
- * - `?session=` (VIEW): oturum doğrulanır, boşta kalma penceresi ilerletilir
- *   ve `Range` istekleri desteklenir (PDF görüntüleyiciler için).
- * - `?ticket=` (DOWNLOAD): asıl tek seferlik teslim edilir; oturum açılmaz.
- *
- * Bilet/oturum kullanıcı+belge+nesne+amaç kapsamındadır; bütün redler tek tip
- * yanıttır ve denetim kaydına maskeli gerekçeyle yazılır. Sunulan içerik bilet
- * anındaki yetkili nesneye sabitlenir; kuşak değişse bile oturum kendi
- * nesnesini sunar. Denetim yazılamıyorsa içerik sunulmaz.
+ * Açık bilet/oturum yalnız Authorization başlığında taşınır. VIEW yalnız türev,
+ * DOWNLOAD yalnız asıl okuma rolüne ulaşabilir; URL kimlik bilgisi kabul edilmez.
  */
 export async function GET(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const bindings = getArchiveBindings();
   const schemaError = await requireArchiveSchema(request, bindings.DB);
   if (schemaError) return schemaError;
-  const url = new URL(request.url);
-  const ticketToken = url.searchParams.get("ticket");
-  const sessionToken = url.searchParams.get("session");
 
-  // Bilet kullanıcıya bağlıdır: kimliği doğrulanmamış istek bilet çalınsa bile içerik alamaz.
-  const principal = await authorizeRequest(request, bindings.DB, "document.read", bindings.ARCHIVE_ADMIN_EMAILS);
+  const url = new URL(request.url);
+  const credential = accessCredential(request);
+  const declaredScope = request.headers.get("x-archive-access-scope");
+  const scope: AccessScope | null = declaredScope === "VIEW" || declaredScope === "DOWNLOAD"
+    ? declaredScope : null;
+  const isDownload = credential?.kind === "TICKET" && scope === "DOWNLOAD";
+  const principal = await authorizeRequest(request, bindings.DB,
+    isDownload ? "document.download" : "document.read", bindings.ARCHIVE_ADMIN_EMAILS);
   if (principal instanceof Response) return principal;
+
   const record = await bindings.DB.prepare(
-    "SELECT original_name, unit, reference_no FROM archive_documents WHERE id = ?",
+    "SELECT original_name, unit FROM archive_documents WHERE id = ?",
   ).bind(id).first<FileRecord>();
   if (!record) return jsonError("Belge bulunamadı.", 404);
-  if (!canAccessUnit(principal, record.unit)) return jsonError("Bu belge müdürlük kapsamınızın dışında.", 403);
+  if (!canAccessUnit(principal, record.unit)) {
+    return jsonError("Bu belge müdürlük kapsamınızın dışında.", 403);
+  }
 
   const denied = async (code: string) => {
-    // Yetki reddi de denetlenir (kanıt rehberi T-05); token asla yazılmaz.
     try {
       await writeAuditEvent(bindings.DB, {
         documentId: id,
         actor: principal.email,
         action: "document.access-denied",
-        details: { referenceNo: record.reference_no, reason: code },
+        details: { reason: code },
       });
-    } catch { /* red zaten veriliyor; denetim hatası reddi engellemez */ }
+    } catch {
+      logEvent("error", "document.access-denied-audit-failed", { documentId: id });
+    }
     return jsonError("Erişim bileti veya oturumu geçersiz.", 403);
   };
 
+  // Kimlik bilgisini URL'ye koyan eski/tehlikeli istemciler açıkça reddedilir.
+  if (url.searchParams.has("ticket") || url.searchParams.has("session")) {
+    return await denied("URL_CREDENTIAL_REJECTED");
+  }
+  if (!credential || !scope || (credential.kind === "SESSION" && scope !== "VIEW")) {
+    return await denied("CREDENTIAL_REQUIRED");
+  }
+
   let servable: ServableObject;
   let session: ViewSession | null = null;
-  let isDownload = false;
   try {
-    if (sessionToken) {
+    if (credential.kind === "SESSION") {
       const active = await touchViewSession(bindings.DB, {
-        token: sessionToken, userId: principal.email, documentId: id,
+        token: credential.token, userId: principal.email, documentId: id,
       });
       servable = { ...active, binary_object_id: active.binary_object_id };
-    } else if (ticketToken) {
-      const scope = url.searchParams.get("scope") === "DOWNLOAD" ? "DOWNLOAD" : "VIEW";
-      if (scope === "DOWNLOAD") {
-        isDownload = true;
-        const consumed = await consumeDownloadTicket(bindings.DB, {
-          token: ticketToken, userId: principal.email, documentId: id, scope: "DOWNLOAD",
-        });
-        servable = { ...consumed, binary_object_id: consumed.binary_object_id };
-      } else {
-        const exchanged = await exchangeViewTicket(bindings.DB, {
-          token: ticketToken, userId: principal.email, documentId: id, scope: "VIEW",
-        });
-        session = exchanged.session;
-        servable = { ...exchanged.ticket, binary_object_id: exchanged.ticket.binary_object_id };
-      }
+    } else if (scope === "DOWNLOAD") {
+      const consumed = await consumeDownloadTicket(bindings.DB, {
+        token: credential.token, userId: principal.email, documentId: id,
+      });
+      servable = { ...consumed, binary_object_id: consumed.binary_object_id };
     } else {
-      return await denied("TICKET_REQUIRED");
+      const exchanged = await exchangeViewTicket(bindings.DB, {
+        token: credential.token, userId: principal.email, documentId: id,
+      });
+      session = exchanged.session;
+      servable = { ...exchanged.ticket, binary_object_id: exchanged.ticket.binary_object_id };
     }
   } catch (error) {
     if (error instanceof AccessTicketError) return await denied(error.code);
     throw error;
   }
 
-  // Range yalnız oturum isteklerinde desteklenir; değişim ve indirme tam gövde döner.
-  const rangeHeader = sessionToken ? request.headers.get("range") : null;
+  const revokeUnreturnedSession = async () => {
+    if (session) await revokeViewSession(bindings.DB, session.sessionId).catch(() => undefined);
+  };
+
+  const rangeHeader = credential.kind === "SESSION" ? request.headers.get("range") : null;
   let range: { offset: number; length: number } | null = null;
   if (rangeHeader) {
     const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
     if (!match || (!match[1] && !match[2])) {
       return new Response(null, { status: 416, headers: { "content-range": `bytes */${servable.byte_size}` } });
     }
-    const start = match[1] ? Number(match[1]) : servable.byte_size - Number(match[2]);
-    const end = match[1] && match[2] ? Math.min(Number(match[2]), servable.byte_size - 1) : servable.byte_size - 1;
-    if (!Number.isSafeInteger(start) || start < 0 || start > end || start >= servable.byte_size) {
+    const suffix = match[1] ? null : Number(match[2]);
+    const start = suffix === null ? Number(match[1]) : Math.max(0, servable.byte_size - suffix);
+    const end = match[1] && match[2]
+      ? Math.min(Number(match[2]), servable.byte_size - 1) : servable.byte_size - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)
+      || suffix === 0 || start < 0 || start > end || start >= servable.byte_size) {
       return new Response(null, { status: 416, headers: { "content-range": `bytes */${servable.byte_size}` } });
     }
     range = { offset: start, length: end - start + 1 };
   }
 
+  const correctBinding = isDownload
+    ? servable.object_class === "original" && servable.bucket_or_namespace === "ARCHIVE_FILES"
+    : servable.object_class === "access" && servable.bucket_or_namespace === "DERIVATIVE_FILES";
+  if (!correctBinding) {
+    await revokeUnreturnedSession();
+    return jsonError("Erişim kapsamı nesne sınıfıyla uyuşmuyor.", 503);
+  }
+
   let object;
   try {
-    const reader = getObjectReaderForNamespace(bindings, servable.bucket_or_namespace);
+    const reader = isDownload
+      ? getOriginalDownloadReader(bindings)
+      : getDerivativeViewReader(bindings);
     object = await reader.get(servable.object_key, range ? { range } : undefined);
   } catch {
+    await revokeUnreturnedSession();
     return jsonError("Belge depolama okuma rolü kullanılamıyor.", 503);
   }
-  if (!object) return jsonError("Dosya kasada bulunamadı.", 404);
+  if (!object) {
+    await revokeUnreturnedSession();
+    return jsonError("Dosya kasada bulunamadı.", 404);
+  }
+  const rangeMismatch = range && (object.range?.offset !== range.offset
+    || object.range?.length !== range.length || object.bodySize !== range.length);
   if (object.size !== servable.byte_size
-    || (object.contentType && object.contentType !== servable.media_type)
-    || (!range && object.range !== null)) {
+    || object.contentType !== servable.media_type
+    || (!range && object.range !== null)
+    || rangeMismatch) {
+    await revokeUnreturnedSession();
     return jsonError("Dosya kasası kanıtı yetkili nesne kaydıyla uyuşmuyor.", 503);
   }
 
@@ -137,9 +167,7 @@ export async function GET(request: Request, context: RouteContext) {
       actor: principal.email,
       action: isDownload ? "document.downloaded" : "document.viewed",
       details: {
-        referenceNo: record.reference_no,
         servedObjectClass: servable.object_class,
-        sha256: servable.sha256,
         byteSize: servable.byte_size,
         purpose: servable.purpose,
         sessionId: session?.sessionId ?? null,
@@ -147,10 +175,11 @@ export async function GET(request: Request, context: RouteContext) {
       },
     });
   } catch {
+    await revokeUnreturnedSession();
     return jsonError("Erişim denetim kaydı oluşturulamadı; dosya sunulmadı.", 503);
   }
 
-  const safeName = record.original_name.replace(/[\r\n"]/g, "_");
+  const safeName = record.original_name.replace(/[\r\n"\\/]/g, "_");
   const bodySize = range ? object.bodySize : object.size;
   return new Response(object.body, {
     status: range ? 206 : 200,
@@ -158,13 +187,13 @@ export async function GET(request: Request, context: RouteContext) {
       "content-type": servable.media_type,
       "content-length": String(bodySize),
       ...(range ? { "content-range": `bytes ${range.offset}-${range.offset + range.length - 1}/${servable.byte_size}` } : {}),
-      ...(sessionToken || session ? { "accept-ranges": "bytes" } : {}),
+      ...(!isDownload ? { "accept-ranges": "bytes" } : {}),
       "content-disposition": `${isDownload ? "attachment" : "inline"}; filename="${safeName}"`,
-      // Belge içeriği paylaşılan önbelleklere ve tarayıcı diskine yazılmamalıdır.
       "cache-control": "no-store, private",
+      "pragma": "no-cache",
+      "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
       "x-archive-object-class": servable.object_class,
-      // Değişim yanıtı oturum tokenını bir kez verir; istemci Range için kullanır.
       ...(session ? {
         "x-archive-session": session.token,
         "x-archive-session-idle-expires": session.idleExpiresAt,

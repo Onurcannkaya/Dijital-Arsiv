@@ -297,7 +297,7 @@ Yeni tablolar:
 | `integrity_findings` | Nesne bazlı kalıcı bütünlük bulgusu ve çözüm durumu |
 | `reconciliation_runs` | Depo–veritabanı uzlaştırma koşusu ve sayısal sonuç |
 | `reconciliation_findings` | Sahipsiz nesne/dosyasız kayıt ve yetkili karar |
-| `access_tickets` | Özetlenmiş bilet, kapsam, amaç, son kullanma ve tüketilme zamanı |
+| `access_tickets` | Özetlenmiş bilet, belge+nesne+sınıf bağı, kapalı amaç kodu, son kullanma ve tüketilme zamanı |
 
 `ingest_objects`, kabul öncesindeki nesnelerin tek doğruluk kaynağıdır.
 `binary_objects` yalnız kabul edilmiş asıl ve türev nesnelerin yetkili
@@ -675,20 +675,33 @@ süreli kullanıcı+belge kapsamlı oturum üretir. Açık indirme bileti ayrı 
 - Kullanıcı veya tarayıcı kalıcı bucket erişim anahtarı alamaz.
 - Yetki reddi ve başarılı erişim, hassas veri sızdırmadan denetim kaydına girer.
 
-**Uygulama durumu (F1.9 — bilet bölümü):** Şema v21 ile `access_sessions`
-eklendi. `lib/access-tickets.ts` ADR-015 profilini uygular: 256 bitlik opak
-bilet 60 saniye geçerlidir ve tek UPDATE içinde bütün bağlama koşullarıyla
-(kullanıcı, belge, kapsam, süre, tek kullanım, iptal) atomik tüketilir; VIEW
-değişimi 15 dk boşta / 30 dk mutlak süreli, nesneye sabitlenmiş görüntüleme
-oturumu üretir ve boşta kalma penceresi mutlak tavana kırpılır. DOWNLOAD
-bileti oturum üretmeyen tek seferlik teslimdir. Veritabanı ve denetim yalnız
-SHA-256 özet taşır; bütün redler tek tip yanıttır ve `document.access-denied`
-olayıyla denetlenir. `/api/documents/[id]/file` artık bilet/oturum olmadan
-içerik sunmaz; oturum istekleri `Range` destekler ve içerik bilet anındaki
-yetkili nesneye sabitlenir. Bilet üretimi `POST /api/documents/[id]/access-ticket`
-ucundadır ve arayüz görüntüleme/indirme için bu akışı kullanır. Depolama
-düzlemi rol/IAM ayrımı, gerçek kova kimlik testleri (T-04/T-05/T-06) ve
-kalıcı anahtar sızıntısı ağ izi denetimi staging koşusuna (F1.11) aittir.
+**Uygulama durumu (F1.9 — uygulama kapısı):** Şema v22 ile bilet doğrudan
+`document_id` + `binary_object_id` + `object_class` bağı taşır; kapsam/amaç
+birleşimi kapalıdır (`VIEW` + `access` + `DOCUMENT_REVIEW`, `DOWNLOAD` +
+`original` + `ORIGINAL_DOWNLOAD`). Bağlama alanları veritabanı tetikleyicileriyle
+değiştirilemez ve nesnenin sınıfı/ad alanı her üretim ve tüketimde yeniden
+doğrulanır. Bilet kaydı ile `document.ticket-issued` denetim olayı aynı atomik
+batch'te yazılır; VIEW biletinin tüketimi ile oturum INSERT'i de tek batch'tir,
+böylece oturum oluşturulamazsa bilet yanmaz.
+
+256 bitlik açık bilet/oturum yalnız `Authorization: ArchiveTicket …` veya
+`Authorization: ArchiveSession …` başlığında taşınır. URL sorgusundaki eski
+kimlik bilgileri reddedilir; istemci geçmişi, referrer ve olağan proxy URL
+loglarına token düşmez. Biçimsiz tokenlar hash işleminden önce sabit maliyetle
+reddedilir. Her tüketimde güncel kullanıcı, müdürlük ve kapsam yetkisi yeniden
+kontrol edilir; DOWNLOAD isteği dosya rotasında da `document.download` ister.
+VIEW yalnız `DERIVATIVE_FILES` dar okuyucusuna, DOWNLOAD yalnız `ARCHIVE_FILES`
+dar okuyucusuna ulaşır. PDF dışı belgelerde de erişim türevi yoksa asıla düşülmez.
+Range yanıtında sağlayıcının offset/uzunluk/gövde boyutu ayrıca doğrulanır ve
+denetim yazılamazsa içerik sunulmaz.
+
+Bu kapı uygulama içindeki yetenek ayrımını ve negatif testleri tamamlar. Ancak
+politikanın istediği **depolama düzlemi görev ayrılığı**, aynı Worker'a iki kova
+bağlamakla tamamlanmış sayılmaz: görüntüleme ve asıl indirme için ayrı servis
+kimlikleri/service binding yerleşimi, kova+işlem kapsamlı IAM politikaları ve
+T-04/T-05/T-06 canlı ağ izi kanıtları staging koşusuna (F1.11) aittir. Büyük
+indirmelerde tarayıcı `fetch`/Blob tamponu yerine akışlı kaydetme adaptörü de
+istemci performans sertleştirmesi olarak açık tutulur.
 
 ### F1.10 — Yedek geri yükleme ve sağlayıcı taşınabilirliği
 

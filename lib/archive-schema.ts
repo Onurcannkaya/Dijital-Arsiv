@@ -41,7 +41,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 21;
+export const ARCHIVE_SCHEMA_VERSION = 22;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -734,6 +734,34 @@ async function createAccessSessionTable(db: D1Database) {
   }
 }
 
+/** F1.9 sertleştirmesi: bilet belge+sınıf bağını ve kapalı amaç kodunu taşır. */
+async function hardenAccessTicketBindings(db: D1Database) {
+  if (!(await tableExists(db, "access_tickets"))) return;
+  const columns = await columnNames(db, "access_tickets");
+  if (!columns.has("document_id")) {
+    await db.prepare("ALTER TABLE access_tickets ADD COLUMN document_id TEXT REFERENCES archive_documents(id)").run();
+  }
+  if (!columns.has("object_class")) {
+    await db.prepare("ALTER TABLE access_tickets ADD COLUMN object_class TEXT").run();
+  }
+  await db.prepare(`UPDATE access_tickets SET
+      document_id = (SELECT document_id FROM binary_objects WHERE id = access_tickets.binary_object_id),
+      object_class = (SELECT object_class FROM binary_objects WHERE id = access_tickets.binary_object_id),
+      purpose = CASE scope WHEN 'VIEW' THEN 'DOCUMENT_REVIEW' ELSE 'ORIGINAL_DOWNLOAD' END
+    WHERE document_id IS NULL OR object_class IS NULL
+      OR purpose NOT IN ('DOCUMENT_REVIEW', 'ORIGINAL_DOWNLOAD')`).run();
+  if (await tableExists(db, "access_sessions")) {
+    await db.prepare(`UPDATE access_sessions SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP)
+      WHERE object_class <> 'access'`).run();
+    await db.prepare(`UPDATE access_sessions SET purpose = 'DOCUMENT_REVIEW'
+      WHERE object_class = 'access' AND purpose <> 'DOCUMENT_REVIEW'`).run();
+  }
+  for (const statement of ingestTableStatements.filter((sql) =>
+    sql.includes("CREATE TRIGGER IF NOT EXISTS access_"))) {
+    await db.prepare(statement).run();
+  }
+}
+
 /** F1.8 sertleştirmesi: kaynak kopyanın bekleme ve ayrı tasfiye kanıtı. */
 async function migrateLegacyKeyRetentionEvidence(db: D1Database) {
   if (!(await tableExists(db, "legacy_key_migrations"))) return;
@@ -1172,6 +1200,8 @@ const structuralMigrations: MigrationStep[] = [
   { version: 20, run: migrateLegacyKeyRetentionEvidence },
   // 20 → 21: tek kullanımlık bilet değişimi ve süreli görüntüleme oturumu.
   { version: 21, run: createAccessSessionTable },
+  // 21 → 22: belge+sınıf bağı, kapalı amaç kodu ve değişmez bağlama tetikleyicileri.
+  { version: 22, run: hardenAccessTicketBindings },
 ];
 
 /**

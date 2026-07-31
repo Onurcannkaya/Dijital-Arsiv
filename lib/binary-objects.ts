@@ -61,8 +61,8 @@ function isCompleteGeneration(segments: StoredObject[], generation: CompletedGen
 /**
  * PDF görüntüleme yalnız tamamlanmış ve eksiksiz üretim kuşağından yapılır.
  * Aynı renderer/profil yeniden çalışsa bile kuşak kimliği segment karışmasını
- * engeller. PDF dışı türlerde mevcut erişim türevi tercih edilir; yoksa asıl
- * fallback F1.8/F1.9 geçişi boyunca sürer.
+ * engeller. PDF dışı türlerde de yalnız erişim türevi döner; türev yoksa
+ * asıl nesneye düşmeden üretimin beklenmesi bildirilir.
  */
 export async function resolveViewableObject(
   db: D1Database,
@@ -101,5 +101,5 @@ export async function resolveViewableObject(
     FROM binary_objects
     WHERE document_id = ? AND object_class = 'access' AND retention_status <> 'DISPOSED'
     ORDER BY created_at DESC LIMIT 1`).bind(documentId).first<StoredObject>();
-  return access ? { object: access, objectClass: "access" } : { object: original, objectClass: "original" };
+  return access ? { object: access, objectClass: "access" } : { pendingDerivative: true };
 }

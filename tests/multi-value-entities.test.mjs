@@ -148,7 +148,8 @@ test("nesne kaydı asıl dosyanın yetkili listesidir", async () => {
   // üretiminde yapılır ve dosya rotası kayıtlı ad alanından okur.
   assert.match(storage, /resolveOriginalObject/);
   assert.match(ticket, /resolveOriginalObject/);
-  assert.match(file, /getObjectReaderForNamespace/);
+  assert.match(file, /getDerivativeViewReader/);
+  assert.match(file, /getOriginalDownloadReader/);
   assert.match(file, /servable\.object_key/);
   assert.match(processor, /resolveOriginalObject/);
 });

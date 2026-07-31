@@ -41,7 +41,8 @@ export { classifyObjectKey, maskObjectKey, secureTargetKey } from "./key-classif
 export {
   ACCESS_SESSION_ABSOLUTE_MS, ACCESS_SESSION_IDLE_MS, ACCESS_TICKET_TTL_SECONDS,
   AccessTicketError, consumeDownloadTicket, exchangeViewTicket, issueAccessTicket,
-  touchViewSession, type AccessScope, type ViewSession,
+  purposeForScope, revokeViewSession, touchViewSession,
+  type AccessPurpose, type AccessScope, type ViewSession,
 } from "./access-tickets.ts";
 export { isPendingDerivative, type PendingDerivative } from "./binary-objects.ts";
 
@@ -99,6 +100,21 @@ export function getObjectReaderForNamespace(
     return new R2ObjectReader(bindings.DERIVATIVE_FILES);
   }
   throw new Error(`Depolama okuma rolü yapılandırılmamış: ${namespace}`);
+}
+
+/** VIEW yolu yalnız türev kovasının dar okuma rolünü alabilir. */
+export function getDerivativeViewReader(
+  bindings: Pick<ArchiveBindings, "DERIVATIVE_FILES">,
+) {
+  if (!bindings.DERIVATIVE_FILES) throw new Error("DERIVATIVE_FILES görüntüleme rolü yapılandırılmamış.");
+  return new R2ObjectReader(bindings.DERIVATIVE_FILES);
+}
+
+/** DOWNLOAD yolu yalnız asıl kovanın dar okuma rolünü alabilir. */
+export function getOriginalDownloadReader(
+  bindings: Pick<ArchiveBindings, "ARCHIVE_FILES">,
+) {
+  return new R2ObjectReader(bindings.ARCHIVE_FILES);
 }
 
 /** F1.5 promotion role: quarantine read, immutable vault write, and vault read-back. */

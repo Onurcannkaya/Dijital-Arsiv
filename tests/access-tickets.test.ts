@@ -62,7 +62,8 @@ const USER = "memur@sivas.bel.tr";
 
 async function issueView(target: Fixture, binaryObjectId: string) {
   return await issueAccessTicket(target.db, {
-    userId: USER, binaryObjectId, scope: "VIEW", purpose: "belge inceleme", now: target.now,
+    userId: USER, documentId: "d1", binaryObjectId, scope: "VIEW",
+    purpose: "DOCUMENT_REVIEW", now: target.now,
   });
 }
 
@@ -82,7 +83,7 @@ test("VIEW bileti tek sefer tüketilir, oturum açılır ve açık token saklanm
     assert.match(stored.ticket_hash, /^[a-f0-9]{64}$/);
 
     const exchanged = await exchangeViewTicket(target.db, {
-      token: issued.token, userId: USER, documentId: "d1", scope: "VIEW", now: target.now,
+      token: issued.token, userId: USER, documentId: "d1", now: target.now,
     });
     assert.equal(exchanged.ticket.object_class, "access");
     assert.equal(exchanged.ticket.bucket_or_namespace, "DERIVATIVE_FILES");
@@ -94,7 +95,7 @@ test("VIEW bileti tek sefer tüketilir, oturum açılır ve açık token saklanm
 
     // Tüketilmiş bilet ikinci kez değiştirilemez.
     await assert.rejects(exchangeViewTicket(target.db, {
-      token: issued.token, userId: USER, documentId: "d1", scope: "VIEW", now: target.now,
+      token: issued.token, userId: USER, documentId: "d1", now: target.now,
     }), rejects("TICKET_INVALID"));
   } finally {
     target.db.close();
@@ -111,23 +112,23 @@ test("süresi dolan, iptal edilen veya yanlış bağlamda kullanılan bilet redd
     // Yanlış kullanıcı/belge/kapsam: red edilir ama bilet YANMAZ; meşru sahibi kullanabilir.
     const bound = await issueView(target, d1.accessId);
     await assert.rejects(exchangeViewTicket(target.db, {
-      token: bound.token, userId: "baskasi@sivas.bel.tr", documentId: "d1", scope: "VIEW", now: target.now,
+      token: bound.token, userId: "baskasi@sivas.bel.tr", documentId: "d1", now: target.now,
     }), rejects("TICKET_INVALID"));
     await assert.rejects(exchangeViewTicket(target.db, {
-      token: bound.token, userId: USER, documentId: "d2", scope: "VIEW", now: target.now,
+      token: bound.token, userId: USER, documentId: "d2", now: target.now,
     }), rejects("TICKET_INVALID"));
     await assert.rejects(consumeDownloadTicket(target.db, {
-      token: bound.token, userId: USER, documentId: "d1", scope: "DOWNLOAD", now: target.now,
+      token: bound.token, userId: USER, documentId: "d1", now: target.now,
     }), rejects("TICKET_INVALID"));
     await exchangeViewTicket(target.db, {
-      token: bound.token, userId: USER, documentId: "d1", scope: "VIEW", now: target.now,
+      token: bound.token, userId: USER, documentId: "d1", now: target.now,
     });
 
     // Süre dolumu: 60 saniyelik pencerenin bir milisaniye sonrası geçersizdir.
     const expiring = await issueView(target, d1.accessId);
     target.advance(ACCESS_TICKET_TTL_SECONDS * 1000 + 1);
     await assert.rejects(exchangeViewTicket(target.db, {
-      token: expiring.token, userId: USER, documentId: "d1", scope: "VIEW", now: target.now,
+      token: expiring.token, userId: USER, documentId: "d1", now: target.now,
     }), rejects("TICKET_INVALID"));
 
     // İptal edilen bilet kullanılamaz.
@@ -135,7 +136,7 @@ test("süresi dolan, iptal edilen veya yanlış bağlamda kullanılan bilet redd
     target.db.raw.prepare("UPDATE access_tickets SET revoked_at = ? WHERE id = ?")
       .run(target.now().toISOString(), revoked.ticketId);
     await assert.rejects(exchangeViewTicket(target.db, {
-      token: revoked.token, userId: USER, documentId: "d1", scope: "VIEW", now: target.now,
+      token: revoked.token, userId: USER, documentId: "d1", now: target.now,
     }), rejects("TICKET_INVALID"));
   } finally {
     target.db.close();
@@ -149,7 +150,7 @@ test("oturum boşta kalma penceresi ilerler ama mutlak süreyi aşamaz", async (
     const objects = seedDocument(target, "d1");
     const issued = await issueView(target, objects.accessId);
     const { session } = await exchangeViewTicket(target.db, {
-      token: issued.token, userId: USER, documentId: "d1", scope: "VIEW", now: target.now,
+      token: issued.token, userId: USER, documentId: "d1", now: target.now,
     });
 
     // 10'ar dakikalık kullanım: boşta kalma penceresi ilerler, mutlak tavana kırpılır.
@@ -181,7 +182,7 @@ test("boşta kalan oturum ve yanlış kullanıcı/belge oturumu reddedilir", asy
     seedDocument(target, "d2");
     const issued = await issueView(target, objects.accessId);
     const { session } = await exchangeViewTicket(target.db, {
-      token: issued.token, userId: USER, documentId: "d1", scope: "VIEW", now: target.now,
+      token: issued.token, userId: USER, documentId: "d1", now: target.now,
     });
 
     await assert.rejects(touchViewSession(target.db, {
@@ -206,17 +207,108 @@ test("DOWNLOAD bileti asıla bağlanır, tek seferliktir ve oturum üretmez", as
     await applyArchiveMigrations(target.db);
     const objects = seedDocument(target, "d1");
     const issued = await issueAccessTicket(target.db, {
-      userId: USER, binaryObjectId: objects.originalId, scope: "DOWNLOAD",
-      purpose: "asıl belge indirme", now: target.now,
+      userId: USER, documentId: "d1", binaryObjectId: objects.originalId, scope: "DOWNLOAD",
+      purpose: "ORIGINAL_DOWNLOAD", now: target.now,
     });
     const consumed = await consumeDownloadTicket(target.db, {
-      token: issued.token, userId: USER, documentId: "d1", scope: "DOWNLOAD", now: target.now,
+      token: issued.token, userId: USER, documentId: "d1", now: target.now,
     });
     assert.equal(consumed.object_class, "original");
     assert.equal((target.db.raw.prepare("SELECT COUNT(*) AS count FROM access_sessions").get() as { count: number }).count, 0);
     await assert.rejects(consumeDownloadTicket(target.db, {
-      token: issued.token, userId: USER, documentId: "d1", scope: "DOWNLOAD", now: target.now,
+      token: issued.token, userId: USER, documentId: "d1", now: target.now,
     }), rejects("TICKET_INVALID"));
+  } finally {
+    target.db.close();
+  }
+});
+
+test("VIEW asla asıl nesneye, DOWNLOAD asla türeve bağlanamaz ve amaç kodu kapalıdır", async () => {
+  const target = fixture();
+  try {
+    await applyArchiveMigrations(target.db);
+    const objects = seedDocument(target, "d1");
+    await assert.rejects(issueAccessTicket(target.db, {
+      userId: USER, documentId: "d1", binaryObjectId: objects.originalId,
+      scope: "VIEW", purpose: "DOCUMENT_REVIEW", now: target.now,
+    }), /uygun yetkili nesne/);
+    await assert.rejects(issueAccessTicket(target.db, {
+      userId: USER, documentId: "d1", binaryObjectId: objects.accessId,
+      scope: "DOWNLOAD", purpose: "ORIGINAL_DOWNLOAD", now: target.now,
+    }), /uygun yetkili nesne/);
+    await assert.rejects(issueAccessTicket(target.db, {
+      userId: USER, documentId: "d1", binaryObjectId: objects.accessId,
+      scope: "VIEW", purpose: "ORIGINAL_DOWNLOAD", now: target.now,
+    }), /kapsamla/);
+    assert.equal((target.db.raw.prepare("SELECT COUNT(*) AS count FROM access_tickets")
+      .get() as { count: number }).count, 0);
+  } finally {
+    target.db.close();
+  }
+});
+
+test("oturum INSERT hatası bileti yakmaz; tüketim ve oturum tek atomik işlemdir", async () => {
+  const target = fixture();
+  try {
+    await applyArchiveMigrations(target.db);
+    const objects = seedDocument(target, "d1");
+    const first = await issueView(target, objects.accessId);
+    await exchangeViewTicket(target.db, {
+      token: first.token, userId: USER, documentId: "d1", now: target.now,
+      sessionId: "sabit-oturum",
+    });
+
+    const second = await issueView(target, objects.accessId);
+    await assert.rejects(exchangeViewTicket(target.db, {
+      token: second.token, userId: USER, documentId: "d1", now: target.now,
+      sessionId: "sabit-oturum",
+    }), rejects("TICKET_INVALID"));
+    const row = target.db.raw.prepare("SELECT consumed_at FROM access_tickets WHERE id = ?")
+      .get(second.ticketId) as { consumed_at: string | null };
+    assert.equal(row.consumed_at, null, "başarısız oturum INSERT'i bilet tüketimini geri alır");
+    assert.ok((await exchangeViewTicket(target.db, {
+      token: second.token, userId: USER, documentId: "d1", now: target.now,
+    })).session.token);
+  } finally {
+    target.db.close();
+  }
+});
+
+test("biçimsiz veya aşırı kısa kimlik bilgisi özetlenmeden tek tip reddedilir", async () => {
+  const target = fixture();
+  try {
+    await applyArchiveMigrations(target.db);
+    seedDocument(target, "d1");
+    await assert.rejects(exchangeViewTicket(target.db, {
+      token: "kısa", userId: USER, documentId: "d1", now: target.now,
+    }), rejects("TICKET_INVALID"));
+    await assert.rejects(touchViewSession(target.db, {
+      token: "x".repeat(10_000), userId: USER, documentId: "d1", now: target.now,
+    }), rejects("SESSION_INVALID"));
+  } finally {
+    target.db.close();
+  }
+});
+
+test("bilet bağlama alanları veritabanında değiştirilemez ve denetim serbest metin taşımaz", async () => {
+  const target = fixture();
+  try {
+    await applyArchiveMigrations(target.db);
+    const objects = seedDocument(target, "d1");
+    const issued = await issueView(target, objects.accessId);
+    const ticket = target.db.raw.prepare(`SELECT document_id, object_class, purpose
+      FROM access_tickets WHERE id = ?`).get(issued.ticketId) as Record<string, string>;
+    assert.equal(ticket.document_id, "d1");
+    assert.equal(ticket.object_class, "access");
+    assert.equal(ticket.purpose, "DOCUMENT_REVIEW");
+    assert.throws(() => target.db.raw.prepare(
+      "UPDATE access_tickets SET object_class = 'original' WHERE id = ?",
+    ).run(issued.ticketId));
+    const audit = target.db.raw.prepare(
+      "SELECT details_json FROM audit_events WHERE action = 'document.ticket-issued'",
+    ).get() as { details_json: string };
+    assert.ok(audit.details_json.includes("DOCUMENT_REVIEW"));
+    assert.ok(!audit.details_json.includes("belge inceleme"));
   } finally {
     target.db.close();
   }

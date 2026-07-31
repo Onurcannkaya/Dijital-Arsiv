@@ -381,8 +381,7 @@ test("görüntüleme erişim türevini, indirme aslı çözer", async () => {
 
     // Türev yokken PDF DIŞI tür asılı sunmak zorunda kalır ama sınıf bildirilir.
     const withoutDerivative = await resolveViewableObject(db, "d9");
-    assert.ok(withoutDerivative && !isPendingDerivative(withoutDerivative));
-    assert.equal(withoutDerivative.objectClass, "original");
+    assert.ok(withoutDerivative && isPendingDerivative(withoutDerivative));
 
     db.raw.prepare(`INSERT INTO binary_objects (id, document_id, object_class, object_key, media_type, byte_size, sha256, derived_from_id, generator)
       VALUES ('a9', 'd9', 'access', 'derivatives/d9/access/a9', 'image/jpeg', 120, 'sha-turev', 'o9', 'ocr:test')`).run();
@@ -422,6 +421,49 @@ test("v19 anahtar taşıma şeması kaynak bekleme ve tasfiye kanıtıyla v20'ye
     const columns = db.raw.prepare("PRAGMA table_info(legacy_key_migrations)").all() as Array<{ name: string }>;
     assert.ok(columns.some((column) => column.name === "source_retire_after"));
     assert.ok(columns.some((column) => column.name === "source_disposed_at"));
+  } finally {
+    db.close();
+  }
+});
+test("v21 erişim bileti şeması belge ve nesne sınıfı bağıyla v22'ye yükselir", async () => {
+  const db = createSqliteD1();
+  try {
+    await applyArchiveMigrations(db);
+    db.raw.exec("PRAGMA foreign_keys = OFF");
+    db.raw.exec("DROP TRIGGER IF EXISTS access_sessions_binding_immutable");
+    db.raw.exec("DROP TRIGGER IF EXISTS access_tickets_binding_immutable");
+    db.raw.exec("DROP TRIGGER IF EXISTS access_tickets_binding_guard_insert");
+    db.raw.exec("DROP TABLE access_sessions");
+    db.raw.exec("DROP TABLE access_tickets");
+    db.raw.exec(`CREATE TABLE access_tickets (
+      id TEXT PRIMARY KEY NOT NULL, ticket_hash TEXT NOT NULL UNIQUE,
+      user_id TEXT NOT NULL, binary_object_id TEXT NOT NULL REFERENCES binary_objects(id),
+      scope TEXT NOT NULL, purpose TEXT NOT NULL, expires_at TEXT NOT NULL,
+      consumed_at TEXT, revoked_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    db.raw.exec(`CREATE TABLE access_sessions (
+      id TEXT PRIMARY KEY NOT NULL, session_hash TEXT NOT NULL UNIQUE,
+      access_ticket_id TEXT NOT NULL UNIQUE REFERENCES access_tickets(id),
+      user_id TEXT NOT NULL, document_id TEXT NOT NULL REFERENCES archive_documents(id),
+      binary_object_id TEXT NOT NULL REFERENCES binary_objects(id), object_class TEXT NOT NULL,
+      purpose TEXT NOT NULL, idle_expires_at TEXT NOT NULL, absolute_expires_at TEXT NOT NULL,
+      last_used_at TEXT NOT NULL, revoked_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    db.raw.exec("PRAGMA foreign_keys = ON");
+    db.raw.prepare("UPDATE schema_state SET version = 21 WHERE id = 'archive'").run();
+
+    const result = await applyArchiveMigrations(db);
+    assert.deepEqual(result, { applied: true, from: 21, to: ARCHIVE_SCHEMA_VERSION });
+    const columns = db.raw.prepare("PRAGMA table_info(access_tickets)").all() as Array<{ name: string }>;
+    assert.ok(columns.some((column) => column.name === "document_id"));
+    assert.ok(columns.some((column) => column.name === "object_class"));
+    const triggers = db.raw.prepare(`SELECT name FROM sqlite_master
+      WHERE type = 'trigger' AND name LIKE 'access_%'`).all() as Array<{ name: string }>;
+    assert.deepEqual(triggers.map((row) => row.name).sort(), [
+      "access_sessions_binding_immutable",
+      "access_tickets_binding_guard_insert",
+      "access_tickets_binding_immutable",
+    ]);
   } finally {
     db.close();
   }

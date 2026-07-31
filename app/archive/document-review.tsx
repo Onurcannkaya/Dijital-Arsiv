@@ -65,10 +65,9 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const [previewMode,setPreviewMode]=useState<"image"|"text">("image");
   const [fileSrc,setFileSrc]=useState("");
 
-  /** F1.9: tek kullanımlık VIEW bileti alır ve içeriği yerel blob olarak tutar.
-   * Bilet tek sefer tüketildiği için <img>/<object> yeniden yüklemeleri blob
-   * URL üzerinden çalışır; açık token hiçbir yerde saklanmaz. */
-  const requestTicket=useCallback(async(scope:"VIEW"|"DOWNLOAD",purpose:string)=>{
+  /** Açık bilet URL'ye yazılmaz; Authorization başlığı log/geçmiş sızıntısını önler. */
+  const requestTicket=useCallback(async(scope:"VIEW"|"DOWNLOAD")=>{
+    const purpose=scope==="VIEW"?"DOCUMENT_REVIEW":"ORIGINAL_DOWNLOAD";
     const response=await fetch(`/api/documents/${documentId}/access-ticket`,{
       method:"POST",headers:{"content-type":"application/json"},
       body:JSON.stringify({scope,purpose}),
@@ -84,8 +83,10 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     let objectUrl="";
     (async()=>{
       try {
-        const ticket=await requestTicket("VIEW","belge inceleme");
-        const response=await fetch(`${detail.document.fileUrl}?ticket=${encodeURIComponent(ticket)}`);
+        const ticket=await requestTicket("VIEW");
+        const response=await fetch(detail.document.fileUrl,{
+          headers:{authorization:`ArchiveTicket ${ticket}`,"x-archive-access-scope":"VIEW"},
+        });
         if(!response.ok) throw new Error("Belge görüntüsü alınamadı.");
         const blob=await response.blob();
         if(cancelled) return;
@@ -101,13 +102,20 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const downloadOriginal=async()=>{
     if(!detail) return;
     try {
-      const ticket=await requestTicket("DOWNLOAD","asıl belge indirme");
-      window.location.assign(`${detail.document.fileUrl}?scope=DOWNLOAD&ticket=${encodeURIComponent(ticket)}`);
+      const ticket=await requestTicket("DOWNLOAD");
+      const response=await fetch(detail.document.fileUrl,{
+        headers:{authorization:`ArchiveTicket ${ticket}`,"x-archive-access-scope":"DOWNLOAD"},
+      });
+      if(!response.ok) throw new Error("Asıl belge indirilemedi.");
+      const url=URL.createObjectURL(await response.blob());
+      const link=document.createElement("a");
+      link.href=url;link.download=detail.document.originalName;
+      link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),60_000);
     } catch(reason) {
       setError(reason instanceof Error?reason.message:"İndirme bileti alınamadı.");
     }
   };
-
   const load=useCallback(async()=>{
     setLoading(true);
     setError("");

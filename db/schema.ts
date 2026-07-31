@@ -759,7 +759,9 @@ export const accessTickets = sqliteTable("access_tickets", {
   id: text("id").primaryKey(),
   ticketHash: text("ticket_hash").notNull().unique(),
   userId: text("user_id").notNull(),
+  documentId: text("document_id").notNull().references(() => archiveDocuments.id, { onDelete: "cascade" }),
   binaryObjectId: text("binary_object_id").notNull().references(() => binaryObjects.id, { onDelete: "cascade" }),
+  objectClass: text("object_class").notNull(),
   scope: text("scope").notNull(),
   purpose: text("purpose").notNull(),
   expiresAt: text("expires_at").notNull(),
@@ -770,8 +772,9 @@ export const accessTickets = sqliteTable("access_tickets", {
   index("access_tickets_user_expiry_idx").on(table.userId, table.expiresAt),
   index("access_tickets_object_idx").on(table.binaryObjectId),
   check("access_tickets_scope_check", sql`${table.scope} IN ('VIEW', 'DOWNLOAD')`),
+  check("access_tickets_class_check", sql`${table.objectClass} IN ('original', 'access')`),
   check("access_tickets_hash_check", sql`length(${table.ticketHash}) = 64`),
-  check("access_tickets_purpose_check", sql`length(trim(${table.purpose})) > 0`),
+  check("access_tickets_purpose_check", sql`(${table.scope} = 'VIEW' AND ${table.objectClass} = 'access' AND ${table.purpose} = 'DOCUMENT_REVIEW') OR (${table.scope} = 'DOWNLOAD' AND ${table.objectClass} = 'original' AND ${table.purpose} = 'ORIGINAL_DOWNLOAD')`),
 ]);
 
 /** F1.9 — `lib/ingest-schema.ts` görüntüleme oturumu tanımının tip aynası. */
@@ -792,8 +795,8 @@ export const accessSessions = sqliteTable("access_sessions", {
 }, (table) => [
   index("access_sessions_user_absolute_idx").on(table.userId, table.absoluteExpiresAt),
   check("access_sessions_hash_check", sql`length(${table.sessionHash}) = 64`),
-  check("access_sessions_class_check", sql`${table.objectClass} IN ('original', 'access', 'ocr', 'preservation', 'thumbnail')`),
-  check("access_sessions_purpose_check", sql`length(trim(${table.purpose})) > 0`),
+  check("access_sessions_class_check", sql`${table.objectClass} = 'access'`),
+  check("access_sessions_purpose_check", sql`${table.purpose} = 'DOCUMENT_REVIEW'`),
 ]);
 export const uploadSessionEvents = sqliteTable("upload_session_events", {
   id: text("id").primaryKey(),

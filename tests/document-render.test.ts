@@ -255,11 +255,10 @@ test("REVIEW_REQUIRED kalıcıdır ve PDF görüntüleme asla asıla düşmez", 
     const view = await resolveViewableObject(target.db, "parolali");
     assert.ok(view && isPendingDerivative(view));
 
-    // PDF dışı türlerde asıl fallback geçici olarak sürer (görsel türevleri OCR üretir).
+    // F1.9'da görsel türler de asıla düşmez; erişim türevi hazır olana kadar bekler.
     seedAcceptedDocument(target, "gorsel", "image/jpeg");
     const imageView = await resolveViewableObject(target.db, "gorsel");
-    assert.ok(imageView && !isPendingDerivative(imageView));
-    assert.equal(imageView.objectClass, "original");
+    assert.ok(imageView && isPendingDerivative(imageView));
 
     // Görsel belge PDF geri dolum kuyruğuna girmez; REVIEW_REQUIRED de yeniden alınmaz.
     const idle = await processNextDerivativeJob(dependencies(target, fetcher));
