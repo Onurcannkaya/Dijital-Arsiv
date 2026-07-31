@@ -218,18 +218,26 @@ async function storagePhaseSlice(
   let unknownAge = 0;
   for (const object of page.objects) {
     await renewMaintenanceLease(dependencies.db, lease, LOCK_SECONDS);
+    // Düz konumsal `?` kullanılır: numaralı `?N` parametreleri `node:sqlite`
+    // sürümleri arasında farklı bağlanıp "column index out of range" verebilir.
+    // Tekrarlanan değerler sıralı olarak birden çok kez bağlanır.
+    const recentIso = new Date(recentThresholdMs).toISOString();
     const known = await dependencies.db.prepare(`SELECT
-        (SELECT id FROM binary_objects WHERE object_key = ?1 AND bucket_or_namespace = ?2 LIMIT 1) AS binary_id,
-        (SELECT id FROM archive_documents WHERE storage_key = ?1 AND ?2 = 'ARCHIVE_FILES' LIMIT 1) AS document_id,
-        EXISTS (SELECT 1 FROM promotion_jobs WHERE target_object_key = ?1 AND ?2 = 'ARCHIVE_FILES'
-          AND (status NOT IN ('COMPLETED', 'FAILED') OR datetime(updated_at) > datetime(?3))) AS promotion_active,
+        (SELECT id FROM binary_objects WHERE object_key = ? AND bucket_or_namespace = ? LIMIT 1) AS binary_id,
+        (SELECT id FROM archive_documents WHERE storage_key = ? AND ? = 'ARCHIVE_FILES' LIMIT 1) AS document_id,
+        EXISTS (SELECT 1 FROM promotion_jobs WHERE target_object_key = ? AND ? = 'ARCHIVE_FILES'
+          AND (status NOT IN ('COMPLETED', 'FAILED') OR datetime(updated_at) > datetime(?))) AS promotion_active,
         -- F1.8: taşınmış eski anahtar tasfiyeye kadar bilinçli olarak yerinde
         -- durur; kopya-değişim penceresindeki hedef de sahipsiz sayılmaz.
-        EXISTS (SELECT 1 FROM legacy_key_migrations WHERE bucket_or_namespace = ?2
-          AND ((source_object_key = ?1 AND status = 'COMPLETED' AND source_disposed_at IS NULL)
-            OR (target_object_key = ?1 AND status <> 'FAILED'))) AS key_migration_known
-      FROM (SELECT 1)`).bind(object.key, namespace.name, new Date(recentThresholdMs).toISOString())
-      .first<{ binary_id: string | null; document_id: string | null;
+        EXISTS (SELECT 1 FROM legacy_key_migrations WHERE bucket_or_namespace = ?
+          AND ((source_object_key = ? AND status = 'COMPLETED' AND source_disposed_at IS NULL)
+            OR (target_object_key = ? AND status <> 'FAILED'))) AS key_migration_known
+      FROM (SELECT 1)`).bind(
+        object.key, namespace.name,
+        object.key, namespace.name,
+        object.key, namespace.name, recentIso,
+        namespace.name, object.key, object.key,
+      ).first<{ binary_id: string | null; document_id: string | null;
         promotion_active: number; key_migration_known: number }>();
     if (known?.binary_id || known?.document_id || Boolean(known?.promotion_active)
       || Boolean(known?.key_migration_known)) continue;
