@@ -606,24 +606,32 @@ tam doğrulama tamamlanmadan bu iş çalıştırılmaz.
 - Anahtar ve custom metadata taramasında doğrulanmış kişisel veri kalmaz.
 - Loglarda özgün dosya adı, açık adres, kişi adı veya erişim belirteci bulunmaz.
 
-**Uygulama durumu (F1.8):** Şema v19 ile `legacy_key_migrations` maskeli
-envanter/taşıma tablosu eklendi. `lib/key-classification.ts` anahtarları
-yapısal olarak sınıflandırır (`LIKE '%.%'` göstergesinin render bölümü yanlış
-pozitifleri düzeltildi), göstergeleri (uzantı, boşluk, ASCII dışı, 11 haneli
-dizi, ad benzeri büyük harf) çıkarır ve ham anahtarı asla log'a/kanıta
-yazmayan maskeleme uygular. Envanter dilimi rowid su işaretiyle sayfalanır;
-taşıma işi kiralı/backoff'lu kuyrukta çalışır: kaynak if-absent `promote`
-ile güvenli hedefe kopyalanır (eski metadata taşınmaz, temiz sözleşme
-alanları yazılır), hedef akışla tam okunup SHA-256 yetkili kayıtla
-doğrulanır ve `binary_objects.object_key` referansı denetim olayıyla birlikte
-tek kira-çitli batch'te atomik değiştirilir. Dolu hedef ezilmez; aynı içerikli
-hedef yanıt kaybı kurtarması olarak doğrulanıp kabul edilir. Eski nesne
-silinmez (tasfiye ADR-016 prosedürüne aittir) ve uzlaştırma taşınmış kaynak
-ile kopya penceresindeki hedefi sahipsiz saymaz. Metadata alan adları
-sınıflandırılır, değerler okunmaz. `archive_documents.storage_key` makbuz
-olarak dokunulmadan kalır; çift yazma yeniden kurulmaz. Kuyruk ve envanter
-kapsamı genel bakışta `keyMigrations` alanındadır. Gerçek eski anahtar
-seti üzerinde T-11 kanıtı staging koşusuna (F1.11) aittir.
+**Uygulama durumu (F1.8):** Şema v20 ile `legacy_key_migrations` maskeli
+envanter/taşıma tablosuna kaynak bekleme sonu ve ayrı tasfiye kanıtı eklendi.
+`lib/key-classification.ts` anahtarları yapısal olarak sınıflandırır; yalnız
+rakamdan oluşan kimlikleri opak token kabul etmez ve Unicode-güvenli maskeleme
+uygular. Envanter hem anahtar biçimini hem custom metadata alan/değerlerini
+bellekte inceler; ham değerleri saklamak yerine sabit bulgu kodları ve maskeli
+alan biçimleri üretir. Anahtarı güvenli olup metadata'sı bulgulu nesne de yeniden
+paketlenir.
+
+Hedef anahtarlar eski belge/nesne kimliklerinden türetilmez; iki yeni UUIDv4
+ile oluşturulur. Kaynak if-absent `promote` ile doğru ad alanındaki hedefe
+kopyalanır. Hedefin tam SHA-256 ve boyutuna ek olarak MIME türü ve yalnız
+`sha256` + `objectClass` içeren temiz metadata sözleşmesi doğrulanır;
+`binary_objects.object_key` referansı denetim olayıyla tek kira-çitli batch'te
+değiştirilir. ARCHIVE ve DERIVATIVE işleri ayrı dar rollerle round-robin
+tüketilir. Dolu hedef ezilmez; ancak aynı baytların yanında tür ve temiz metadata
+kanıtı da eşleşirse yanıt kaybı kurtarması kabul edilir.
+
+Eski nesne normal uygulama rolüyle silinmez. Başarılı taşıma 30 günlük varsayılan
+bekleme sonunu `source_retire_after` alanına yazar; süresi dolanlar genel bakışta
+`readyForDisposition`, bekleyenler `retainedSources` olarak görünür. Fiziksel
+silme ve `source_disposed_at` kanıtı ADR-016 kapsamındaki ayrı, dört-göz yetkili
+tasfiye prosedürüne aittir. Genel bakıştaki iş sayıları müdürlük kapsamıyla
+süzülür; bütün arşiv envanter ilerlemesi yalnız `*` kapsamındaki yöneticiye
+gösterilir. Gerçek eski anahtar seti, ayrı tasfiye rolü ve T-11 canlı kanıtı
+staging koşusuna (F1.11) aittir.
 
 ### F1.9 — Görüntüleme bileti ve depolama görev ayrılığı
 

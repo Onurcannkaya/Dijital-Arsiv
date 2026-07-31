@@ -636,6 +636,8 @@ export const legacyKeyMigrations = sqliteTable("legacy_key_migrations", {
   lastError: text("last_error"),
   verifiedAt: text("verified_at"),
   completedAt: text("completed_at"),
+  sourceRetireAfter: text("source_retire_after"),
+  sourceDisposedAt: text("source_disposed_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [

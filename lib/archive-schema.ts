@@ -41,7 +41,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 19;
+export const ARCHIVE_SCHEMA_VERSION = 20;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -727,6 +727,18 @@ async function createLegacyKeyMigrationTable(db: D1Database) {
   }
 }
 
+/** F1.8 sertleştirmesi: kaynak kopyanın bekleme ve ayrı tasfiye kanıtı. */
+async function migrateLegacyKeyRetentionEvidence(db: D1Database) {
+  if (!(await tableExists(db, "legacy_key_migrations"))) return;
+  const columns = await columnNames(db, "legacy_key_migrations");
+  if (!columns.has("source_retire_after")) {
+    await db.prepare("ALTER TABLE legacy_key_migrations ADD COLUMN source_retire_after TEXT").run();
+  }
+  if (!columns.has("source_disposed_at")) {
+    await db.prepare("ALTER TABLE legacy_key_migrations ADD COLUMN source_disposed_at TEXT").run();
+  }
+}
+
 /** F1.7 / ADR-015: bölümlü erişim türevleri sayfa aralığıyla kaydedilir. */
 async function migrateBinaryObjectPageRange(db: D1Database) {
   if (!(await tableExists(db, "binary_objects"))) return;
@@ -1149,6 +1161,8 @@ const structuralMigrations: MigrationStep[] = [
   { version: 18, run: migrateDerivativeGenerationEvidence },
   // 18 → 19: eski anahtarların maskeli envanteri ve taşıma durumu.
   { version: 19, run: createLegacyKeyMigrationTable },
+  // 19 → 20: eski kaynak için bekleme sonu ve ayrı tasfiye kanıtı.
+  { version: 20, run: migrateLegacyKeyRetentionEvidence },
 ];
 
 /**

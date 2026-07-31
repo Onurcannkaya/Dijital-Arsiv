@@ -124,7 +124,7 @@ export async function GET(request: Request) {
       derivatives: await readDerivativeSummary(bindings.DB),
       // F1.8: `LIKE '%.%'` göstergesinin yerini alan yetkili envanter. `pending`
       // sınıflandırılmış eski anahtar sayısıdır; kapsam `inventory` alanındadır.
-      keyMigrations: await readKeyMigrationSummary(bindings.DB),
+      keyMigrations: await readKeyMigrationSummary(bindings.DB, scope),
       // Kapasite kotası, yedekleme durumu ve servis sağlığı henüz ölçülmüyor;
       // uydurma değer döndürmek yerine açıkça bildirilmez.
       unmeasured: ["storageQuota", "lastBackup", "serviceHealth"],

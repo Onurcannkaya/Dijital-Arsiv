@@ -1,69 +1,85 @@
 /**
  * F1.8 — Nesne anahtarı ve custom metadata sınıflandırması.
  *
- * `LIKE '%.%'` yalnız kaba göstergeydi; türev bölüm dosyaları (`part-0001.pdf`)
- * gibi politika uyumlu anahtarları da sayıyordu. Bu modül anahtarları yapısal
- * olarak sınıflandırır ve HAM ANAHTARI ASLA log'a/kanıta yazmaz: rapor edilen
- * biçim `maskObjectKey` çıktısıdır (harf→a, rakam→9; yapı korunur, veri gitmez).
+ * Ham anahtar/metadata değerleri yalnız bellekte sınıflandırılır; log, denetim
+ * ve taşıma kanıtına yalnız sabit bulgu kodları ile Unicode-güvenli maskeler
+ * yazılır. Hedef anahtarlar kaynak kimliklerden türetilmez.
  */
 
-const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const OPAQUE_SEGMENT = /^[0-9a-f-]{8,64}$/i;
-const DERIVATIVE_PART = /^part-\d{1,6}\.pdf$/;
+const UUID_V4_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const HEX_TOKEN_SEGMENT = /^(?=[0-9a-f]{32,64}$)(?=.*[a-f])[0-9a-f]+$/i;
+const DERIVATIVE_PART = /^part-\d{4}\.pdf$/;
 const DERIVED_CLASSES = new Set(["access", "ocr", "preservation", "thumbnail"]);
+const ALL_MIGRATABLE_CLASSES = new Set(["original", ...DERIVED_CLASSES]);
+const SAFE_OBJECT_CLASSES = new Set([
+  "original", "access", "ocr", "preservation", "thumbnail", "temporary", "quarantine",
+]);
 
-/** Kabul hattının metadata sözleşmesindeki bilinen alan adları. */
+/** Alan adları sağlayıcı tarafından küçük harfe çevrilebildiği için kanonik tutulur. */
 export const SAFE_METADATA_FIELDS = new Set([
-  "sha256", "documentId", "binaryObjectId", "objectClass", "uploadSessionId",
+  "sha256", "documentid", "binaryobjectid", "objectclass", "uploadsessionid",
+  "generationid", "profileversion",
 ]);
 
 export type KeyClassification = {
   legacy: boolean;
-  /** Maskelenmiş anahtar biçimi; özgün ad/kişisel veri içermez. */
   maskedPattern: string;
-  /** Maskelenmiş, makine-okur göstergeler (ör. FILENAME_EXTENSION). */
   indicators: string[];
 };
 
-export function maskObjectKey(key: string): string {
-  return key.replace(/[A-ZÇĞİÖŞÜ]/g, "A").replace(/[a-zçğıöşü]/g, "a").replace(/[0-9]/g, "9");
+/** Harf/rakam dışındaki yalnız yapısal ayraçları koruyan Unicode-güvenli maske. */
+export function maskSensitiveText(value: string): string {
+  return [...value.normalize("NFKC")].map((character) => {
+    if (/\p{Lu}/u.test(character)) return "A";
+    if (/\p{L}/u.test(character)) return "a";
+    if (/\p{N}/u.test(character)) return "9";
+    if (/[/._\- ]/.test(character)) return character;
+    return "x";
+  }).join("");
 }
 
-function opaque(segment: string) {
-  return UUID_SEGMENT.test(segment) || OPAQUE_SEGMENT.test(segment);
+export const maskObjectKey = maskSensitiveText;
+
+export function isOpaqueKeySegment(segment: string) {
+  return UUID_V4_SEGMENT.test(segment) || HEX_TOKEN_SEGMENT.test(segment);
 }
 
-/** Politika uyumlu anahtar biçimleri; bunların dışındaki her anahtar eskidir. */
 function matchesSafeShape(key: string, objectClass: string): boolean {
   const segments = key.split("/");
   if (objectClass === "original") {
     return segments.length === 3 && segments[0] === "originals"
-      && opaque(segments[1]) && opaque(segments[2]);
+      && isOpaqueKeySegment(segments[1]) && isOpaqueKeySegment(segments[2]);
   }
   if (DERIVED_CLASSES.has(objectClass)) {
-    if (segments[0] !== "derivatives" || !opaque(segments[1])) return false;
-    // OCR türevi: derivatives/<doc>/access/<obj>; render bölümü ek kuşak
-    // dizini ve part-NNNN.pdf taşır.
-    if (segments.length === 4) return DERIVED_CLASSES.has(segments[2]) && opaque(segments[3]);
-    if (segments.length === 5) {
-      return DERIVED_CLASSES.has(segments[2]) && opaque(segments[3]) && DERIVATIVE_PART.test(segments[4]);
+    if (segments[0] !== "derivatives" || !isOpaqueKeySegment(segments[1])) return false;
+    if (segments.length === 4) {
+      return DERIVED_CLASSES.has(segments[2]) && isOpaqueKeySegment(segments[3]);
     }
-    return false;
+    if (segments.length === 5) {
+      return DERIVED_CLASSES.has(segments[2]) && isOpaqueKeySegment(segments[3])
+        && DERIVATIVE_PART.test(segments[4]);
+    }
   }
   return false;
 }
 
-function collectIndicators(key: string): string[] {
+function valueIndicators(value: string): string[] {
   const indicators = new Set<string>();
-  if (/\s/.test(key)) indicators.add("WHITESPACE");
-  // eslint-disable-next-line no-control-regex
-  if (/[^\x00-\x7F]/.test(key)) indicators.add("NON_ASCII");
+  if (/\s/u.test(value)) indicators.add("WHITESPACE");
+  if (/[^\x00-\x7F]/u.test(value)) indicators.add("NON_ASCII");
+  if (/(?<!\d)\d{11}(?!\d)/u.test(value)) indicators.add("ELEVEN_DIGIT_RUN");
+  if (/[^\s@]+@[^\s@]+\.[^\s@]+/u.test(value)) indicators.add("EMAIL_LIKE");
+  if (/\.[a-z0-9]{1,8}$/iu.test(value)) indicators.add("FILENAME_LIKE");
+  if (/\p{Lu}\p{Ll}+/u.test(value)) indicators.add("NAME_LIKE_CASING");
+  return [...indicators].sort();
+}
+
+function collectKeyIndicators(key: string): string[] {
+  const indicators = new Set(valueIndicators(key));
   const lastSegment = key.split("/").at(-1) ?? "";
-  if (/\.[a-z0-9]{1,5}$/i.test(lastSegment) && !DERIVATIVE_PART.test(lastSegment)) {
+  if (/\.[a-z0-9]{1,8}$/iu.test(lastSegment) && !DERIVATIVE_PART.test(lastSegment)) {
     indicators.add("FILENAME_EXTENSION");
   }
-  if (/(?<!\d)\d{11}(?!\d)/.test(key)) indicators.add("ELEVEN_DIGIT_RUN");
-  if (/[A-ZÇĞİÖŞÜ][a-zçğıöşü]+/.test(key)) indicators.add("NAME_LIKE_CASING");
   return [...indicators].sort();
 }
 
@@ -71,20 +87,52 @@ export function classifyObjectKey(key: string, objectClass: string): KeyClassifi
   const legacy = !matchesSafeShape(key, objectClass);
   return {
     legacy,
-    maskedPattern: maskObjectKey(key),
-    indicators: legacy ? collectIndicators(key) : [],
+    maskedPattern: maskSensitiveText(key),
+    indicators: legacy ? collectKeyIndicators(key) : [],
   };
 }
 
-/** Bilinmeyen metadata alan ADLARINI döndürür; değerler asla okunup raporlanmaz. */
-export function classifyMetadataFields(customMetadata: Record<string, string> | undefined): string[] {
-  if (!customMetadata) return [];
-  return Object.keys(customMetadata).filter((field) => !SAFE_METADATA_FIELDS.has(field)).sort();
+function validKnownMetadataValue(field: string, value: string): boolean {
+  switch (field) {
+    case "sha256": return /^[a-f0-9]{64}$/i.test(value);
+    case "documentid":
+    case "binaryobjectid":
+    case "uploadsessionid":
+    case "generationid": return isOpaqueKeySegment(value);
+    case "objectclass": return SAFE_OBJECT_CLASSES.has(value);
+    case "profileversion": return /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(value);
+    default: return false;
+  }
 }
 
-/** Sınıfa uygun, kişisel veri taşımayan güvenli hedef anahtar üretir. */
-export function secureTargetKey(objectClass: string, documentId: string, binaryObjectId: string): string {
+/**
+ * Metadata bulguları ham alan adı/değer içermez. Bilinmeyen alan adları
+ * maskelenir; değerler yalnız sabit sınıflandırma kodlarına dönüştürülür.
+ */
+export function classifyMetadataFields(customMetadata: Record<string, string> | undefined): string[] {
+  if (!customMetadata) return [];
+  const findings = new Set<string>();
+  for (const [rawField, value] of Object.entries(customMetadata)) {
+    const field = rawField.toLowerCase();
+    if (!SAFE_METADATA_FIELDS.has(field)) {
+      const indicators = valueIndicators(value);
+      findings.add(`UNKNOWN_FIELD:${maskSensitiveText(rawField)}${indicators.length ? `:${indicators.join("+")}` : ""}`);
+      continue;
+    }
+    if (!validKnownMetadataValue(field, value)) {
+      findings.add(`INVALID_SAFE_VALUE:${maskSensitiveText(rawField)}`);
+    }
+  }
+  return [...findings].sort();
+}
+
+/** Yeni hedef yalnız rastgele/opak tokenlardan oluşur; kaynak kimlik kullanılmaz. */
+export function secureTargetKey(objectClass: string, documentToken: string, objectToken: string): string {
+  if (!ALL_MIGRATABLE_CLASSES.has(objectClass)) throw new Error("Taşınamaz nesne sınıfı.");
+  if (!isOpaqueKeySegment(documentToken) || !isOpaqueKeySegment(objectToken)) {
+    throw new Error("Güvenli hedef anahtarı opak token gerektirir.");
+  }
   return objectClass === "original"
-    ? `originals/${documentId}/${binaryObjectId}`
-    : `derivatives/${documentId}/${objectClass}/${binaryObjectId}`;
+    ? `originals/${documentToken}/${objectToken}`
+    : `derivatives/${documentToken}/${objectClass}/${objectToken}`;
 }

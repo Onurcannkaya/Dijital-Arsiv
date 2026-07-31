@@ -26,7 +26,7 @@ import {
   MaintenanceLeaseLostError,
   claimMaintenanceLease,
   failMaintenanceLease,
-  type MaintenanceLease,
+  renewMaintenanceLease,
 } from "./maintenance-lease.ts";
 import {
   isObjectStorageError,
@@ -45,10 +45,12 @@ type MigrationJob = {
   binary_object_id: string;
   document_id: string;
   object_class: string;
+  bucket_or_namespace: string;
   source_object_key: string;
   target_object_key: string;
   masked_key_pattern: string;
   source_sha256: string;
+  metadata_findings_json: string | null;
   attempt: number;
   max_attempts: number;
   lease_token: string;
@@ -70,8 +72,14 @@ export type KeyMigrationDependencies = {
   hasher: StreamingHasher;
   /** Bu bağların hizmet ettiği ad alanı; diğer ad alanlarının işleri alınmaz. */
   namespace?: string;
+  /** Envanterde her yetkili ad alanının metadata okuyucusunu çözer. */
+  readerForNamespace?: (namespace: string) => ObjectReader;
   now?: () => Date;
   randomId?: () => string;
+  /** Kaynak kimliklerden bağımsız hedef anahtar tokenı. */
+  randomOpaqueId?: () => string;
+  /** Doğrulanmış eski kopyanın ayrı tasfiye rolüne açılacağı bekleme süresi. */
+  sourceRetentionDays?: number;
 };
 
 function clock(dependencies: KeyMigrationDependencies) {
@@ -84,6 +92,51 @@ function randomId(dependencies: KeyMigrationDependencies) {
 
 function namespaceOf(dependencies: KeyMigrationDependencies) {
   return dependencies.namespace ?? "ARCHIVE_FILES";
+}
+
+function inventoryReader(dependencies: KeyMigrationDependencies, namespace: string) {
+  if (dependencies.readerForNamespace) return dependencies.readerForNamespace(namespace);
+  if (namespace === namespaceOf(dependencies)) return dependencies.reader;
+  throw new Error(`Anahtar envanteri okuma rolü yapılandırılmamış: ${namespace}`);
+}
+
+function opaqueId(dependencies: KeyMigrationDependencies) {
+  return dependencies.randomOpaqueId?.() ?? crypto.randomUUID();
+}
+
+function sourceRetentionDays(dependencies: KeyMigrationDependencies) {
+  const value = Math.trunc(dependencies.sourceRetentionDays ?? 30);
+  return Math.min(Math.max(value, 1), 365);
+}
+
+function cleanTargetMetadata(job: Pick<MigrationJob, "object_class" | "source_sha256">) {
+  return { sha256: job.source_sha256, objectClass: job.object_class };
+}
+
+function storedMetadataFindings(job: MigrationJob) {
+  if (!job.metadata_findings_json) return [];
+  try {
+    const value: unknown = JSON.parse(job.metadata_findings_json);
+    return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+      ? value as string[] : [];
+  } catch {
+    return [];
+  }
+}
+
+function assertCleanTargetMetadata(
+  metadata: Record<string, string> | undefined,
+  job: MigrationJob,
+) {
+  const canonical = Object.fromEntries(
+    Object.entries(metadata ?? {}).map(([key, value]) => [key.toLowerCase(), value]),
+  );
+  if (Object.keys(canonical).sort().join(",") !== "objectclass,sha256"
+    || canonical.sha256 !== job.source_sha256
+    || canonical.objectclass !== job.object_class
+    || classifyMetadataFields(metadata).length > 0) {
+    throw new Error("Taşıma hedefinin temiz metadata sözleşmesi doğrulanamadı.");
+  }
 }
 
 /**
@@ -123,27 +176,42 @@ export async function runKeyInventorySlice(
 
     let enqueued = 0;
     for (const row of rows.results) {
+      await renewMaintenanceLease(db, lease, INVENTORY_LOCK_SECONDS);
       const classification = classifyObjectKey(row.object_key, row.object_class);
-      if (!classification.legacy) continue;
-      // Hedef anahtar deterministiktir: yeniden koşu aynı hedefi üretir.
-      const target = secureTargetKey(row.object_class, row.document_id, row.id);
-      if (target === row.object_key) continue;
+      const sourceHead = await inventoryReader(dependencies, row.bucket_or_namespace)
+        .head(row.object_key);
+      const metadataFindings = classifyMetadataFields(sourceHead?.customMetadata);
+      if (!classification.legacy && metadataFindings.length === 0) continue;
+
+      // Metadata değişmez olduğundan, anahtar güvenli olsa bile bulgulu nesne yeni ve
+      // kaynak kimliklerden bağımsız iki opak tokenla yeniden paketlenir.
+      const target = secureTargetKey(
+        row.object_class,
+        opaqueId(dependencies),
+        opaqueId(dependencies),
+      );
       const nowIso = clock(dependencies).toISOString();
       const inserted = await db.prepare(`INSERT OR IGNORE INTO legacy_key_migrations
           (id, binary_object_id, document_id, object_class, bucket_or_namespace,
            source_object_key, target_object_key, masked_key_pattern, classification_json,
-           source_sha256, status, attempt, max_attempts, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'QUEUED', 0, 5, ?, ?)`)
+           metadata_findings_json, source_sha256, status, attempt, max_attempts, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'QUEUED', 0, 5, ?, ?)`)
         .bind(randomId(dependencies), row.id, row.document_id, row.object_class,
           row.bucket_or_namespace, row.object_key, target, classification.maskedPattern,
-          JSON.stringify({ indicators: classification.indicators }), row.sha256, nowIso, nowIso).run();
+          JSON.stringify({
+            legacyKey: classification.legacy,
+            keyIndicators: classification.indicators,
+            metadataScan: sourceHead ? "COMPLETE" : "SOURCE_UNAVAILABLE",
+            metadataFindingCount: metadataFindings.length,
+          }), JSON.stringify(metadataFindings), row.sha256, nowIso, nowIso).run();
       if (inserted.meta.changes) {
         enqueued += 1;
-        logEvent("warn", "key-migration.legacy-key-found", {
-          binaryObjectId: row.id,
+        logEvent("warn", "key-migration.repack-required", {
           objectClass: row.object_class,
+          namespace: row.bucket_or_namespace,
           maskedPattern: classification.maskedPattern,
-          indicators: classification.indicators,
+          keyIndicators: classification.indicators,
+          metadataFindingCount: metadataFindings.length,
         });
       }
     }
@@ -183,8 +251,9 @@ async function claimJob(dependencies: KeyMigrationDependencies) {
         )
       ORDER BY j.created_at LIMIT 1
     )
-    RETURNING id, binary_object_id, document_id, object_class, source_object_key,
-      target_object_key, masked_key_pattern, source_sha256, attempt, max_attempts, lease_token`)
+    RETURNING id, binary_object_id, document_id, object_class, bucket_or_namespace,
+      source_object_key, target_object_key, masked_key_pattern, source_sha256,
+      metadata_findings_json, attempt, max_attempts, lease_token`)
     .bind(leaseToken, leaseUntil, nowIso, namespaceOf(dependencies), nowIso, nowIso)
     .first<MigrationJob>();
 }
@@ -218,7 +287,6 @@ async function recordFailure(
   if (!update.meta.changes) return "STALE";
   logEvent("error", "key-migration.failed", {
     migrationId: job.id,
-    binaryObjectId: job.binary_object_id,
     maskedPattern: job.masked_key_pattern,
     attempt: job.attempt,
     terminal,
@@ -234,7 +302,8 @@ async function finalizeSwap(
   targetSha256: string,
   swapAlreadyDone: boolean,
 ) {
-  const nowIso = clock(dependencies).toISOString();
+  const now = clock(dependencies);
+  const nowIso = now.toISOString();
   const audit = await prepareAuditEvent(dependencies.db, {
     documentId: job.document_id,
     actor: "system:key-migration",
@@ -242,7 +311,6 @@ async function finalizeSwap(
     // Ham anahtar denetim kanıtına yazılmaz (yol haritası F1.8): maskeli biçim yeterlidir.
     details: {
       migrationId: job.id,
-      binaryObjectId: job.binary_object_id,
       objectClass: job.object_class,
       maskedSourcePattern: job.masked_key_pattern,
       sha256: targetSha256,
@@ -260,10 +328,11 @@ async function finalizeSwap(
     dependencies.db.prepare(`UPDATE legacy_key_migrations SET status = 'COMPLETED',
       lease_token = NULL, lease_expires_at = NULL, next_attempt_at = NULL,
       failure_code = NULL, last_error = NULL, metadata_findings_json = ?,
-      target_sha256 = ?, verified_at = ?, completed_at = ?, updated_at = ?
+      target_sha256 = ?, verified_at = ?, completed_at = ?, source_retire_after = ?, updated_at = ?
       WHERE id = ? AND status = 'COPYING' AND lease_token = ?`)
-      .bind(JSON.stringify(metadataFindings), targetSha256, nowIso, nowIso, nowIso,
-        job.id, job.lease_token),
+      .bind(JSON.stringify(metadataFindings), targetSha256, nowIso, nowIso,
+        new Date(now.getTime() + sourceRetentionDays(dependencies) * 86_400_000).toISOString(),
+        nowIso, job.id, job.lease_token),
   ];
   // Önceki deneme referansı değiştirdiyse ilk ifade 0 satır etkiler; bu meşrudur.
   const results = await dependencies.db.batch(swapAlreadyDone ? statements.slice(1) : statements);
@@ -272,26 +341,36 @@ async function finalizeSwap(
   }
   logEvent("info", "key-migration.completed", {
     migrationId: job.id,
-    binaryObjectId: job.binary_object_id,
     objectClass: job.object_class,
     maskedPattern: job.masked_key_pattern,
   });
   return { processed: true, result: "COMPLETED" as const, migrationId: job.id };
 }
 
-export async function readKeyMigrationSummary(db: D1Database) {
+export async function readKeyMigrationSummary(db: D1Database, scope = "*") {
   const jobs = await db.prepare(`SELECT
-      SUM(CASE WHEN status IN ('QUEUED', 'RETRY', 'COPYING') THEN 1 ELSE 0 END) AS pending,
-      SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed,
-      SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS dead_letter
-    FROM legacy_key_migrations`).first<Record<string, number>>();
-  const inventory = await db.prepare(`SELECT status, processed, updated_at
-    FROM maintenance_tasks WHERE id = ?`).bind(KEY_INVENTORY_TASK)
-    .first<{ status: string; processed: number; updated_at: string }>();
+      SUM(CASE WHEN j.status IN ('QUEUED', 'RETRY', 'COPYING') THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN j.status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed,
+      SUM(CASE WHEN j.status = 'FAILED' THEN 1 ELSE 0 END) AS dead_letter,
+      SUM(CASE WHEN j.status = 'COMPLETED' AND j.source_disposed_at IS NULL
+        AND j.source_retire_after <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS ready_for_disposition,
+      SUM(CASE WHEN j.status = 'COMPLETED' AND j.source_disposed_at IS NULL
+        AND (j.source_retire_after IS NULL OR j.source_retire_after > CURRENT_TIMESTAMP)
+        THEN 1 ELSE 0 END) AS retained_sources
+    FROM legacy_key_migrations j
+    JOIN archive_documents d ON d.id = j.document_id
+    WHERE (? = '*' OR d.unit = ?)`).bind(scope, scope).first<Record<string, number>>();
+  const inventory = scope === "*"
+    ? await db.prepare(`SELECT status, processed, updated_at
+        FROM maintenance_tasks WHERE id = ?`).bind(KEY_INVENTORY_TASK)
+      .first<{ status: string; processed: number; updated_at: string }>()
+    : null;
   return {
     pending: Number(jobs?.pending ?? 0),
     completed: Number(jobs?.completed ?? 0),
     deadLetter: Number(jobs?.dead_letter ?? 0),
+    readyForDisposition: Number(jobs?.ready_for_disposition ?? 0),
+    retainedSources: Number(jobs?.retained_sources ?? 0),
     inventory: inventory ? {
       status: inventory.status,
       scanned: Number(inventory.processed),
@@ -306,8 +385,12 @@ export async function processNextKeyMigrationJob(dependencies: KeyMigrationDepen
 
   try {
     const record = await dependencies.db.prepare(`SELECT object_key, media_type, byte_size, sha256
-      FROM binary_objects WHERE id = ?`).bind(job.binary_object_id).first<SourceRecord>();
-    if (!record || record.sha256 !== job.source_sha256) {
+      FROM binary_objects
+      WHERE id = ? AND document_id = ? AND object_class = ? AND bucket_or_namespace = ?
+        AND retention_status <> 'DISPOSED'`)
+      .bind(job.binary_object_id, job.document_id, job.object_class, job.bucket_or_namespace)
+      .first<SourceRecord>();
+    if (!record || record.sha256 !== job.source_sha256 || !/^[a-f0-9]{64}$/i.test(record.sha256)) {
       throw new Error("Taşıma işinin yetkili nesne kaydı bulunamadı veya SHA kanıtı değişti.");
     }
     // Önceki deneme referansı değiştirmiş olabilir: iş kapanışı kurtarılır.
@@ -316,37 +399,37 @@ export async function processNextKeyMigrationJob(dependencies: KeyMigrationDepen
       throw new Error("Nesne kaydı beklenmeyen bir anahtarı gösteriyor; el ile inceleme gerekir.");
     }
 
-    // Metadata bulguları: yalnız alan adları sınıflandırılır, değer okunmaz/loglanmaz.
     const sourceHead = await dependencies.reader.head(job.source_object_key);
-    const metadataFindings = classifyMetadataFields(sourceHead?.customMetadata);
+    const metadataFindings = [...new Set([
+      ...storedMetadataFindings(job),
+      ...classifyMetadataFields(sourceHead?.customMetadata),
+    ])].sort();
 
-    let targetExists = Boolean(await dependencies.reader.head(job.target_object_key));
-    if (!targetExists) {
+    const targetHead = await dependencies.reader.head(job.target_object_key);
+    if (!targetHead) {
       if (!sourceHead) throw new Error("Taşıma kaynağı depolamada bulunamadı.");
       await renewLease(dependencies, job);
       try {
         await dependencies.writer.promote(job.source_object_key, job.target_object_key, {
           contentType: record.media_type,
           contentSha256Hex: job.source_sha256,
-          // Eski metadata taşınmaz; hedef yalnız sözleşmedeki temiz alanları taşır.
-          customMetadata: {
-            sha256: job.source_sha256,
-            documentId: job.document_id,
-            binaryObjectId: job.binary_object_id,
-            objectClass: job.object_class,
-          },
+          // Eski metadata taşınmaz; hedef yalnız asgari temiz sözleşmeyi taşır.
+          customMetadata: cleanTargetMetadata(job),
         });
       } catch (error) {
         // Yanıt kaybı kurtarması: hedef bir önceki denemede yazılmış olabilir;
-        // içerik birazdan tam okumayla kanıtlanacak.
+        // içerik ve metadata birazdan tam okumayla kanıtlanır.
         if (!isObjectStorageError(error, "KEY_ALREADY_EXISTS")) throw error;
       }
-      targetExists = true;
     }
 
     await renewLease(dependencies, job);
     const target = await dependencies.reader.get(job.target_object_key);
     if (!target || target.range !== null) throw new Error("Taşıma hedefi tam okunamadı.");
+    if (target.contentType !== record.media_type || target.size !== Number(record.byte_size)) {
+      throw new Error("Taşıma hedefinin tür veya boyut kanıtı yetkili kayıtla uyuşmuyor.");
+    }
+    assertCleanTargetMetadata(target.customMetadata, job);
     const digest = await dependencies.hasher.sha256(target.body);
     if (digest.byteSize !== Number(record.byte_size) || digest.sha256Hex !== job.source_sha256) {
       throw new Error("Taşıma hedefinin tam SHA-256 doğrulaması başarısız.");

@@ -167,22 +167,52 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
         ingestLifecycle = { ...lifecycle, skipped: false };
       }
 
-      // F1.8: eski anahtar envanteri ve dilim başına sınırlı taşıma. Kaynak ve
-      // hedef aynı ad alanındadır; kopya + tam SHA doğrulaması F1.1/F1.5
-      // yetenekleriyle yapılır.
+      // F1.8: envanter bütün kalıcı ad alanlarını tarar; tüketici ise her kovanın
+      // kendi dar reader/writer rolüyle çalışır. Böylece türev işleri açılıp sahipsiz kalmaz.
       const archiveReader = new R2ObjectReader(bindings.ARCHIVE_FILES);
-      const keyMigrationDependencies = {
-        db: bindings.DB,
+      const migrationTargets = [{
+        namespace: "ARCHIVE_FILES",
         reader: archiveReader,
         writer: new R2ImmutableVaultWriter(bindings.ARCHIVE_FILES, archiveReader),
-        hasher: createDigestStreamHasher(),
+      }];
+      if (bindings.DERIVATIVE_FILES) {
+        const derivativeReader = new R2ObjectReader(bindings.DERIVATIVE_FILES);
+        migrationTargets.push({
+          namespace: "DERIVATIVE_FILES",
+          reader: derivativeReader,
+          writer: new R2ImmutableVaultWriter(bindings.DERIVATIVE_FILES, derivativeReader),
+        });
+      }
+      const readerForNamespace = (namespace: string) => {
+        const target = migrationTargets.find((entry) => entry.namespace === namespace);
+        if (!target) throw new Error(`Anahtar taşıma ad alanı yapılandırılmamış: ${namespace}`);
+        return target.reader;
       };
-      const inventory = await runKeyInventorySlice(keyMigrationDependencies);
+      const baseMigrationDependencies = {
+        db: bindings.DB,
+        hasher: createDigestStreamHasher(),
+        readerForNamespace,
+      };
+      const inventory = await runKeyInventorySlice({
+        ...baseMigrationDependencies,
+        ...migrationTargets[0],
+      });
       let migrated = 0;
-      for (let index = 0; index < 2; index += 1) {
-        const migration = await processNextKeyMigrationJob(keyMigrationDependencies);
-        if (!migration.processed) break;
-        migrated += 1;
+      // İki geçişli round-robin: bir ad alanı boşsa diğeri kalan dilimi kullanabilir.
+      for (let pass = 0; pass < 2 && migrated < 2; pass += 1) {
+        let progress = false;
+        for (const target of migrationTargets) {
+          if (migrated >= 2) break;
+          const migration = await processNextKeyMigrationJob({
+            ...baseMigrationDependencies,
+            ...target,
+          });
+          if (migration.processed) {
+            migrated += 1;
+            progress = true;
+          }
+        }
+        if (!progress) break;
       }
       logEvent("info", "cron.maintenance-result", {
         ...result,

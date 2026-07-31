@@ -19,9 +19,10 @@ import {
   classifyMetadataFields,
   classifyObjectKey,
   maskObjectKey,
-  secureTargetKey,
 } from "../lib/key-classification.ts";
-import { processNextKeyMigrationJob, runKeyInventorySlice } from "../lib/key-migration.ts";
+import {
+  processNextKeyMigrationJob, readKeyMigrationSummary, runKeyInventorySlice,
+} from "../lib/key-migration.ts";
 import {
   MemoryImmutableVaultWriter,
   MemoryNamespace,
@@ -43,6 +44,7 @@ function fixture() {
   const vault = new MemoryNamespace(() => NOW);
   const reader = new MemoryObjectReader(vault);
   let sequence = 0;
+  let opaqueSequence = 0;
   return {
     db,
     vault,
@@ -51,6 +53,7 @@ function fixture() {
     writer: new MemoryImmutableVaultWriter(vault, reader),
     hasher: createNodeStreamingHasher(),
     randomId: () => `id-${++sequence}`,
+    randomOpaqueId: () => `00000000-0000-4000-8000-${String(++opaqueSequence).padStart(12, "0")}`,
   };
 }
 
@@ -64,6 +67,7 @@ function dependencies(target: Fixture) {
     hasher: target.hasher,
     now: () => NOW,
     randomId: target.randomId,
+    randomOpaqueId: target.randomOpaqueId,
   };
 }
 
@@ -103,7 +107,7 @@ test("politika uyumlu anahtarlar eski sayılmaz; dosya adı taşıyanlar göster
   const legacy = classifyObjectKey(LEGACY_KEY, "original");
   assert.equal(legacy.legacy, true);
   assert.deepEqual(legacy.indicators, [
-    "ELEVEN_DIGIT_RUN", "FILENAME_EXTENSION", "NAME_LIKE_CASING", "NON_ASCII", "WHITESPACE",
+    "ELEVEN_DIGIT_RUN", "FILENAME_EXTENSION", "FILENAME_LIKE", "NAME_LIKE_CASING", "NON_ASCII", "WHITESPACE",
   ]);
   // Maskeli biçim yapıyı korur ama adı, kimlik numarasını ve sözcükleri taşımaz.
   assert.equal(legacy.maskedPattern, "aaaaaaaaa/9999/aaaa-Aaaaa Aaaaaa 99999999999.aaa");
@@ -112,13 +116,29 @@ test("politika uyumlu anahtarlar eski sayılmaz; dosya adı taşıyanlar göster
   assert.equal(maskObjectKey("originals/GİZLİ-Ad.pdf").includes("GİZLİ"), false);
 });
 
-test("metadata sınıflandırması yalnız bilinmeyen alan adlarını raporlar", () => {
-  assert.deepEqual(classifyMetadataFields({ sha256: "x", documentId: "y" }), []);
-  assert.deepEqual(
-    classifyMetadataFields({ sha256: "x", originalName: "gizli.pdf", uploader: "ad" }),
-    ["originalName", "uploader"],
-  );
+test("metadata sınıflandırması ham ad/değer sızdırmadan bilinmeyen veya geçersiz alanı raporlar", () => {
+  const uuid = "0f8b2c1d-3a4e-45f6-8a9b-0c1d2e3f4a5b";
+  assert.deepEqual(classifyMetadataFields({ sha256: "a".repeat(64), documentId: uuid }), []);
+  const findings = classifyMetadataFields({
+    sha256: "x", originalName: "gizli-Ahmet Yılmaz.pdf", uploader: "ad",
+  });
+  assert.ok(findings.some((entry) => entry.startsWith("INVALID_SAFE_VALUE:")));
+  assert.ok(findings.some((entry) => entry.startsWith("UNKNOWN_FIELD:")));
+  assert.ok(!JSON.stringify(findings).includes("Ahmet"));
+  assert.ok(!JSON.stringify(findings).includes("Yılmaz"));
+  assert.ok(!JSON.stringify(findings).includes("originalName"));
   assert.deepEqual(classifyMetadataFields(undefined), []);
+});
+
+test("yalnız rakamdan oluşan hassas kimlik opak token sayılmaz; Unicode maske ham karakter sızdırmaz", () => {
+  assert.equal(classifyObjectKey(
+    "originals/12345678901/98765432109", "original",
+  ).legacy, true);
+  const masked = maskObjectKey("éЖ😀/12345678901");
+  assert.ok(!masked.includes("é"));
+  assert.ok(!masked.includes("Ж"));
+  assert.ok(!masked.includes("😀"));
+  assert.ok(!masked.includes("12345678901"));
 });
 
 // ---------------------------------------------------------------------------
@@ -129,7 +149,8 @@ test("eski anahtar envantere maskeli girer, if-absent kopyalanır, SHA doğrulan
   const target = fixture();
   try {
     await applyArchiveMigrations(target.db);
-    const safe = await seedDocument(target, "uyumlu", "originals/uyumlu/obj-uyumlu", "politika uyumlu içerik");
+    const safeUuid = "0f8b2c1d-3a4e-45f6-8a9b-0c1d2e3f4a5b";
+    const safe = await seedDocument(target, "uyumlu", `originals/${safeUuid}/${safeUuid}`, "politika uyumlu içerik");
     const legacy = await seedDocument(target, "eski", LEGACY_KEY, "eski anahtarlı içerik", {
       metadata: { sha256: sha256("eski anahtarlı içerik"), originalName: "tapu-Ahmet Yılmaz.pdf" },
     });
@@ -139,7 +160,9 @@ test("eski anahtar envantere maskeli girer, if-absent kopyalanır, SHA doğrulan
     const row = target.db.raw.prepare(`SELECT source_object_key, target_object_key, masked_key_pattern,
         classification_json, source_sha256, status FROM legacy_key_migrations`).get() as Record<string, string>;
     assert.equal(row.source_object_key, LEGACY_KEY);
-    assert.equal(row.target_object_key, secureTargetKey("original", "eski", legacy.objectId));
+    assert.equal(classifyObjectKey(row.target_object_key, "original").legacy, false);
+    assert.ok(!row.target_object_key.includes("eski"));
+    assert.ok(!row.target_object_key.includes(legacy.objectId));
     assert.ok(!row.masked_key_pattern.includes("Ahmet"), "envanter maskelidir");
     assert.ok(!row.classification_json.includes("Ahmet"));
 
@@ -151,7 +174,9 @@ test("eski anahtar envantere maskeli girer, if-absent kopyalanır, SHA doğrulan
     assert.equal(done.status, "COMPLETED");
     assert.equal(done.target_sha256, legacy.digest, "taşıma öncesi/sonrası SHA aynıdır");
     assert.ok(done.verified_at);
-    assert.deepEqual(JSON.parse(done.metadata_findings_json), ["originalName"]);
+    const metadataFindings = JSON.parse(done.metadata_findings_json) as string[];
+    assert.ok(metadataFindings.some((entry) => entry.startsWith("UNKNOWN_FIELD:")));
+    assert.ok(!done.metadata_findings_json.includes("originalName"));
 
     // Referans atomik değişti; okuma yolu yeni anahtarı sunar.
     const resolved = await resolveOriginalObject(target.db, "eski");
@@ -161,7 +186,7 @@ test("eski anahtar envantere maskeli girer, if-absent kopyalanır, SHA doğrulan
     // Hedef temiz metadata taşır; eski nesne SİLİNMEMİŞTİR (tasfiye ayrı roldedir).
     const targetEntry = target.vault.entries.get(row.target_object_key)!;
     assert.deepEqual(Object.keys(targetEntry.customMetadata ?? {}).sort(),
-      ["binaryObjectId", "documentId", "objectClass", "sha256"]);
+      ["objectClass", "sha256"]);
     assert.ok(target.vault.entries.has(LEGACY_KEY), "eski nesne geri dönüş süresi boyunca yerinde durur");
 
     // Denetim kanıtı ham anahtarı/özgün adı içermez.
@@ -175,6 +200,83 @@ test("eski anahtar envantere maskeli girer, if-absent kopyalanır, SHA doğrulan
     assert.equal(second.enqueued, 0);
     assert.equal((target.db.raw.prepare("SELECT COUNT(*) AS count FROM legacy_key_migrations").get() as { count: number }).count, 1);
     assert.ok(target.vault.entries.has(safe.key));
+    const scopedSummary = await readKeyMigrationSummary(target.db, "Belirlenmedi");
+    assert.equal(scopedSummary.completed, 1);
+    assert.equal(scopedSummary.inventory, null, "birim kullanıcısına tüm arşiv ilerlemesi sızmaz");
+    assert.ok((await readKeyMigrationSummary(target.db, "*")).inventory);
+  } finally {
+    target.db.close();
+  }
+});
+
+test("anahtarı güvenli fakat metadata bulgulu nesne yeni opak anahtarla yeniden paketlenir", async () => {
+  const target = fixture();
+  try {
+    await applyArchiveMigrations(target.db);
+    const uuid = "0f8b2c1d-3a4e-45f6-8a9b-0c1d2e3f4a5b";
+    const seeded = await seedDocument(target, "metadata", `originals/${uuid}/${uuid}`, "temiz içerik", {
+      metadata: { sha256: sha256("temiz içerik"), originalName: "Ahmet Yılmaz.pdf" },
+    });
+
+    const inventory = await runKeyInventorySlice(dependencies(target));
+    assert.equal(inventory.enqueued, 1);
+    const queued = target.db.raw.prepare(`SELECT target_object_key, metadata_findings_json
+      FROM legacy_key_migrations`).get() as Record<string, string>;
+    assert.notEqual(queued.target_object_key, seeded.key);
+    assert.ok(!queued.metadata_findings_json.includes("Ahmet"));
+
+    assert.equal((await processNextKeyMigrationJob(dependencies(target))).result, "COMPLETED");
+    const resolved = await resolveOriginalObject(target.db, "metadata");
+    assert.equal(resolved?.object_key, queued.target_object_key);
+    assert.deepEqual(target.vault.entries.get(queued.target_object_key)?.customMetadata, {
+      sha256: seeded.digest,
+      objectClass: "original",
+    });
+  } finally {
+    target.db.close();
+  }
+});
+
+test("türev ad alanı envantere girer ve kendi dar tüketicisi tarafından tamamlanır", async () => {
+  const target = fixture();
+  try {
+    await applyArchiveMigrations(target.db);
+    const uuid = "0f8b2c1d-3a4e-45f6-8a9b-0c1d2e3f4a5b";
+    await seedDocument(target, "turev", `originals/${uuid}/${uuid}`, "asıl içerik");
+    const content = "erişim türevi";
+    const digest = sha256(content);
+    const bytes = new TextEncoder().encode(content).byteLength;
+    const legacyDerivative = "derivatives/turev/erişim-Ahmet.pdf";
+    target.db.raw.prepare(`INSERT INTO binary_objects
+      (id, document_id, object_class, object_key, bucket_or_namespace, media_type, byte_size, sha256)
+      VALUES ('access-turev', 'turev', 'access', ?, 'DERIVATIVE_FILES', 'application/pdf', ?, ?)`)
+      .run(legacyDerivative, bytes, digest);
+    await target.staging.put(legacyDerivative, content, {
+      contentType: "application/pdf",
+      customMetadata: { sha256: digest, objectClass: "access" },
+    });
+
+    const common = dependencies(target);
+    const inventory = await runKeyInventorySlice({
+      ...common,
+      readerForNamespace: (namespace) => {
+        assert.ok(namespace === "ARCHIVE_FILES" || namespace === "DERIVATIVE_FILES");
+        return target.reader;
+      },
+    });
+    assert.equal(inventory.enqueued, 1);
+    assert.equal((await processNextKeyMigrationJob({
+      ...common,
+      namespace: "ARCHIVE_FILES",
+    })).processed, false, "arşiv rolü türev işini alamaz");
+    const migrated = await processNextKeyMigrationJob({
+      ...common,
+      namespace: "DERIVATIVE_FILES",
+    });
+    assert.equal(migrated.result, "COMPLETED");
+    const object = target.db.raw.prepare("SELECT object_key FROM binary_objects WHERE id = 'access-turev'")
+      .get() as { object_key: string };
+    assert.equal(classifyObjectKey(object.object_key, "access").legacy, false);
   } finally {
     target.db.close();
   }
@@ -201,7 +303,10 @@ test("dolu hedef üzerine yazılmaz: içerik farklıysa iş başarısız kalır,
     // (Backoff penceresi test saatinde sabit olduğundan elle açılır.)
     target.db.raw.prepare("UPDATE legacy_key_migrations SET next_attempt_at = NULL").run();
     target.vault.entries.delete(row.target_object_key);
-    await target.staging.put(row.target_object_key, "doğru içerik", { contentType: "application/pdf" });
+    await target.staging.put(row.target_object_key, "doğru içerik", {
+      contentType: "application/pdf",
+      customMetadata: { sha256: legacy.digest, objectClass: "original" },
+    });
     const recovered = await processNextKeyMigrationJob(dependencies(target));
     assert.equal(recovered.result, "COMPLETED");
     assert.equal((await resolveOriginalObject(target.db, "catisma"))?.object_key, row.target_object_key);

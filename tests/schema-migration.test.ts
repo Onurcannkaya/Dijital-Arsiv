@@ -408,3 +408,21 @@ test("görüntüleme erişim türevini, indirme aslı çözer", async () => {
     db.close();
   }
 });
+
+test("v19 anahtar taşıma şeması kaynak bekleme ve tasfiye kanıtıyla v20'ye yükselir", async () => {
+  const db = createSqliteD1();
+  try {
+    await applyArchiveMigrations(db);
+    db.raw.exec("ALTER TABLE legacy_key_migrations DROP COLUMN source_retire_after");
+    db.raw.exec("ALTER TABLE legacy_key_migrations DROP COLUMN source_disposed_at");
+    db.raw.prepare("UPDATE schema_state SET version = 19 WHERE id = 'archive'").run();
+
+    const result = await applyArchiveMigrations(db);
+    assert.deepEqual(result, { applied: true, from: 19, to: ARCHIVE_SCHEMA_VERSION });
+    const columns = db.raw.prepare("PRAGMA table_info(legacy_key_migrations)").all() as Array<{ name: string }>;
+    assert.ok(columns.some((column) => column.name === "source_retire_after"));
+    assert.ok(columns.some((column) => column.name === "source_disposed_at"));
+  } finally {
+    db.close();
+  }
+});

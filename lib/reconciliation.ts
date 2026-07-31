@@ -226,7 +226,7 @@ async function storagePhaseSlice(
         -- F1.8: taşınmış eski anahtar tasfiyeye kadar bilinçli olarak yerinde
         -- durur; kopya-değişim penceresindeki hedef de sahipsiz sayılmaz.
         EXISTS (SELECT 1 FROM legacy_key_migrations WHERE bucket_or_namespace = ?2
-          AND ((source_object_key = ?1 AND status = 'COMPLETED')
+          AND ((source_object_key = ?1 AND status = 'COMPLETED' AND source_disposed_at IS NULL)
             OR (target_object_key = ?1 AND status <> 'FAILED'))) AS key_migration_known
       FROM (SELECT 1)`).bind(object.key, namespace.name, new Date(recentThresholdMs).toISOString())
       .first<{ binary_id: string | null; document_id: string | null;

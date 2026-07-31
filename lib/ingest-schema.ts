@@ -219,6 +219,8 @@ export const ingestTableStatements: readonly string[] = [
     last_error TEXT,
     verified_at TEXT,
     completed_at TEXT,
+    source_retire_after TEXT,
+    source_disposed_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (status IN ('QUEUED', 'COPYING', 'RETRY', 'COMPLETED', 'FAILED')),
