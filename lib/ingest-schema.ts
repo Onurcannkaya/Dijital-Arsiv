@@ -440,4 +440,26 @@ export const ingestTableStatements: readonly string[] = [
   )`,
   "CREATE INDEX IF NOT EXISTS access_tickets_user_expiry_idx ON access_tickets (user_id, expires_at)",
   "CREATE INDEX IF NOT EXISTS access_tickets_object_idx ON access_tickets (binary_object_id)",
+
+  // F1.9 / ADR-015: 60 sn'lik tek kullanımlık değişim bileti, kapsamı sabit ve
+  // süreli görüntüleme oturumuna dönüşür. Açık token tutulmaz; yalnız özet.
+  `CREATE TABLE IF NOT EXISTS access_sessions (
+    id TEXT PRIMARY KEY NOT NULL,
+    session_hash TEXT NOT NULL UNIQUE,
+    access_ticket_id TEXT NOT NULL UNIQUE REFERENCES access_tickets(id),
+    user_id TEXT NOT NULL,
+    document_id TEXT NOT NULL REFERENCES archive_documents(id) ON DELETE CASCADE,
+    binary_object_id TEXT NOT NULL REFERENCES binary_objects(id) ON DELETE CASCADE,
+    object_class TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    idle_expires_at TEXT NOT NULL,
+    absolute_expires_at TEXT NOT NULL,
+    last_used_at TEXT NOT NULL,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (length(session_hash) = 64),
+    CHECK (object_class IN ('original', 'access', 'ocr', 'preservation', 'thumbnail')),
+    CHECK (length(trim(purpose)) > 0)
+  )`,
+  "CREATE INDEX IF NOT EXISTS access_sessions_user_absolute_idx ON access_sessions (user_id, absolute_expires_at)",
 ];

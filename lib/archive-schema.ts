@@ -41,7 +41,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 20;
+export const ARCHIVE_SCHEMA_VERSION = 21;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -727,6 +727,13 @@ async function createLegacyKeyMigrationTable(db: D1Database) {
   }
 }
 
+/** F1.9: görüntüleme oturumu tablosu mevcut kurulumlara eklenir. */
+async function createAccessSessionTable(db: D1Database) {
+  for (const statement of ingestTableStatements.filter((sql) => sql.includes("access_sessions"))) {
+    await db.prepare(statement).run();
+  }
+}
+
 /** F1.8 sertleştirmesi: kaynak kopyanın bekleme ve ayrı tasfiye kanıtı. */
 async function migrateLegacyKeyRetentionEvidence(db: D1Database) {
   if (!(await tableExists(db, "legacy_key_migrations"))) return;
@@ -1163,6 +1170,8 @@ const structuralMigrations: MigrationStep[] = [
   { version: 19, run: createLegacyKeyMigrationTable },
   // 19 → 20: eski kaynak için bekleme sonu ve ayrı tasfiye kanıtı.
   { version: 20, run: migrateLegacyKeyRetentionEvidence },
+  // 20 → 21: tek kullanımlık bilet değişimi ve süreli görüntüleme oturumu.
+  { version: 21, run: createAccessSessionTable },
 ];
 
 /**

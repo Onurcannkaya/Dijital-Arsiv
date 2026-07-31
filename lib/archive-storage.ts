@@ -38,6 +38,11 @@ export {
   runKeyInventorySlice, type KeyMigrationDependencies,
 } from "./key-migration.ts";
 export { classifyObjectKey, maskObjectKey, secureTargetKey } from "./key-classification.ts";
+export {
+  ACCESS_SESSION_ABSOLUTE_MS, ACCESS_SESSION_IDLE_MS, ACCESS_TICKET_TTL_SECONDS,
+  AccessTicketError, consumeDownloadTicket, exchangeViewTicket, issueAccessTicket,
+  touchViewSession, type AccessScope, type ViewSession,
+} from "./access-tickets.ts";
 export { isPendingDerivative, type PendingDerivative } from "./binary-objects.ts";
 
 export type ArchiveBindings = {

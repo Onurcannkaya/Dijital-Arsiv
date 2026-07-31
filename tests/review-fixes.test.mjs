@@ -5,19 +5,21 @@ import test from "node:test";
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("görüntüleme erişim türevini, indirme aslı sunar", async () => {
-  const [route, storage, contract, main, processor] = await Promise.all([
+  const [route, ticketRoute, storage, contract, main, processor] = await Promise.all([
     read("app/api/documents/[id]/file/route.ts"),
+    read("app/api/documents/[id]/access-ticket/route.ts"),
     read("lib/archive-storage.ts"),
     read("lib/ocr-contract.ts"),
     read("services/ocr/app/main.py"),
     read("app/api/jobs/process/route.ts"),
   ]);
-  // Görüntüleme ve indirme farklı nesne çözer; yalnız başlık farkı yetmez.
-  assert.match(route, /resolveViewableObject/);
-  assert.match(route, /isDownload\s*\n?\s*\?\s*await resolveOriginalObject/);
+  // F1.9: nesne çözümü bilet üretiminde yapılır ve bilet nesneye sabitlenir;
+  // görüntüleme türevi, indirme aslı çözer.
+  assert.match(ticketRoute, /resolveViewableObject/);
+  assert.match(ticketRoute, /scope === "DOWNLOAD"\s*\n?\s*\?\s*await resolveOriginalObject/);
   assert.match(storage, /resolveViewableObject/);
-  // Sunulan sınıf denetime yazılır: türev yoksa asıl sunulduğu görünür.
-  assert.match(route, /servedObjectClass: resolved\.objectClass/);
+  // Sunulan sınıf denetime yazılır: hangi nesne sınıfının verildiği görünür.
+  assert.match(route, /servedObjectClass: servable\.object_class/);
   assert.match(route, /"x-archive-object-class"/);
   // Türev OCR servisinde üretilir ve nesne kaydına bağlanır.
   assert.match(main, /def build_access_derivative/);

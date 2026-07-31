@@ -675,6 +675,21 @@ süreli kullanıcı+belge kapsamlı oturum üretir. Açık indirme bileti ayrı 
 - Kullanıcı veya tarayıcı kalıcı bucket erişim anahtarı alamaz.
 - Yetki reddi ve başarılı erişim, hassas veri sızdırmadan denetim kaydına girer.
 
+**Uygulama durumu (F1.9 — bilet bölümü):** Şema v21 ile `access_sessions`
+eklendi. `lib/access-tickets.ts` ADR-015 profilini uygular: 256 bitlik opak
+bilet 60 saniye geçerlidir ve tek UPDATE içinde bütün bağlama koşullarıyla
+(kullanıcı, belge, kapsam, süre, tek kullanım, iptal) atomik tüketilir; VIEW
+değişimi 15 dk boşta / 30 dk mutlak süreli, nesneye sabitlenmiş görüntüleme
+oturumu üretir ve boşta kalma penceresi mutlak tavana kırpılır. DOWNLOAD
+bileti oturum üretmeyen tek seferlik teslimdir. Veritabanı ve denetim yalnız
+SHA-256 özet taşır; bütün redler tek tip yanıttır ve `document.access-denied`
+olayıyla denetlenir. `/api/documents/[id]/file` artık bilet/oturum olmadan
+içerik sunmaz; oturum istekleri `Range` destekler ve içerik bilet anındaki
+yetkili nesneye sabitlenir. Bilet üretimi `POST /api/documents/[id]/access-ticket`
+ucundadır ve arayüz görüntüleme/indirme için bu akışı kullanır. Depolama
+düzlemi rol/IAM ayrımı, gerçek kova kimlik testleri (T-04/T-05/T-06) ve
+kalıcı anahtar sızıntısı ağ izi denetimi staging koşusuna (F1.11) aittir.
+
 ### F1.10 — Yedek geri yükleme ve sağlayıcı taşınabilirliği
 
 **Amaç:** Depolama sağlayıcısı veya ortam kaybında belgeyi yalnız dosya olarak

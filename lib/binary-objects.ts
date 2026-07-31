@@ -5,6 +5,8 @@
  */
 
 export type StoredObject = {
+  /** Yetkili `binary_objects` kimliği; erişim bileti bu kimliğe bağlanır (F1.9). */
+  id: string;
   object_key: string;
   bucket_or_namespace: string;
   media_type: string;
@@ -29,7 +31,7 @@ export function isPendingDerivative(value: ResolvedObject | PendingDerivative): 
 }
 
 export async function resolveOriginalObject(db: D1Database, documentId: string): Promise<StoredObject | null> {
-  return await db.prepare(`SELECT object_key, bucket_or_namespace, media_type, byte_size, sha256
+  return await db.prepare(`SELECT id, object_key, bucket_or_namespace, media_type, byte_size, sha256
     FROM binary_objects
     WHERE document_id = ? AND object_class = 'original' AND retention_status <> 'DISPOSED'
     LIMIT 1`).bind(documentId).first<StoredObject>();
@@ -78,7 +80,7 @@ export async function resolveViewableObject(
       ORDER BY completed_at DESC, created_at DESC LIMIT 1`)
       .bind(documentId).first<CompletedGeneration>();
     if (!generation) return { pendingDerivative: true };
-    const rows = await db.prepare(`SELECT object_key, bucket_or_namespace, media_type, byte_size,
+    const rows = await db.prepare(`SELECT id, object_key, bucket_or_namespace, media_type, byte_size,
         sha256, page_start, page_end, derivative_generation_id
       FROM binary_objects
       WHERE document_id = ? AND object_class = 'access'
@@ -94,7 +96,7 @@ export async function resolveViewableObject(
     };
   }
 
-  const access = await db.prepare(`SELECT object_key, bucket_or_namespace, media_type, byte_size,
+  const access = await db.prepare(`SELECT id, object_key, bucket_or_namespace, media_type, byte_size,
       sha256, page_start, page_end, derivative_generation_id
     FROM binary_objects
     WHERE document_id = ? AND object_class = 'access' AND retention_status <> 'DISPOSED'

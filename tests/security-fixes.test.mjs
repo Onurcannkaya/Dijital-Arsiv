@@ -35,15 +35,19 @@ test("OCR servisi anahtarsız çalışmaz", async () => {
 });
 
 test("görüntüleme ve indirme ayrı yetkilidir ve denetlenir", async () => {
-  const [fileRoute, authorization, audit] = await Promise.all([
+  const [fileRoute, ticketRoute, authorization, audit] = await Promise.all([
     read("app/api/documents/[id]/file/route.ts"),
+    read("app/api/documents/[id]/access-ticket/route.ts"),
     read("lib/authorization.ts"),
     read("lib/audit.ts"),
   ]);
   assert.match(authorization, /"document\.download"/);
   // Görüntüleyici rolü indirme yetkisi almaz.
   assert.match(authorization, /viewer: \["document\.read"\]/);
-  assert.match(fileRoute, /isDownload \? "document\.download" : "document\.read"/);
+  // F1.9: yetki ayrımı bilet üretiminde uygulanır; dosya rotası bilet/oturum ister.
+  assert.match(ticketRoute, /scope === "DOWNLOAD" \? "document\.download" : "document\.read"/);
+  assert.match(fileRoute, /TICKET_REQUIRED/);
+  assert.match(fileRoute, /document\.access-denied/);
   assert.match(fileRoute, /document\.downloaded/);
   assert.match(fileRoute, /document\.viewed/);
   // Denetim kaydı yazılamazsa dosya sunulmaz.

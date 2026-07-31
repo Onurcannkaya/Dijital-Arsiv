@@ -773,6 +773,28 @@ export const accessTickets = sqliteTable("access_tickets", {
   check("access_tickets_hash_check", sql`length(${table.ticketHash}) = 64`),
   check("access_tickets_purpose_check", sql`length(trim(${table.purpose})) > 0`),
 ]);
+
+/** F1.9 — `lib/ingest-schema.ts` görüntüleme oturumu tanımının tip aynası. */
+export const accessSessions = sqliteTable("access_sessions", {
+  id: text("id").primaryKey(),
+  sessionHash: text("session_hash").notNull().unique(),
+  accessTicketId: text("access_ticket_id").notNull().unique().references(() => accessTickets.id),
+  userId: text("user_id").notNull(),
+  documentId: text("document_id").notNull().references(() => archiveDocuments.id, { onDelete: "cascade" }),
+  binaryObjectId: text("binary_object_id").notNull().references(() => binaryObjects.id, { onDelete: "cascade" }),
+  objectClass: text("object_class").notNull(),
+  purpose: text("purpose").notNull(),
+  idleExpiresAt: text("idle_expires_at").notNull(),
+  absoluteExpiresAt: text("absolute_expires_at").notNull(),
+  lastUsedAt: text("last_used_at").notNull(),
+  revokedAt: text("revoked_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("access_sessions_user_absolute_idx").on(table.userId, table.absoluteExpiresAt),
+  check("access_sessions_hash_check", sql`length(${table.sessionHash}) = 64`),
+  check("access_sessions_class_check", sql`${table.objectClass} IN ('original', 'access', 'ocr', 'preservation', 'thumbnail')`),
+  check("access_sessions_purpose_check", sql`length(trim(${table.purpose})) > 0`),
+]);
 export const uploadSessionEvents = sqliteTable("upload_session_events", {
   id: text("id").primaryKey(),
   uploadSessionId: text("upload_session_id").notNull().references(() => uploadSessions.id, { onDelete: "cascade" }),

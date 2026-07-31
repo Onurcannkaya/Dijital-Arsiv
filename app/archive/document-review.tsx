@@ -63,6 +63,50 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const [notice,setNotice]=useState("");
   const [activeValueId,setActiveValueId]=useState<string|null>(null);
   const [previewMode,setPreviewMode]=useState<"image"|"text">("image");
+  const [fileSrc,setFileSrc]=useState("");
+
+  /** F1.9: tek kullanımlık VIEW bileti alır ve içeriği yerel blob olarak tutar.
+   * Bilet tek sefer tüketildiği için <img>/<object> yeniden yüklemeleri blob
+   * URL üzerinden çalışır; açık token hiçbir yerde saklanmaz. */
+  const requestTicket=useCallback(async(scope:"VIEW"|"DOWNLOAD",purpose:string)=>{
+    const response=await fetch(`/api/documents/${documentId}/access-ticket`,{
+      method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({scope,purpose}),
+    });
+    const payload=await response.json() as {ticket?:string;error?:string};
+    if(!response.ok||!payload.ticket) throw new Error(payload.error||"Erişim bileti alınamadı.");
+    return payload.ticket;
+  },[documentId]);
+
+  useEffect(()=>{
+    if(!detail) return;
+    let cancelled=false;
+    let objectUrl="";
+    (async()=>{
+      try {
+        const ticket=await requestTicket("VIEW","belge inceleme");
+        const response=await fetch(`${detail.document.fileUrl}?ticket=${encodeURIComponent(ticket)}`);
+        if(!response.ok) throw new Error("Belge görüntüsü alınamadı.");
+        const blob=await response.blob();
+        if(cancelled) return;
+        objectUrl=URL.createObjectURL(blob);
+        setFileSrc(objectUrl);
+      } catch(reason) {
+        if(!cancelled) setError(reason instanceof Error?reason.message:"Belge görüntüsü alınamadı.");
+      }
+    })();
+    return()=>{cancelled=true;if(objectUrl) URL.revokeObjectURL(objectUrl);};
+  },[detail,requestTicket]);
+
+  const downloadOriginal=async()=>{
+    if(!detail) return;
+    try {
+      const ticket=await requestTicket("DOWNLOAD","asıl belge indirme");
+      window.location.assign(`${detail.document.fileUrl}?scope=DOWNLOAD&ticket=${encodeURIComponent(ticket)}`);
+    } catch(reason) {
+      setError(reason instanceof Error?reason.message:"İndirme bileti alınamadı.");
+    }
+  };
 
   const load=useCallback(async()=>{
     setLoading(true);
@@ -205,8 +249,8 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     <div className="review-grid">
       <aside className="thumbs">{(detail.pages.length?detail.pages:[{pageNumber:1}]).map((page,index)=><button className={index===0?"active":""} key={page.pageNumber}><span>{page.pageNumber}</span><i/></button>)}</aside>
       <section className="document">
-        <div className="document-tools"><span>{detail.document.originalName}</span>{canDownload?<a className="download-original" href={`${detail.document.fileUrl}?download=1`} download><Download size={14}/> Aslını indir</a>:null}<div className="preview-switch"><button className={previewMode==="image"?"active":""} onClick={()=>setPreviewMode("image")} aria-label="Belge görüntüsü"><ImageIcon size={15}/> Görüntü</button><button className={previewMode==="text"?"active":""} onClick={()=>setPreviewMode("text")} disabled={!detail.pages.length} aria-label="Okunabilir OCR metni"><FileText size={15}/> Okunabilir metin</button></div></div>
-        <div className="real-preview">{previewMode==="text"?<article className="ocr-transcript"><header><div><span><FileText size={17}/><b>Onaylı ve aranabilir belge metni</b><em className={textPending?"pending":"verified"}>{textPending?"Kontrol bekliyor":"Personel onaylı"}</em></span><small>Otomatik metni asıl belgeyle karşılaştırın. Kaydedilen her düzeltme sürüm ve SHA-256 denetim iziyle korunur.</small></div>{canReview&&!archived?<button className="text-confirm" onClick={saveText} disabled={savingText||(!textPending&&!hasTextChanges)}>{savingText?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {hasTextChanges?"Düzeltmeleri kaydet":"Metni onayla"}</button>:null}</header>{detail.pages.map(page=><section key={page.pageNumber}><h3><span>Sayfa {page.pageNumber}</span>{page.confirmedBy?<small>{page.confirmedBy} · {page.confirmedAt?new Date(page.confirmedAt).toLocaleString("tr-TR"):"Onaylandı"}</small>:<small>Henüz personel onayı yok</small>}</h3>{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:isImage?<div className="image-evidence"><img src={detail.document.fileUrl} alt={`${detail.document.referenceNo} asıl belge`}/>{selected&&evidencePage&&selected.box.some(value=>value>0)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}/>:null}</div>:<object data={detail.document.fileUrl} type={detail.document.mediaType} aria-label={`${detail.document.referenceNo} asıl belge`}><a href={detail.document.fileUrl}>Asıl dosyayı aç</a></object>}</div>
+        <div className="document-tools"><span>{detail.document.originalName}</span>{canDownload?<button className="download-original" onClick={()=>{void downloadOriginal()}} type="button"><Download size={14}/> Aslını indir</button>:null}<div className="preview-switch"><button className={previewMode==="image"?"active":""} onClick={()=>setPreviewMode("image")} aria-label="Belge görüntüsü"><ImageIcon size={15}/> Görüntü</button><button className={previewMode==="text"?"active":""} onClick={()=>setPreviewMode("text")} disabled={!detail.pages.length} aria-label="Okunabilir OCR metni"><FileText size={15}/> Okunabilir metin</button></div></div>
+        <div className="real-preview">{previewMode==="text"?<article className="ocr-transcript"><header><div><span><FileText size={17}/><b>Onaylı ve aranabilir belge metni</b><em className={textPending?"pending":"verified"}>{textPending?"Kontrol bekliyor":"Personel onaylı"}</em></span><small>Otomatik metni asıl belgeyle karşılaştırın. Kaydedilen her düzeltme sürüm ve SHA-256 denetim iziyle korunur.</small></div>{canReview&&!archived?<button className="text-confirm" onClick={saveText} disabled={savingText||(!textPending&&!hasTextChanges)}>{savingText?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {hasTextChanges?"Düzeltmeleri kaydet":"Metni onayla"}</button>:null}</header>{detail.pages.map(page=><section key={page.pageNumber}><h3><span>Sayfa {page.pageNumber}</span>{page.confirmedBy?<small>{page.confirmedBy} · {page.confirmedAt?new Date(page.confirmedAt).toLocaleString("tr-TR"):"Onaylandı"}</small>:<small>Henüz personel onayı yok</small>}</h3>{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:isImage?<div className="image-evidence"><img src={fileSrc||undefined} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&selected.box.some(value=>value>0)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}/>:null}</div>:<object data={fileSrc||undefined} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Güvenli görüntüleme kopyası bu tarayıcıda gösterilemiyor.</p></object>}</div>
       </section>
       <aside className="fields">
         <header><Sparkles size={18}/><span><b>OCR alan kanıtları</b><small>{detail.fields.length?`${detail.fields.length} değer · ${detail.fieldGroups.length} alan`:"Henüz OCR sonucu yok"}</small></span><em>{detail.pages[0]?.model||"PaddleOCR"}</em></header>
