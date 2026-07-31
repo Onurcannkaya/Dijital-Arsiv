@@ -729,6 +729,23 @@ Taşınabilir paket en az şunları içerir:
   sayılmaz.
 - Tatbikat RPO/RTO hedefleri ve gerçek sürelerle raporlanır.
 
+**Uygulama durumu (F1.10 — paket bölümü):** `lib/storage-manifest.ts`
+taşınabilir paketi üretir: kanonik (deterministik) JSON manifest; mantıksal
+kimlikler, nesne sınıfı/boyut/medya/SHA-256, belge üst verisi + profil sürümü,
+doğrulanmış varlık ilişkileri, OCR metin bağlamı ve denetim zincirinin bağ
+bütünlüğü doğrulanan bölümü. Sağlayıcı anahtarı/ETag/sürüm kimliği pakete
+girmez; testler manifestte bu alanların bulunmadığını ve farklı sağlayıcı
+kimlikleri üreten ikinci S3 uyumlu adaptörde doğrulamanın yalnız içerik
+SHA'sıyla geçtiğini kanıtlar. Dışa aktarım her nesneyi kaynağından akışla
+okuyup hedefe yetkili SHA beyanıyla yazar; `verifyPortablePackage` hedeften
+tam okuma ile doğrular; `restorePortablePackage` bağımsız veritabanı ve
+geri yükleme alanına belge bağlamını (nesneler, ilişkiler, OCR metni) açar ve
+bozuk denetim zinciri bağını geri yüklemeden önce reddeder.
+`scripts/verify-storage-manifest.mjs` diske aktarılmış paketi tatbikat kanıtı
+için doğrular. OCR kelime koordinatları pilot pakete alınmaz (metin bağlamı
+taşınır). Gerçek yedek işleri, RPO/RTO tatbikatı, ikinci gerçek sağlayıcı
+koşusu ve T-09/T-10 kanıtları staging'e (F1.11) aittir.
+
 ### F1.11 — Otomatik kabul ve kanıt kapısı
 
 **Amaç:** “Kod var” ile “politika kanıtla geçiyor” arasındaki farkı CI ve

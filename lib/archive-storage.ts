@@ -39,6 +39,11 @@ export {
 } from "./key-migration.ts";
 export { classifyObjectKey, maskObjectKey, secureTargetKey } from "./key-classification.ts";
 export {
+  PORTABLE_PACKAGE_VERSION, buildPortableManifest, canonicalJson, exportPortablePackage,
+  manifestDigest, restorePortablePackage, verifyAuditLinkage, verifyPortablePackage,
+  type PortableManifest,
+} from "./storage-manifest.ts";
+export {
   ACCESS_SESSION_ABSOLUTE_MS, ACCESS_SESSION_IDLE_MS, ACCESS_TICKET_TTL_SECONDS,
   AccessTicketError, consumeDownloadTicket, exchangeViewTicket, issueAccessTicket,
   purposeForScope, revokeViewSession, touchViewSession,
