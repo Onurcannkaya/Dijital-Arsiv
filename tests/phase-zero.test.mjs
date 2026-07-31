@@ -93,6 +93,32 @@ test("dağıtım sözleşmesi sırları, şema göçünü ve readiness kontrolü
   assert.match(sitesPlugin, /rm\(copiedLocalSecrets/);
 });
 
+test("dağıtım workflow'u kaliteyi, dağıtımı, doğrulamayı ve rollback'i bağlar", async () => {
+  const [deploy, pkg] = await Promise.all([
+    read(".github/workflows/deploy.yml"),
+    read("package.json"),
+  ]);
+  const scripts = JSON.parse(pkg).scripts;
+  // Sıra sözleşmesi: kalite kapısı → dağıtım → dağıtım doğrulaması → koşullu rollback.
+  assert.match(deploy, /npm run verify/);
+  assert.match(deploy, /id: deploy/);
+  assert.match(deploy, /npm run deploy:verify/);
+  assert.match(deploy, /npm run "?deploy:\$\{DEPLOY_ENV\}"?/);
+  // Rollback yalnız dağıtım başarılıyken ve sonraki adım düştüğünde tetiklenir.
+  assert.match(deploy, /if: failure\(\) && steps\.deploy\.outcome == 'success'/);
+  assert.match(deploy, /npm run deploy:rollback/);
+  // production yalnız elle tetiklenir; staging main'e push'ta otomatik.
+  assert.match(deploy, /workflow_dispatch/);
+  assert.match(deploy, /branches: \[main\]/);
+  assert.match(deploy, /environment: \$\{\{ github\.event\.inputs\.environment \|\| 'staging' \}\}/);
+  // Üçüncü taraf action'lar değişmez commit SHA'sına sabitli.
+  assert.doesNotMatch(deploy, /uses: [^@\n]+@v\d/);
+  // npm scriptleri wrangler dağıtım/rollback komutlarını taşır.
+  assert.match(scripts["deploy:staging"], /wrangler deploy --env staging/);
+  assert.match(scripts["deploy:production"], /wrangler deploy --env production/);
+  assert.match(scripts["deploy:rollback"], /wrangler rollback --env/);
+});
+
 test("OCR üretim imajı modeli gömer ve ayrıcalıksız kullanıcıyla çalışır", async () => {
   const [dockerfile, downloader, service] = await Promise.all([
     read("services/ocr/Dockerfile"),

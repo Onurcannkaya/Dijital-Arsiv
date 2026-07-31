@@ -13,6 +13,9 @@
         "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .wrangler --ignore-pattern outputs --ignore-pattern work",
         "typecheck": "tsc --noEmit",
         "verify": "npm run typecheck && npm run lint && npm test",
+        "deploy:staging": "wrangler deploy --env staging",
+        "deploy:production": "wrangler deploy --env production",
+        "deploy:rollback": "wrangler rollback --env \"${DEPLOY_ENV:-staging}\" --yes --message \"${ROLLBACK_MESSAGE:-deploy gate failed}\"",
         "deploy:verify": "node scripts/verify-deployment.mjs",
         "db:generate": "drizzle-kit generate"
     },
