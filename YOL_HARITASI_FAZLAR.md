@@ -777,6 +777,23 @@ Test katmanları:
 Faz 1 staging koşuları production verisi kullanmaz. Test nesneleri ayrı
 namespace/bucket, ayrı servis kimlikleri ve süreli yaşam döngüsüyle tutulur.
 
+**Uygulama durumu (F1.11 — otomasyon iskeleti):** `scripts/phase-one-acceptance-core.mjs`
+19 testlik kataloğu (12 politika + 7 kabul hattı), sonuç sözleşmesini
+(`PASS/FAIL/BLOCKED/NOT_APPLICABLE`) ve kapı kuralını saf/kod olarak tutar:
+19 test sonuçlandırılmadan, uygulanabilir olanların tamamı `PASS` olmadan ve
+`NOT_APPLICABLE` yalnız T-07'de yetkili ADR referansıyla kabul edilmeden kapı
+açılmaz; `FAIL`/`BLOCKED`/eksik/mükerrer/bilinmeyen sonuç kapıyı kapatır.
+`scripts/run-phase-one-acceptance.mjs` ortam yeteneklerini çözer, ön koşulu
+eksik veya yürütücüsü tanımsız testleri `BLOCKED` işaretler, değişmez `run_id`
+ile maskeli kanıt manifesti (sır/URL yolu sızdırmayan) yazar ve manifest özetini
+paket dışı güven köküne verilmek üzere raporlar. `.github/workflows/phase-one-acceptance.yml`
+yalnız `workflow_dispatch` ve `acceptance-*` etiketiyle, korumalı
+`phase-one-acceptance` ortam kapısı altında koşar; PR/push'ta çalışmaz ve
+kanıtı artefakt olarak saklar. **Staging yürütücüleri (`EXECUTORS`) bilinçli
+olarak boştur:** gerçek kaynaklar bağlanana kadar koşu kapıyı dürüstçe `BLOCKED`
+raporlar ve kırmızı biter. Gerçek R2/IAM kaynakları, canlı T-01…T-12 ve
+K-1…K-7 koşusu ile yetkili onaylar staging operasyon kapısına aittir.
+
 ## 7. Dosya bazında planlanan değişiklikler
 
 | Dosya/alan | Değişiklik |

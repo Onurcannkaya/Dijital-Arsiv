@@ -1,0 +1,72 @@
+name: Faz 1 kabul kanıtı
+
+# Kontrollü kabul koşusu: yalnız elle tetikleme veya sürümleme etiketiyle
+# çalışır; PR/push üzerinde otomatik koşmaz. Gerçek staging kaynakları
+# `phase-one-acceptance` ortamının onaylı sırlarından gelir; production verisi
+# kullanılmaz (kanıt rehberi §11 / FAZ_1_KANIT_REHBERI.md).
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Kabul ortamı
+        required: true
+        default: staging
+        type: choice
+        options: [staging]
+  push:
+    tags: ["acceptance-*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase-one-acceptance
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Ortam kapısı: sırlar ve zorunlu onaylayanlar GitHub environment koruma
+    # kurallarından gelir. Onay olmadan koşu başlamaz.
+    environment: phase-one-acceptance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+          cache: npm
+      - run: npm ci
+      # Kanıt sözleşmesinin kendi birim testleri önce yeşil olmalı.
+      - run: node --test tests/phase-one-acceptance.test.mjs
+      - name: Kabul koşusu
+        env:
+          ACCEPTANCE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          ACCEPTANCE_GIT_COMMIT: ${{ github.sha }}
+          ACCEPTANCE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          ACCEPTANCE_INITIATED_BY: ${{ github.actor }}
+          ACCEPTANCE_ADAPTER_PROFILE: ${{ vars.ACCEPTANCE_ADAPTER_PROFILE }}
+          ACCEPTANCE_APP_VERSION: ${{ github.ref_name }}
+          # Staging kaynakları ve dar servis kimlikleri korumalı sırlardan gelir.
+          ACCEPTANCE_BASE_URL: ${{ secrets.ACCEPTANCE_BASE_URL }}
+          ARCHIVE_MIGRATION_TOKEN: ${{ secrets.ARCHIVE_MIGRATION_TOKEN }}
+          ACCEPTANCE_S3_ENDPOINT: ${{ secrets.ACCEPTANCE_S3_ENDPOINT }}
+          ACCEPTANCE_ORIGINAL_BUCKET: ${{ secrets.ACCEPTANCE_ORIGINAL_BUCKET }}
+          ACCEPTANCE_RESTORE_BUCKET: ${{ secrets.ACCEPTANCE_RESTORE_BUCKET }}
+          ACCEPTANCE_SECOND_S3_ENDPOINT: ${{ secrets.ACCEPTANCE_SECOND_S3_ENDPOINT }}
+          ACCEPTANCE_SECOND_BUCKET: ${{ secrets.ACCEPTANCE_SECOND_BUCKET }}
+          ACCEPTANCE_VIEWER_IDENTITY: ${{ secrets.ACCEPTANCE_VIEWER_IDENTITY }}
+          ACCEPTANCE_UNAUTHORIZED_IDENTITY: ${{ secrets.ACCEPTANCE_UNAUTHORIZED_IDENTITY }}
+          ACCEPTANCE_LOCK_PROFILE: ${{ vars.ACCEPTANCE_LOCK_PROFILE }}
+          ACCEPTANCE_LOG_ENDPOINT: ${{ secrets.ACCEPTANCE_LOG_ENDPOINT }}
+          ACCEPTANCE_FAULT_INJECTION: ${{ vars.ACCEPTANCE_FAULT_INJECTION }}
+          ACCEPTANCE_LARGE_FIXTURES: ${{ vars.ACCEPTANCE_LARGE_FIXTURES }}
+        run: node scripts/run-phase-one-acceptance.mjs --out "outputs/acceptance/${ACCEPTANCE_RUN_ID}.json"
+      - name: Kanıt manifestini yükle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-evidence-${{ github.run_id }}
+          path: outputs/acceptance/
+          retention-days: 90
+          if-no-files-found: error
