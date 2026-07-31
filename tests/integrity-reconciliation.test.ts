@@ -409,3 +409,68 @@ test("v15 veritabanı veri kaybetmeden kiralı ve su işaretli v16 şemasına y�
     db.close();
   }
 });
+
+test("bütünlük ve uzlaştırma türev namespace'ini doğru rolle tarar", async () => {
+  const target = fixture();
+  const derivativeNamespace = new MemoryNamespace(() => new Date(OLD_TIMESTAMP));
+  const derivativeStaging = new MemoryStagingStorage(derivativeNamespace);
+  const derivativeReader = new MemoryObjectReader(derivativeNamespace);
+  const derivativeInventory = new MemoryStorageInventory(derivativeNamespace);
+  try {
+    await applyArchiveMigrations(target.db);
+    const seeded = await seedDocument(target, "coklu-depo", "asıl içerik");
+    const derivativeKey = "derivatives/coklu-depo/access/generation-1/part-0001.pdf";
+    const derivativeContent = "güvenli türev";
+    const derivativeSha = sha256(derivativeContent);
+    await derivativeStaging.put(derivativeKey, derivativeContent, {
+      contentType: "application/pdf",
+      customMetadata: { sha256: derivativeSha },
+    });
+    target.db.raw.prepare(`INSERT INTO binary_objects
+      (id, document_id, object_class, object_key, bucket_or_namespace, media_type,
+       byte_size, sha256, derived_from_id, generator, page_start, page_end,
+       derivative_generation_id, created_at)
+      VALUES ('access-coklu', 'coklu-depo', 'access', ?, 'DERIVATIVE_FILES',
+       'application/pdf', ?, ?, 'obj-coklu-depo', 'pdfium:test:access-pdf-v1',
+       1, 1, 'generation-1', ?)`)
+      .run(derivativeKey, new TextEncoder().encode(derivativeContent).byteLength,
+        derivativeSha, OLD_TIMESTAMP);
+
+    const readerFor = (namespace: string) => {
+      if (namespace === "ARCHIVE_FILES") return target.reader;
+      if (namespace === "DERIVATIVE_FILES") return derivativeReader;
+      throw new Error(`unexpected namespace ${namespace}`);
+    };
+    for (let guard = 0; guard < 20; guard += 1) {
+      const result = await runIntegritySlice(target.db, readerFor, target.hasher, 2);
+      if (result.done) break;
+    }
+    assert.equal((target.db.raw.prepare("SELECT COUNT(*) AS count FROM integrity_findings")
+      .get() as { count: number }).count, 0, "türev yanlış kovada aranmış olmamalı");
+
+    await derivativeStaging.put("derivatives/orphan/access/g/part-0001.pdf", "orphan", {
+      contentType: "application/pdf",
+    });
+    for (let guard = 0; guard < 30; guard += 1) {
+      const result = await runReconciliationSlice({
+        db: target.db,
+        inventory: target.inventory,
+        reader: target.reader,
+        namespaces: [
+          { name: "ARCHIVE_FILES", inventory: target.inventory, reader: target.reader },
+          { name: "DERIVATIVE_FILES", inventory: derivativeInventory, reader: derivativeReader },
+        ],
+        now: () => NOW,
+      }, { batchSize: 2, minAgeMinutes: 60 });
+      if (result.done) break;
+    }
+    const orphan = target.db.raw.prepare(`SELECT object_key FROM reconciliation_findings
+      WHERE finding_type = 'ORPHAN_OBJECT' AND object_key = ?`).get(derivativeKey.replace(
+        "coklu-depo/access/generation-1", "orphan/access/g",
+      )) as { object_key: string } | undefined;
+    assert.equal(orphan?.object_key, "derivatives/orphan/access/g/part-0001.pdf");
+    assert.ok(target.vault.entries.has(seeded.key));
+  } finally {
+    target.db.close();
+  }
+});

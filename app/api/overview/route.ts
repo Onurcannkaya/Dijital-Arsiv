@@ -1,7 +1,8 @@
 import { authorizeRequest } from "../../../lib/authorization";
 import {
-  readIntegrityProgress, readIntegritySummary, readMaintenanceProgress,
-  readReconciliationSummary, requireArchiveSchema, getArchiveBindings,
+  readDerivativeSummary, readIntegrityProgress, readIntegritySummary,
+  readMaintenanceProgress, readReconciliationSummary, requireArchiveSchema,
+  getArchiveBindings,
 } from "../../../lib/archive-storage";
 import { failure } from "../../../lib/errors";
 
@@ -118,6 +119,8 @@ export async function GET(request: Request) {
       // `reconciliation_findings` tablolarından gelir, dilim log'undan değil.
       integrityFindings: await readIntegritySummary(bindings.DB),
       reconciliation: await readReconciliationSummary(bindings.DB),
+      // F1.7: PDF erişim türevi kuyruğu; REVIEW_REQUIRED işletim metriğidir (ADR-015).
+      derivatives: await readDerivativeSummary(bindings.DB),
       // Kapasite kotası, yedekleme durumu ve servis sağlığı henüz ölçülmüyor;
       // uydurma değer döndürmek yerine açıkça bildirilmez.
       unmeasured: ["storageQuota", "lastBackup", "serviceHealth"],

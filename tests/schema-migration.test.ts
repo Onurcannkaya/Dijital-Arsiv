@@ -6,7 +6,7 @@ import {
   assertSchemaReady, declaredColumns, readMaintenanceProgress, readSchemaVersion,
   requireArchiveSchema, runMaintenanceSlice, SchemaNotReadyError,
 } from "../lib/archive-schema.ts";
-import { resolveOriginalObject, resolveViewableObject } from "../lib/binary-objects.ts";
+import { isPendingDerivative, resolveOriginalObject, resolveViewableObject } from "../lib/binary-objects.ts";
 import { columnsOf, createSqliteD1, indexesOf, rejects, tablesOf } from "./sqlite-d1.ts";
 
 /**
@@ -310,6 +310,66 @@ test("yarıda kalan göç sürüm damgalamaz", async () => {
   }
 });
 
+test("v17 türev işi verisi kuşak kanıtlı v18 şemasına kayıpsız yükselir", async () => {
+  const db = createSqliteD1();
+  try {
+    await applyArchiveMigrations(db);
+    // Dağıtılmış v17 biçimini gerçek tablo kısıtıyla yeniden kuruyoruz. Yeni
+    // kolonlara bağlı indeksler v18 yapısal adımından önce çalışmamalıdır.
+    db.raw.exec(`DROP TABLE derivative_jobs;
+      CREATE TABLE derivative_jobs (
+        id TEXT PRIMARY KEY NOT NULL,
+        document_id TEXT NOT NULL UNIQUE REFERENCES archive_documents(id) ON DELETE CASCADE,
+        source_binary_object_id TEXT NOT NULL REFERENCES binary_objects(id),
+        status TEXT NOT NULL DEFAULT 'QUEUED',
+        attempt INTEGER NOT NULL DEFAULT 0,
+        max_attempts INTEGER NOT NULL DEFAULT 5,
+        next_attempt_at TEXT,
+        lease_token TEXT,
+        lease_expires_at TEXT,
+        failure_code TEXT,
+        last_error TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX derivative_jobs_claim_idx
+        ON derivative_jobs (status, next_attempt_at, lease_expires_at, created_at);`);
+    db.raw.prepare(`INSERT INTO archive_documents
+      (id, reference_no, original_name, storage_key, media_type, byte_size, sha256, uploaded_by)
+      VALUES ('v17-doc', 'ARS-V17', 'belge.pdf', 'originals/v17-doc/object',
+        'application/pdf', 10, ?, 'a@b')`).run("a".repeat(64));
+    db.raw.prepare(`INSERT INTO binary_objects
+      (id, document_id, object_class, object_key, media_type, byte_size, sha256)
+      VALUES ('v17-source', 'v17-doc', 'original', 'originals/v17-doc/object',
+        'application/pdf', 10, ?)`).run("a".repeat(64));
+    db.raw.prepare(`INSERT INTO derivative_jobs
+      (id, document_id, source_binary_object_id, status, attempt, max_attempts)
+      VALUES ('v17-job', 'v17-doc', 'v17-source', 'RETRY', 2, 5)`).run();
+    db.raw.prepare("UPDATE schema_state SET version = 17 WHERE id = 'archive'").run();
+
+    await applyArchiveMigrations(db);
+    assert.equal(await readSchemaVersion(db), ARCHIVE_SCHEMA_VERSION);
+    const migrated = db.raw.prepare(`SELECT id, profile_version, status, attempt,
+        renderer_image_digest, page_count, segment_count
+      FROM derivative_jobs WHERE id = 'v17-job'`).get() as Record<string, unknown>;
+    assert.equal(migrated.profile_version, "access-pdf-v1");
+    assert.equal(migrated.status, "RETRY");
+    assert.equal(migrated.attempt, 2);
+    assert.equal(migrated.renderer_image_digest, null);
+    assert.ok(columnsOf(db, "binary_objects").includes("derivative_generation_id"));
+    assert.ok(indexesOf(db).includes("derivative_jobs_document_profile_unique"));
+
+    // Eski belge için yeni profil işi açılabilir; aynı profil yinelenemez.
+    db.raw.prepare(`INSERT INTO derivative_jobs
+      (id, document_id, source_binary_object_id, profile_version)
+      VALUES ('v18-job', 'v17-doc', 'v17-source', 'access-pdf-v2')`).run();
+    assert.throws(() => db.raw.prepare(`INSERT INTO derivative_jobs
+      (id, document_id, source_binary_object_id, profile_version)
+      VALUES ('duplicate', 'v17-doc', 'v17-source', 'access-pdf-v1')`).run());
+  } finally {
+    db.close();
+  }
+});
 test("görüntüleme erişim türevini, indirme aslı çözer", async () => {
   const db = createSqliteD1();
   try {
@@ -319,18 +379,20 @@ test("görüntüleme erişim türevini, indirme aslı çözer", async () => {
     db.raw.prepare(`INSERT INTO binary_objects (id, document_id, object_class, object_key, media_type, byte_size, sha256)
       VALUES ('o9', 'd9', 'original', 'originals/d9/o9', 'image/jpeg', 900, 'sha-orijinal')`).run();
 
-    // Türev yokken görüntüleme asılı sunmak zorunda kalır ama sınıf bildirilir.
+    // Türev yokken PDF DIŞI tür asılı sunmak zorunda kalır ama sınıf bildirilir.
     const withoutDerivative = await resolveViewableObject(db, "d9");
-    assert.equal(withoutDerivative?.objectClass, "original");
+    assert.ok(withoutDerivative && !isPendingDerivative(withoutDerivative));
+    assert.equal(withoutDerivative.objectClass, "original");
 
     db.raw.prepare(`INSERT INTO binary_objects (id, document_id, object_class, object_key, media_type, byte_size, sha256, derived_from_id, generator)
       VALUES ('a9', 'd9', 'access', 'derivatives/d9/access/a9', 'image/jpeg', 120, 'sha-turev', 'o9', 'ocr:test')`).run();
 
     // Türev varken görüntüleme aslı açmaz.
     const viewable = await resolveViewableObject(db, "d9");
-    assert.equal(viewable?.objectClass, "access");
-    assert.equal(viewable?.object.object_key, "derivatives/d9/access/a9");
-    assert.equal(viewable?.object.sha256, "sha-turev");
+    assert.ok(viewable && !isPendingDerivative(viewable));
+    assert.equal(viewable.objectClass, "access");
+    assert.equal(viewable.object.object_key, "derivatives/d9/access/a9");
+    assert.equal(viewable.object.sha256, "sha-turev");
 
     // İndirme her durumda aslı döner.
     const original = await resolveOriginalObject(db, "d9");

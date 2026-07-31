@@ -162,10 +162,10 @@ Görüntüleme ve indirme **ayrı nesneler** döndürür:
 | `document.read` | Kontrollü erişim türevi (`access`) |
 | `document.download` | Değiştirilemez asıl (`original`) |
 
-Erişim türevi OCR servisinde üretilir (görüntüyü zaten çözdüğü için). PDF'lerde
-türev üretilmez; o belgelerde görüntüleme aslı sunmak zorunda kalır. Bu durum
-denetim kaydına `servedObjectClass` olarak yazılır ve türevi olmayan belge sayısı
-`/api/overview` içinde `storage.withoutAccessDerivative` olarak raporlanır.
+Görsel erişim türevleri OCR hattında, PDF erişim türevleri ise izole PDFium
+renderer'ında üretilir. PDF görüntüleme hiçbir durumda asıl nesneye geri düşmez;
+tamamlanmış ve segment aralıkları eksiksiz bir üretim kuşağı yoksa uç nokta 425
+döndürür. Asıl indirme ayrı `document.download` yetkisi ve denetim olayı ister.
 
 ## Bilinen açık kalemler
 
@@ -176,11 +176,10 @@ denetim kaydına `servedObjectClass` olarak yazılır ve türevi olmayan belge s
   sayı `/api/overview` içinde `storage.legacyKeys` olarak raporlanır.
 - Denetim olayı bulunan bir belge silinemez (tetikleyici engeller). Hatalı kayıtlar
   için saklama-imha iş akışı gerekir; bu ayrı bir iş paketidir.
-- **PDF'ler için erişim türevi üretilmiyor.** OCR servisinde PDF sayfası çizdirecek
-  bir bileşen yok; o belgelerde görüntüleme değiştirilemez aslı sunar. Sayı
-  `storage.withoutAccessDerivative` ile izlenir.
-- Erişim türevi yalnız OCR çalıştığında üretilir. Mevcut belgeler için türev
-  oluşturmak OCR'ın yeniden çalıştırılmasını gerektirir.
+- PDF renderer'ının gerçek `DERIVATIVE_FILES` bağı, salt-okunur asıl kimliği,
+  registry imaj özeti ve T-03 staging kanıtı henüz canlı ortamda doğrulanmalıdır.
+- PDF türevi için tek kullanımlık görüntüleme bileti ve byte-range oturumu F1.9
+  kapsamındadır; F1.7 bölümlü türevi yetkili API üzerinden fail-closed sunar.
 - Faz 0 staging çıkış testi, gerçek Sites kaynağı ve dışarıdan erişilebilir TLS'li
   OCR servis adresi sağlandığında tamamlanacaktır; ayrıntılar
   `FAZ_0_ISLETIM_REHBERI.md` içindedir.

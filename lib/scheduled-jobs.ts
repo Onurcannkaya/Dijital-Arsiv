@@ -5,6 +5,7 @@ import { getPromotionStorages, type ArchiveBindings } from "./archive-storage.ts
 import { processNextPromotionJob } from "./ingest-promotion.ts";
 import { R2ObjectReader, R2StagingStorage, R2StorageInventory } from "./r2-object-storage.ts";
 import { createDigestStreamHasher } from "./content-hasher.ts";
+import { processNextDerivativeJob } from "./document-render.ts";
 import { expireIncompleteUploads } from "./ingest-service.ts";
 import { runIntegritySlice } from "./integrity.ts";
 import { runReconciliationSlice } from "./reconciliation.ts";
@@ -84,6 +85,40 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
         });
       });
     }
+
+    if (!bindings.DOCUMENT_RENDER_SERVICE_URL || !bindings.DOCUMENT_RENDER_SERVICE_TOKEN
+      || !bindings.DOCUMENT_RENDER_IMAGE_DIGEST || !bindings.DERIVATIVE_FILES) {
+      logEvent("warn", "cron.derivative-skipped", {
+        reason: "document render service, image digest, or DERIVATIVE_FILES configuration missing",
+      });
+    } else {
+      await measured("cron.derivative", { cron }, async () => {
+        // Render pahalıdır: tetikleme başına tek iş; kalanlar sonraki dakikada sürer.
+        let processed = 0;
+        if (Date.now() < deadline) {
+          const result = await processNextDerivativeJob({
+            db: bindings.DB,
+            derivativeReader: new R2ObjectReader(bindings.DERIVATIVE_FILES!),
+            hasher: createDigestStreamHasher(),
+            serviceUrl: bindings.DOCUMENT_RENDER_SERVICE_URL!,
+            serviceToken: bindings.DOCUMENT_RENDER_SERVICE_TOKEN!,
+            expectedImageDigest: bindings.DOCUMENT_RENDER_IMAGE_DIGEST!,
+          });
+          if (result.processed) processed += 1;
+        }
+        const metrics = await bindings.DB.prepare(`SELECT
+          SUM(CASE WHEN status IN ('QUEUED', 'RETRY', 'RENDERING') THEN 1 ELSE 0 END) AS depth,
+          SUM(CASE WHEN status = 'REVIEW_REQUIRED' THEN 1 ELSE 0 END) AS review_required,
+          SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS dead_letter
+          FROM derivative_jobs`).first<Record<string, number>>();
+        logEvent("info", "cron.derivative-result", {
+          processed,
+          queueDepth: Number(metrics?.depth ?? 0),
+          reviewRequired: Number(metrics?.review_required ?? 0),
+          deadLetter: Number(metrics?.dead_letter ?? 0),
+        });
+      });
+    }
     return;
   }
   if (cron === OCR_CRON) {
@@ -136,12 +171,34 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
   }
   if (cron === INTEGRITY_CRON) {
     await measured("cron.integrity", { cron }, async () => {
-      const reader = new R2ObjectReader(bindings.ARCHIVE_FILES);
-      const integrity = await runIntegritySlice(bindings.DB, reader, createDigestStreamHasher());
+      const archiveReader = new R2ObjectReader(bindings.ARCHIVE_FILES);
+      const derivativeReader = bindings.DERIVATIVE_FILES
+        ? new R2ObjectReader(bindings.DERIVATIVE_FILES) : null;
+      const readerForNamespace = (namespace: string) => {
+        if (namespace === "ARCHIVE_FILES") return archiveReader;
+        if (namespace === "DERIVATIVE_FILES" && derivativeReader) return derivativeReader;
+        throw new Error(`Bütünlük okuma rolü yapılandırılmamış: ${namespace}`);
+      };
+      const integrity = await runIntegritySlice(
+        bindings.DB, readerForNamespace, createDigestStreamHasher(),
+      );
+      const namespaces = [{
+        name: "ARCHIVE_FILES",
+        inventory: new R2StorageInventory(bindings.ARCHIVE_FILES),
+        reader: archiveReader,
+      }];
+      if (bindings.DERIVATIVE_FILES && derivativeReader) {
+        namespaces.push({
+          name: "DERIVATIVE_FILES",
+          inventory: new R2StorageInventory(bindings.DERIVATIVE_FILES),
+          reader: derivativeReader,
+        });
+      }
       const reconciliation = await runReconciliationSlice({
         db: bindings.DB,
-        inventory: new R2StorageInventory(bindings.ARCHIVE_FILES),
-        reader,
+        inventory: namespaces[0].inventory,
+        reader: archiveReader,
+        namespaces,
       });
       logEvent("info", "cron.integrity-result", {
         integrity: {

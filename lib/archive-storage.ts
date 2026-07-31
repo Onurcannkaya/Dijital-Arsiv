@@ -32,16 +32,22 @@ export {
   RECONCILIATION_TASK, readReconciliationSummary, runReconciliationSlice,
   type ReconciliationDependencies,
 } from "./reconciliation.ts";
+export { processNextDerivativeJob, readDerivativeSummary } from "./document-render.ts";
+export { isPendingDerivative, type PendingDerivative } from "./binary-objects.ts";
 
 export type ArchiveBindings = {
   DB: D1Database;
   ARCHIVE_FILES: R2Bucket;
+  DERIVATIVE_FILES?: R2Bucket;
   TEMPORARY_FILES?: R2Bucket;
   QUARANTINE_FILES?: R2Bucket;
   OCR_SERVICE_URL?: string;
   OCR_SERVICE_TOKEN?: string;
   CONTENT_SCAN_SERVICE_URL?: string;
   CONTENT_SCAN_SERVICE_TOKEN?: string;
+  DOCUMENT_RENDER_SERVICE_URL?: string;
+  DOCUMENT_RENDER_SERVICE_TOKEN?: string;
+  DOCUMENT_RENDER_IMAGE_DIGEST?: string;
   ARCHIVE_ADMIN_EMAILS?: string;
   /** Şema göç uç noktasının anahtarı; tanımlı değilse uç nokta kapalıdır. */
   ARCHIVE_MIGRATION_TOKEN?: string;
@@ -71,6 +77,18 @@ export function getIngestStorages(bindings: Pick<ArchiveBindings, "TEMPORARY_FIL
 /** Çalışma zamanı nesne kasasını ADR-012 arayüzüne dönüştürür. */
 export function getArchiveObjectStorage(bindings: Pick<ArchiveBindings, "ARCHIVE_FILES">): ObjectStorage {
   return createObjectStorage(bindings.ARCHIVE_FILES);
+}
+
+/** Yetkili kayıttaki namespace'i dar okuma rolüne çevirir; bilinmeyen alan fail-closed'dur. */
+export function getObjectReaderForNamespace(
+  bindings: Pick<ArchiveBindings, "ARCHIVE_FILES" | "DERIVATIVE_FILES">,
+  namespace: string,
+) {
+  if (namespace === "ARCHIVE_FILES") return new R2ObjectReader(bindings.ARCHIVE_FILES);
+  if (namespace === "DERIVATIVE_FILES" && bindings.DERIVATIVE_FILES) {
+    return new R2ObjectReader(bindings.DERIVATIVE_FILES);
+  }
+  throw new Error(`Depolama okuma rolü yapılandırılmamış: ${namespace}`);
 }
 
 /** F1.5 promotion role: quarantine read, immutable vault write, and vault read-back. */

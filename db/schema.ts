@@ -131,10 +131,14 @@ export const binaryObjects = sqliteTable("binary_objects", {
   generator: text("generator"),
   retentionStatus: text("retention_status").notNull().default("ACTIVE"),
   legalHoldStatus: text("legal_hold_status").notNull().default("NONE"),
+  pageStart: integer("page_start"),
+  pageEnd: integer("page_end"),
+  derivativeGenerationId: text("derivative_generation_id"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   index("binary_objects_document_class_idx").on(table.documentId, table.objectClass),
   index("binary_objects_sha256_idx").on(table.sha256),
+  index("binary_objects_generation_idx").on(table.derivativeGenerationId, table.pageStart),
   uniqueIndex("binary_objects_single_original_unique").on(table.documentId).where(sql`object_class = 'original'`),
   check("binary_objects_class_check", sql`${table.objectClass} IN ('original', 'access', 'ocr', 'preservation', 'thumbnail', 'quarantine', 'temporary')`),
   check("binary_objects_retention_check", sql`${table.retentionStatus} IN ('ACTIVE', 'RETENTION_REVIEW', 'DISPOSED')`),
@@ -577,6 +581,35 @@ export const promotionJobs = sqliteTable("promotion_jobs", {
   check("promotion_jobs_hash_check", sql`length(${table.sha256}) = 64`),
   check("promotion_jobs_status_check", sql`${table.status} IN ('QUEUED', 'PROMOTING', 'RETRY', 'COMPLETED', 'FAILED')`),
   check("promotion_jobs_attempt_check", sql`${table.attempt} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 20`),
+]);
+
+/** F1.7 — `lib/ingest-schema.ts` PDF erişim türevi işi tanımının tip aynası. */
+export const derivativeJobs = sqliteTable("derivative_jobs", {
+  id: text("id").primaryKey(),
+  documentId: text("document_id").notNull().references(() => archiveDocuments.id, { onDelete: "cascade" }),
+  sourceBinaryObjectId: text("source_binary_object_id").notNull().references(() => binaryObjects.id),
+  profileVersion: text("profile_version").notNull().default("access-pdf-v1"),
+  status: text("status").notNull().default("QUEUED"),
+  attempt: integer("attempt").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  nextAttemptAt: text("next_attempt_at"),
+  leaseToken: text("lease_token"),
+  leaseExpiresAt: text("lease_expires_at"),
+  failureCode: text("failure_code"),
+  lastError: text("last_error"),
+  renderer: text("renderer"),
+  rendererVersion: text("renderer_version"),
+  rendererImageDigest: text("renderer_image_digest"),
+  pageCount: integer("page_count"),
+  segmentCount: integer("segment_count"),
+  completedAt: text("completed_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("derivative_jobs_claim_idx").on(table.status, table.nextAttemptAt, table.leaseExpiresAt, table.createdAt),
+  uniqueIndex("derivative_jobs_document_profile_unique").on(table.documentId, table.profileVersion),
+  check("derivative_jobs_status_check", sql`${table.status} IN ('QUEUED', 'RENDERING', 'RETRY', 'COMPLETED', 'REVIEW_REQUIRED', 'FAILED')`),
+  check("derivative_jobs_attempt_check", sql`${table.attempt} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 20`),
 ]);
 
 export const promotionReceipts = sqliteTable("promotion_receipts", {

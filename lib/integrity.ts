@@ -39,7 +39,14 @@ type BinaryObjectRow = {
   byte_size: number;
   sha256: string;
   storage_version_id: string | null;
+  bucket_or_namespace: string;
 };
+
+type ObjectReaderSource = ObjectReader | ((namespace: string) => ObjectReader);
+
+function readerFor(source: ObjectReaderSource, namespace: string) {
+  return typeof source === "function" ? source(namespace) : source;
+}
 
 type FindingInput = {
   binaryObjectId: string | null;
@@ -255,7 +262,7 @@ function fenced(results: D1Result<unknown>[], lease: MaintenanceLease) {
 
 export async function runIntegritySlice(
   db: D1Database,
-  reader: ObjectReader,
+  readerSource: ObjectReaderSource,
   hasher: StreamingHasher,
   batchSize = 20,
 ) {
@@ -271,9 +278,11 @@ export async function runIntegritySlice(
     const limit = run.profile === "full"
       ? Math.min(Math.max(Math.trunc(batchSize), 1), FULL_PROFILE_SLICE_LIMIT)
       : Math.min(Math.max(Math.trunc(batchSize), 1), 100);
-    const rows = await db.prepare(`SELECT rowid AS scan_rowid, id, object_key, byte_size, sha256, storage_version_id
+    const rows = await db.prepare(`SELECT rowid AS scan_rowid, id, object_key, byte_size, sha256,
+        storage_version_id, bucket_or_namespace
       FROM binary_objects
       WHERE rowid > ? AND rowid <= ? AND retention_status <> 'DISPOSED'
+        AND object_class IN ('original', 'access', 'ocr', 'preservation', 'thumbnail')
       ORDER BY rowid LIMIT ?`).bind(cursor, snapshotMaxRowid, limit).all<BinaryObjectRow>();
 
     if (!rows.results.length) {
@@ -299,6 +308,7 @@ export async function runIntegritySlice(
     let findings = 0;
     for (const row of rows.results) {
       await renewMaintenanceLease(db, lease, LOCK_SECONDS);
+      const reader = readerFor(readerSource, row.bucket_or_namespace);
       const finding = run.profile === "full"
         ? await fullChecks(reader, hasher, row)
         : await quickChecks(reader, row);

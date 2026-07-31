@@ -1,0 +1,7 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+pydantic==2.11.7
+boto3==1.39.14
+pypdfium2==4.30.0
+pikepdf==9.0.0
+Pillow==11.3.0

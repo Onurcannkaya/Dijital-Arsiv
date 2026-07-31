@@ -163,6 +163,37 @@ export const ingestTableStatements: readonly string[] = [
   "CREATE INDEX IF NOT EXISTS promotion_jobs_claim_idx ON promotion_jobs (status, next_attempt_at, lease_expires_at, created_at)",
   "CREATE UNIQUE INDEX IF NOT EXISTS promotion_jobs_active_sha_unique ON promotion_jobs (sha256) WHERE status <> 'FAILED'",
 
+  // F1.7 / ADR-015: PDF erişim türevi işleri. REVIEW_REQUIRED türev işi
+  // sözleşmesine aittir; kabul durum makinesine karışmaz.
+  `CREATE TABLE IF NOT EXISTS derivative_jobs (
+    id TEXT PRIMARY KEY NOT NULL,
+    document_id TEXT NOT NULL REFERENCES archive_documents(id) ON DELETE CASCADE,
+    source_binary_object_id TEXT NOT NULL REFERENCES binary_objects(id),
+    profile_version TEXT NOT NULL DEFAULT 'access-pdf-v1',
+    status TEXT NOT NULL DEFAULT 'QUEUED',
+    attempt INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 5,
+    next_attempt_at TEXT,
+    lease_token TEXT,
+    lease_expires_at TEXT,
+    failure_code TEXT,
+    last_error TEXT,
+    renderer TEXT,
+    renderer_version TEXT,
+    renderer_image_digest TEXT,
+    page_count INTEGER,
+    segment_count INTEGER,
+    completed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (status IN ('QUEUED', 'RENDERING', 'RETRY', 'COMPLETED', 'REVIEW_REQUIRED', 'FAILED')),
+    CHECK (attempt >= 0 AND max_attempts BETWEEN 1 AND 20),
+    CHECK (page_count IS NULL OR page_count >= 1),
+    CHECK (segment_count IS NULL OR segment_count >= 1)
+  )`,
+  "CREATE INDEX IF NOT EXISTS derivative_jobs_claim_idx ON derivative_jobs (status, next_attempt_at, lease_expires_at, created_at)",
+
+
   `CREATE TABLE IF NOT EXISTS promotion_receipts (
     id TEXT PRIMARY KEY NOT NULL,
     promotion_job_id TEXT NOT NULL REFERENCES promotion_jobs(id),

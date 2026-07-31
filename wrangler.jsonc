@@ -22,6 +22,9 @@
     "required": [
       "CONTENT_SCAN_SERVICE_URL",
       "CONTENT_SCAN_SERVICE_TOKEN",
+      "DOCUMENT_RENDER_SERVICE_URL",
+      "DOCUMENT_RENDER_SERVICE_TOKEN",
+      "DOCUMENT_RENDER_IMAGE_DIGEST",
       "OCR_SERVICE_URL",
       "OCR_SERVICE_TOKEN",
       "ARCHIVE_MIGRATION_TOKEN",
@@ -29,10 +32,10 @@
     ]
   },
 
-  // DB, ARCHIVE_FILES, TEMPORARY_FILES ve QUARANTINE_FILES .openai/hosting.json
-  // içindeki mantıksal bağlardır; son ikisi F1.3 için fiziksel olarak ayrıdır.
-  // Gerçek D1/R2 kaynak kimlikleri Sites tarafından yönetilir; bu dosyaya sahte
-  // ya da başka ortama ait kimlik yazılmaz.
+  // DB, ARCHIVE_FILES, DERIVATIVE_FILES, TEMPORARY_FILES ve QUARANTINE_FILES .openai/hosting.json
+  // içindeki mantıksal bağlardır; son üçü ayrı ve en-dar yetki rollerine bağlanır.
+  // Gerçek D1/R2 kaynak kimlikleri Sites tarafÄ±ndan yönetilir; bu dosyaya sahte
+  // ya da başka ortama ait kimlik yazÄ±lmaz.
   "env": {
     "dev": {
       "name": "sivas-dijital-arsiv-dev",
@@ -41,6 +44,9 @@
         "required": [
           "CONTENT_SCAN_SERVICE_URL",
           "CONTENT_SCAN_SERVICE_TOKEN",
+          "DOCUMENT_RENDER_SERVICE_URL",
+          "DOCUMENT_RENDER_SERVICE_TOKEN",
+      "DOCUMENT_RENDER_IMAGE_DIGEST",
           "OCR_SERVICE_URL",
           "OCR_SERVICE_TOKEN",
           "ARCHIVE_MIGRATION_TOKEN",
@@ -58,6 +64,9 @@
         "required": [
           "CONTENT_SCAN_SERVICE_URL",
           "CONTENT_SCAN_SERVICE_TOKEN",
+          "DOCUMENT_RENDER_SERVICE_URL",
+          "DOCUMENT_RENDER_SERVICE_TOKEN",
+      "DOCUMENT_RENDER_IMAGE_DIGEST",
           "OCR_SERVICE_URL",
           "OCR_SERVICE_TOKEN",
           "ARCHIVE_MIGRATION_TOKEN",
@@ -75,6 +84,9 @@
         "required": [
           "CONTENT_SCAN_SERVICE_URL",
           "CONTENT_SCAN_SERVICE_TOKEN",
+          "DOCUMENT_RENDER_SERVICE_URL",
+          "DOCUMENT_RENDER_SERVICE_TOKEN",
+      "DOCUMENT_RENDER_IMAGE_DIGEST",
           "OCR_SERVICE_URL",
           "OCR_SERVICE_TOKEN",
           "ARCHIVE_MIGRATION_TOKEN",

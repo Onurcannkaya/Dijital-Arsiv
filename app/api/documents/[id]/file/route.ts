@@ -1,8 +1,8 @@
 import { writeAuditEvent } from "../../../../../lib/audit";
 import { authorizeRequest, canAccessUnit } from "../../../../../lib/authorization";
 import {
-  getArchiveObjectStorage, requireArchiveSchema, getArchiveBindings, jsonError,
-  resolveOriginalObject, resolveViewableObject,
+  getObjectReaderForNamespace, requireArchiveSchema, getArchiveBindings, isPendingDerivative,
+  jsonError, resolveOriginalObject, resolveViewableObject,
 } from "../../../../../lib/archive-storage";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -17,9 +17,10 @@ type FileRecord = { original_name:string; unit:string; reference_no:string };
  *
  * Web'de görüntülenen içeriğin kaydedilmesi tamamen engellenemez; korunabilecek
  * sınır asıl dosyadır (S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md §5, §11.2).
- * Erişim türevi henüz üretilmemiş belgelerde (örneğin PDF'ler) görüntüleme asılı
- * sunmak zorunda kalır; bu durum denetim kaydına `servedObjectClass` olarak
- * yazılır ve eksik türev sayısı `/api/overview` içinde raporlanır.
+ * F1.7/ADR-015: PDF görüntüleme HİÇBİR durumda asıl sınıfına düşmez; türev
+ * hazır değilse 425 döner ve geri dolum işi türevi üretene kadar beklenir.
+ * Bölümlü türevlerde `?segment=N` ile sonraki bölümler istenir; PDF dışı
+ * türlerde asıl fallback geçici olarak sürer ve denetim kaydına yazılır.
  *
  * İkisi de denetlenir. Denetim kaydı yazılamazsa dosya sunulmaz: erişimin
  * izlenebilir olmadığı durumda erişim verilmemelidir.
@@ -27,7 +28,6 @@ type FileRecord = { original_name:string; unit:string; reference_no:string };
 export async function GET(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const bindings = getArchiveBindings();
-  const objectStorage = getArchiveObjectStorage(bindings);
   const schemaError = await requireArchiveSchema(request, bindings.DB);
   if (schemaError) return schemaError;
   const url = new URL(request.url);
@@ -41,12 +41,35 @@ export async function GET(request: Request, context: RouteContext) {
   if (!canAccessUnit(principal, record.unit)) return jsonError("Bu belge müdürlük kapsamınızın dışında.", 403);
 
   // Depolama konumu nesne kaydından çözülür (S3_DEPOLAMA... §8).
+  const segmentValue = url.searchParams.get("segment") ?? "1";
+  if (!isDownload && !/^[1-9]\d*$/.test(segmentValue)) {
+    return jsonError("Türev bölüm numarası pozitif tam sayı olmalıdır.", 400);
+  }
+  const segment = Number(segmentValue);
+  if (!isDownload && !Number.isSafeInteger(segment)) {
+    return jsonError("Türev bölüm numarası geçersiz.", 400);
+  }
   const resolved = isDownload
     ? await resolveOriginalObject(bindings.DB, id).then((object) => object && { object, objectClass: "original" as const })
-    : await resolveViewableObject(bindings.DB, id);
+    : await resolveViewableObject(bindings.DB, id, segment);
   if (!resolved) return jsonError("Belgenin nesne kaydı bulunamadı.", 404);
-  const object = await objectStorage.get(resolved.object.object_key);
+  if (!isDownload && isPendingDerivative(resolved)) {
+    // ADR-015: asıl PDF görüntülemeye sunulmaz; türev geri dolum işi üretecek.
+    return jsonError("Güvenli görüntüleme kopyası henüz hazırlanıyor; lütfen daha sonra yeniden deneyin.", 425);
+  }
+  if (isPendingDerivative(resolved)) return jsonError("Belgenin nesne kaydı bulunamadı.", 404);
+  let object;
+  try {
+    const reader = getObjectReaderForNamespace(bindings, resolved.object.bucket_or_namespace);
+    object = await reader.get(resolved.object.object_key);
+  } catch {
+    return jsonError("Belge depolama okuma rolü kullanılamıyor.", 503);
+  }
   if (!object) return jsonError("Dosya kasada bulunamadı.", 404);
+  if (object.range !== null || object.size !== resolved.object.byte_size
+    || (object.contentType && object.contentType !== resolved.object.media_type)) {
+    return jsonError("Dosya kasası kanıtı yetkili nesne kaydıyla uyuşmuyor.", 503);
+  }
 
   try {
     await writeAuditEvent(bindings.DB, {
@@ -55,9 +78,10 @@ export async function GET(request: Request, context: RouteContext) {
       action: isDownload ? "document.downloaded" : "document.viewed",
       details: {
         referenceNo: record.reference_no,
-        // Hangi sınıfın sunulduğu kaydedilir: türev yoksa asıl sunulmuştur.
+        // Sunulan sınıf ve kuşak kanıtı denetim zincirine yazılır.
         servedObjectClass: resolved.objectClass,
-        sha256: resolved.object.sha256, byteSize: resolved.object.byte_size, purpose,
+        sha256: resolved.object.sha256, byteSize: resolved.object.byte_size,
+        generationId: resolved.object.derivative_generation_id ?? null, purpose,
       },
     });
   } catch {
@@ -74,6 +98,11 @@ export async function GET(request: Request, context: RouteContext) {
       "cache-control": "no-store, private",
       "x-content-type-options": "nosniff",
       "x-archive-object-class": resolved.objectClass,
+      // Bölümlü türevde istemci sonraki bölümleri ?segment=N ile ister.
+      ...("segment" in resolved && resolved.segment ? {
+        "x-archive-segment": String(resolved.segment.index),
+        "x-archive-segment-count": String(resolved.segment.total),
+      } : {}),
     },
   });
 }

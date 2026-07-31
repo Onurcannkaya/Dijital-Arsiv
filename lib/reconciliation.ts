@@ -21,7 +21,7 @@ const LOCK_SECONDS = 15 * 60;
 export const RECONCILIATION_MIN_AGE_MINUTES = 60;
 
 type RunCursor =
-  | { phase: "STORAGE"; cursor: string | null }
+  | { phase: "STORAGE"; namespaceIndex: number; cursor: string | null }
   | { phase: "DATABASE"; cursor: number | null }
   | { phase: "DOCUMENTS"; cursor: number | null };
 
@@ -42,30 +42,46 @@ type FindingInput = {
   severity: "HIGH" | "CRITICAL";
 };
 
-export type ReconciliationDependencies = {
-  db: D1Database;
+export type ReconciliationNamespace = {
+  name: string;
   inventory: StorageInventory;
   reader: Pick<ObjectReader, "head">;
+};
+
+export type ReconciliationDependencies = {
+  db: D1Database;
+  /** Tek namespace kullanan eski çağrılar için geriye dönük alanlar. */
+  inventory: StorageInventory;
+  reader: Pick<ObjectReader, "head">;
+  namespaces?: ReconciliationNamespace[];
   now?: () => Date;
 };
+
+function storageNamespaces(dependencies: ReconciliationDependencies): ReconciliationNamespace[] {
+  return dependencies.namespaces?.length
+    ? dependencies.namespaces
+    : [{ name: "ARCHIVE_FILES", inventory: dependencies.inventory, reader: dependencies.reader }];
+}
 
 function clock(dependencies: ReconciliationDependencies) {
   return dependencies.now?.() ?? new Date();
 }
 
 function parseCursor(raw: string | null): RunCursor {
-  if (!raw) return { phase: "STORAGE", cursor: null };
+  if (!raw) return { phase: "STORAGE", namespaceIndex: 0, cursor: null };
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (parsed.phase === "STORAGE" && (parsed.cursor === null || typeof parsed.cursor === "string")) {
-      return { phase: "STORAGE", cursor: parsed.cursor };
+      const namespaceIndex = typeof parsed.namespaceIndex === "number" && Number.isSafeInteger(parsed.namespaceIndex)
+        ? Math.max(parsed.namespaceIndex, 0) : 0;
+      return { phase: "STORAGE", namespaceIndex, cursor: parsed.cursor };
     }
     if ((parsed.phase === "DATABASE" || parsed.phase === "DOCUMENTS")
       && (parsed.cursor === null || (typeof parsed.cursor === "number" && Number.isSafeInteger(parsed.cursor)))) {
       return { phase: parsed.phase, cursor: parsed.cursor };
     }
   } catch { /* v15/bozuk imleç güvenli biçimde baştan alınır */ }
-  return { phase: "STORAGE", cursor: null };
+  return { phase: "STORAGE", namespaceIndex: 0, cursor: null };
 }
 
 export async function readReconciliationSummary(db: D1Database) {
@@ -188,7 +204,12 @@ async function storagePhaseSlice(
   batchSize: number,
   minAgeMinutes: number,
 ) {
-  const page = await dependencies.inventory.list({
+  const namespaces = storageNamespaces(dependencies);
+  const namespace = namespaces[cursor.namespaceIndex];
+  if (!namespace) {
+    return { checked: 0, findings: 0, nextCursor: { phase: "DATABASE", cursor: null } as RunCursor, phaseDone: true };
+  }
+  const page = await namespace.inventory.list({
     cursor: cursor.cursor ?? undefined,
     limit: batchSize,
   });
@@ -198,11 +219,11 @@ async function storagePhaseSlice(
   for (const object of page.objects) {
     await renewMaintenanceLease(dependencies.db, lease, LOCK_SECONDS);
     const known = await dependencies.db.prepare(`SELECT
-        (SELECT id FROM binary_objects WHERE object_key = ?1 LIMIT 1) AS binary_id,
-        (SELECT id FROM archive_documents WHERE storage_key = ?1 LIMIT 1) AS document_id,
-        EXISTS (SELECT 1 FROM promotion_jobs WHERE target_object_key = ?1
-          AND (status NOT IN ('COMPLETED', 'FAILED') OR datetime(updated_at) > datetime(?2))) AS promotion_active
-      FROM (SELECT 1)`).bind(object.key, new Date(recentThresholdMs).toISOString())
+        (SELECT id FROM binary_objects WHERE object_key = ?1 AND bucket_or_namespace = ?2 LIMIT 1) AS binary_id,
+        (SELECT id FROM archive_documents WHERE storage_key = ?1 AND ?2 = 'ARCHIVE_FILES' LIMIT 1) AS document_id,
+        EXISTS (SELECT 1 FROM promotion_jobs WHERE target_object_key = ?1 AND ?2 = 'ARCHIVE_FILES'
+          AND (status NOT IN ('COMPLETED', 'FAILED') OR datetime(updated_at) > datetime(?3))) AS promotion_active
+      FROM (SELECT 1)`).bind(object.key, namespace.name, new Date(recentThresholdMs).toISOString())
       .first<{ binary_id: string | null; document_id: string | null; promotion_active: number }>();
     if (known?.binary_id || known?.document_id || Boolean(known?.promotion_active)) continue;
 
@@ -226,9 +247,16 @@ async function storagePhaseSlice(
     logEvent("warn", "reconciliation.object-age-unavailable", { runId: run.id, count: unknownAge });
   }
   const nextCursor: RunCursor = page.cursor
-    ? { phase: "STORAGE", cursor: page.cursor }
-    : { phase: "DATABASE", cursor: null };
-  return { checked: page.objects.length, findings, nextCursor, phaseDone: !page.cursor };
+    ? { phase: "STORAGE", namespaceIndex: cursor.namespaceIndex, cursor: page.cursor }
+    : cursor.namespaceIndex + 1 < namespaces.length
+      ? { phase: "STORAGE", namespaceIndex: cursor.namespaceIndex + 1, cursor: null }
+      : { phase: "DATABASE", cursor: null };
+  return {
+    checked: page.objects.length,
+    findings,
+    nextCursor,
+    phaseDone: !page.cursor && cursor.namespaceIndex + 1 >= namespaces.length,
+  };
 }
 
 async function databasePhaseSlice(
@@ -240,16 +268,21 @@ async function databasePhaseSlice(
   minAgeMinutes: number,
 ) {
   const recentThreshold = new Date(clock(dependencies).getTime() - minAgeMinutes * 60_000).toISOString();
-  const rows = await dependencies.db.prepare(`SELECT rowid AS scan_rowid, id, object_key
+  const rows = await dependencies.db.prepare(`SELECT rowid AS scan_rowid, id, object_key, bucket_or_namespace
     FROM binary_objects
     WHERE rowid > ? AND rowid <= ? AND retention_status <> 'DISPOSED'
+      AND object_class IN ('original', 'access', 'ocr', 'preservation', 'thumbnail')
       AND datetime(created_at) <= datetime(?)
     ORDER BY rowid LIMIT ?`).bind(cursor.cursor ?? 0, Number(run.binary_snapshot_max_rowid ?? 0),
-      recentThreshold, batchSize).all<{ scan_rowid: number; id: string; object_key: string }>();
+      recentThreshold, batchSize).all<{
+        scan_rowid: number; id: string; object_key: string; bucket_or_namespace: string;
+      }>();
   let findings = 0;
   for (const row of rows.results) {
     await renewMaintenanceLease(dependencies.db, lease, LOCK_SECONDS);
-    const head = await dependencies.reader.head(row.object_key);
+    const namespace = storageNamespaces(dependencies).find((entry) => entry.name === row.bucket_or_namespace);
+    if (!namespace) throw new Error(`Uzlaştırma okuma rolü yapılandırılmamış: ${row.bucket_or_namespace}`);
+    const head = await namespace.reader.head(row.object_key);
     if (!head) {
       await recordFinding(dependencies.db, lease, run.id, {
         recordKind: "BINARY_OBJECT",

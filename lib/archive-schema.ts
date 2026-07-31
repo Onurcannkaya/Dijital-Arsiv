@@ -41,7 +41,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 16;
+export const ARCHIVE_SCHEMA_VERSION = 18;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -125,15 +125,21 @@ const tableStatements: string[] = [
     generator TEXT,
     retention_status TEXT NOT NULL DEFAULT 'ACTIVE',
     legal_hold_status TEXT NOT NULL DEFAULT 'NONE',
+    page_start INTEGER,
+    page_end INTEGER,
+    derivative_generation_id TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (object_class IN ('original', 'access', 'ocr', 'preservation', 'thumbnail', 'quarantine', 'temporary')),
     CHECK (retention_status IN ('ACTIVE', 'RETENTION_REVIEW', 'DISPOSED')),
     CHECK (legal_hold_status IN ('NONE', 'HELD')),
     CHECK (byte_size >= 0),
-    CHECK (id <> derived_from_id)
+    CHECK (id <> derived_from_id),
+    CHECK (page_start IS NULL OR page_start >= 1),
+    CHECK (page_end IS NULL OR (page_start IS NOT NULL AND page_end >= page_start))
   )`,
   "CREATE INDEX IF NOT EXISTS binary_objects_document_class_idx ON binary_objects (document_id, object_class)",
   "CREATE INDEX IF NOT EXISTS binary_objects_sha256_idx ON binary_objects (sha256)",
+
   // Bir belgenin yalnız bir asıl nesnesi olabilir; türevler serbesttir.
   "CREATE UNIQUE INDEX IF NOT EXISTS binary_objects_single_original_unique ON binary_objects (document_id) WHERE object_class = 'original'",
   "CREATE UNIQUE INDEX IF NOT EXISTS binary_objects_original_sha256_unique ON binary_objects (sha256) WHERE object_class = 'original'",
@@ -714,6 +720,88 @@ async function migrateOriginalShaUniqueness(db: D1Database) {
   await db.prepare("DROP INDEX IF EXISTS archive_documents_sha256_unique").run();
 }
 
+/** F1.7 / ADR-015: bölümlü erişim türevleri sayfa aralığıyla kaydedilir. */
+async function migrateBinaryObjectPageRange(db: D1Database) {
+  if (!(await tableExists(db, "binary_objects"))) return;
+  const columns = await columnNames(db, "binary_objects");
+  if (!columns.has("page_start")) {
+    await db.prepare("ALTER TABLE binary_objects ADD COLUMN page_start INTEGER CHECK (page_start IS NULL OR page_start >= 1)").run();
+  }
+  if (!columns.has("page_end")) {
+    await db.prepare("ALTER TABLE binary_objects ADD COLUMN page_end INTEGER CHECK (page_end IS NULL OR page_end >= 1)").run();
+  }
+}
+
+/** F1.7 sertleştirmesi: segmentleri tek, kanıtlanmış üretim kuşağına bağlar. */
+async function migrateDerivativeGenerationEvidence(db: D1Database) {
+  if (await tableExists(db, "binary_objects")) {
+    const columns = await columnNames(db, "binary_objects");
+    if (!columns.has("derivative_generation_id")) {
+      await db.prepare("ALTER TABLE binary_objects ADD COLUMN derivative_generation_id TEXT").run();
+    }
+    await db.prepare(
+      "CREATE INDEX IF NOT EXISTS binary_objects_generation_idx ON binary_objects (derivative_generation_id, page_start)",
+    ).run();
+  }
+  if (!(await tableExists(db, "derivative_jobs"))) return;
+
+  // v17 `document_id UNIQUE` ile profil yükseltmesini engelliyordu. SQLite
+  // tablo-kısıtı düşüremediği için işi kanıt alanlarıyla birlikte yeniden kurarız.
+  await db.prepare("DROP TABLE IF EXISTS derivative_jobs_v18").run();
+  await db.prepare(`CREATE TABLE derivative_jobs_v18 (
+    id TEXT PRIMARY KEY NOT NULL,
+    document_id TEXT NOT NULL REFERENCES archive_documents(id) ON DELETE CASCADE,
+    source_binary_object_id TEXT NOT NULL REFERENCES binary_objects(id),
+    profile_version TEXT NOT NULL DEFAULT 'access-pdf-v1',
+    status TEXT NOT NULL DEFAULT 'QUEUED',
+    attempt INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 5,
+    next_attempt_at TEXT,
+    lease_token TEXT,
+    lease_expires_at TEXT,
+    failure_code TEXT,
+    last_error TEXT,
+    renderer TEXT,
+    renderer_version TEXT,
+    renderer_image_digest TEXT,
+    page_count INTEGER,
+    segment_count INTEGER,
+    completed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (status IN ('QUEUED', 'RENDERING', 'RETRY', 'COMPLETED', 'REVIEW_REQUIRED', 'FAILED')),
+    CHECK (attempt >= 0 AND max_attempts BETWEEN 1 AND 20),
+    CHECK (page_count IS NULL OR page_count >= 1),
+    CHECK (segment_count IS NULL OR segment_count >= 1)
+  )`).run();
+  const columns = await columnNames(db, "derivative_jobs");
+  const profile = columns.has("profile_version") ? "profile_version" : "'access-pdf-v1'";
+  const renderer = columns.has("renderer") ? "renderer" : "NULL";
+  const rendererVersion = columns.has("renderer_version") ? "renderer_version" : "NULL";
+  const imageDigest = columns.has("renderer_image_digest") ? "renderer_image_digest" : "NULL";
+  const pageCount = columns.has("page_count") ? "page_count" : "NULL";
+  const segmentCount = columns.has("segment_count") ? "segment_count" : "NULL";
+  const completedAt = columns.has("completed_at") ? "completed_at" : "NULL";
+  await db.prepare(`INSERT INTO derivative_jobs_v18
+      (id, document_id, source_binary_object_id, profile_version, status, attempt, max_attempts,
+       next_attempt_at, lease_token, lease_expires_at, failure_code, last_error,
+       renderer, renderer_version, renderer_image_digest, page_count, segment_count,
+       completed_at, created_at, updated_at)
+    SELECT id, document_id, source_binary_object_id, ${profile}, status, attempt, max_attempts,
+       next_attempt_at, lease_token, lease_expires_at, failure_code, last_error,
+       ${renderer}, ${rendererVersion}, ${imageDigest}, ${pageCount}, ${segmentCount},
+       ${completedAt}, created_at, updated_at
+    FROM derivative_jobs`).run();
+  await db.prepare("DROP TABLE derivative_jobs").run();
+  await db.prepare("ALTER TABLE derivative_jobs_v18 RENAME TO derivative_jobs").run();
+  await db.prepare(
+    "CREATE INDEX derivative_jobs_claim_idx ON derivative_jobs (status, next_attempt_at, lease_expires_at, created_at)",
+  ).run();
+  await db.prepare(
+    "CREATE UNIQUE INDEX derivative_jobs_document_profile_unique ON derivative_jobs (document_id, profile_version)",
+  ).run();
+}
+
 /** F1.6: hızlı (metadata) ve tam (akışlı SHA) tarama koşuları ayrışır. */
 async function migrateIntegrityRunProfile(db: D1Database) {
   if (!(await tableExists(db, "integrity_runs"))) return;
@@ -1048,6 +1136,10 @@ const structuralMigrations: MigrationStep[] = [
   { version: 15, run: migrateIntegrityRunProfile },
   // 15 → 16: çökme kurtarma kirası ve deterministik tarama su işaretleri.
   { version: 16, run: hardenIntegrityAndReconciliationRuns },
+  // 16 → 17: bölümlü PDF erişim türevleri sayfa aralığı taşır.
+  { version: 17, run: migrateBinaryObjectPageRange },
+  // 17 → 18: segment kuşağı ve renderer kanıtı; profil yükseltmesi engellenmez.
+  { version: 18, run: migrateDerivativeGenerationEvidence },
 ];
 
 /**

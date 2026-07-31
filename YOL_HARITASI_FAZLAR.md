@@ -553,6 +553,22 @@ ADR-015 aşağıdaki kararları kesinleştirmiştir:
   bütün eksik türevleri üretir.
 - Başarısız türevler retry/dead-letter görünürlüğüne sahiptir.
 
+**Uygulama durumu (F1.7):** Şema v18 ile `derivative_jobs` kuyruğu (kiralı
+claim, exponential backoff, `REVIEW_REQUIRED` ve dead-letter görünürlüğü),
+renderer/imaj/sayfa kanıtları ve `binary_objects.derivative_generation_id`
+eklendi. Belge+profil tekilliği yeni profil sürümünün eski türevi ezmeden ayrı
+kuşak üretmesine izin verir. Worker'ın verdiği kararlı iş kimliği fiziksel nesne
+anahtarında kullanılır; yanıt kaybında koşullu yazma var olan segment başlığını
+doğrulayarak sürer. Worker beklenen renderer, profil, registry imaj özeti,
+anahtar deseni, MIME, boyut, bitişik sayfa aralığı ve tam SHA-256 kanıtlarının
+tamamını doğrulamadan kuşağı etkinleştirmez. Segmentler `DERIVATIVE_FILES`
+rolünde tutulur; bütünlük ve uzlaştırma işleri namespace'e göre doğru okuyucuyu
+seçer. Sonlandırma kayıtları, denetim olayı ve tamamlanmış kuşak kanıtı tek
+kira-çitli batch'tir. PDF görüntüleme yalnız tamamlanmış/eksiksiz kuşağı sunar;
+aksi durumda 425 döner ve asıl PDF'ye fallback açılmaz. Gerçek PDFium/pikepdf
+imaj koşusu, ayrı depo kimlikleri ve T-03 kanıtı staging'e (F1.11) aittir;
+onaylı OCR metin katmanlı ikinci profil sonraki dilimdedir.
+
 ### F1.8 — Eski nesne anahtarlarının yetkili taşınması
 
 **Amaç:** Anahtar veya custom metadata içinde kişisel veri taşıma ihtimali olan
