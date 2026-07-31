@@ -222,10 +222,17 @@ async function storagePhaseSlice(
         (SELECT id FROM binary_objects WHERE object_key = ?1 AND bucket_or_namespace = ?2 LIMIT 1) AS binary_id,
         (SELECT id FROM archive_documents WHERE storage_key = ?1 AND ?2 = 'ARCHIVE_FILES' LIMIT 1) AS document_id,
         EXISTS (SELECT 1 FROM promotion_jobs WHERE target_object_key = ?1 AND ?2 = 'ARCHIVE_FILES'
-          AND (status NOT IN ('COMPLETED', 'FAILED') OR datetime(updated_at) > datetime(?3))) AS promotion_active
+          AND (status NOT IN ('COMPLETED', 'FAILED') OR datetime(updated_at) > datetime(?3))) AS promotion_active,
+        -- F1.8: taşınmış eski anahtar tasfiyeye kadar bilinçli olarak yerinde
+        -- durur; kopya-değişim penceresindeki hedef de sahipsiz sayılmaz.
+        EXISTS (SELECT 1 FROM legacy_key_migrations WHERE bucket_or_namespace = ?2
+          AND ((source_object_key = ?1 AND status = 'COMPLETED')
+            OR (target_object_key = ?1 AND status <> 'FAILED'))) AS key_migration_known
       FROM (SELECT 1)`).bind(object.key, namespace.name, new Date(recentThresholdMs).toISOString())
-      .first<{ binary_id: string | null; document_id: string | null; promotion_active: number }>();
-    if (known?.binary_id || known?.document_id || Boolean(known?.promotion_active)) continue;
+      .first<{ binary_id: string | null; document_id: string | null;
+        promotion_active: number; key_migration_known: number }>();
+    if (known?.binary_id || known?.document_id || Boolean(known?.promotion_active)
+      || Boolean(known?.key_migration_known)) continue;
 
     const uploadedMs = object.uploadedAt ? Date.parse(object.uploadedAt) : Number.NaN;
     if (!Number.isFinite(uploadedMs)) {

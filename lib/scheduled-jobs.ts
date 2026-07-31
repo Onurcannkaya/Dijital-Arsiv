@@ -3,10 +3,11 @@ import { processNextContentScanJob } from "./content-scan.ts";
 import { assertSchemaReady, runMaintenanceSlice } from "./archive-schema.ts";
 import { getPromotionStorages, type ArchiveBindings } from "./archive-storage.ts";
 import { processNextPromotionJob } from "./ingest-promotion.ts";
-import { R2ObjectReader, R2StagingStorage, R2StorageInventory } from "./r2-object-storage.ts";
+import { R2ImmutableVaultWriter, R2ObjectReader, R2StagingStorage, R2StorageInventory } from "./r2-object-storage.ts";
 import { createDigestStreamHasher } from "./content-hasher.ts";
 import { processNextDerivativeJob } from "./document-render.ts";
 import { expireIncompleteUploads } from "./ingest-service.ts";
+import { processNextKeyMigrationJob, runKeyInventorySlice } from "./key-migration.ts";
 import { runIntegritySlice } from "./integrity.ts";
 import { runReconciliationSlice } from "./reconciliation.ts";
 import { logEvent, measured } from "./observability.ts";
@@ -165,7 +166,30 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
         });
         ingestLifecycle = { ...lifecycle, skipped: false };
       }
-      logEvent("info", "cron.maintenance-result", { ...result, ingestLifecycle });
+
+      // F1.8: eski anahtar envanteri ve dilim başına sınırlı taşıma. Kaynak ve
+      // hedef aynı ad alanındadır; kopya + tam SHA doğrulaması F1.1/F1.5
+      // yetenekleriyle yapılır.
+      const archiveReader = new R2ObjectReader(bindings.ARCHIVE_FILES);
+      const keyMigrationDependencies = {
+        db: bindings.DB,
+        reader: archiveReader,
+        writer: new R2ImmutableVaultWriter(bindings.ARCHIVE_FILES, archiveReader),
+        hasher: createDigestStreamHasher(),
+      };
+      const inventory = await runKeyInventorySlice(keyMigrationDependencies);
+      let migrated = 0;
+      for (let index = 0; index < 2; index += 1) {
+        const migration = await processNextKeyMigrationJob(keyMigrationDependencies);
+        if (!migration.processed) break;
+        migrated += 1;
+      }
+      logEvent("info", "cron.maintenance-result", {
+        ...result,
+        ingestLifecycle,
+        keyInventory: { checked: inventory.checked, enqueued: inventory.enqueued, done: inventory.done },
+        keyMigrationsProcessed: migrated,
+      });
     });
     return;
   }

@@ -33,6 +33,11 @@ export {
   type ReconciliationDependencies,
 } from "./reconciliation.ts";
 export { processNextDerivativeJob, readDerivativeSummary } from "./document-render.ts";
+export {
+  KEY_INVENTORY_TASK, processNextKeyMigrationJob, readKeyMigrationSummary,
+  runKeyInventorySlice, type KeyMigrationDependencies,
+} from "./key-migration.ts";
+export { classifyObjectKey, maskObjectKey, secureTargetKey } from "./key-classification.ts";
 export { isPendingDerivative, type PendingDerivative } from "./binary-objects.ts";
 
 export type ArchiveBindings = {

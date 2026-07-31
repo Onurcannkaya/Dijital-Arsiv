@@ -193,6 +193,41 @@ export const ingestTableStatements: readonly string[] = [
   )`,
   "CREATE INDEX IF NOT EXISTS derivative_jobs_claim_idx ON derivative_jobs (status, next_attempt_at, lease_expires_at, created_at)",
 
+  // F1.8: politika öncesi anahtarların maskeli envanteri ve taşıma durumu.
+  // key_pattern/classification alanları maskeli biçimdir; ham anahtar yalnız
+  // source/target kolonlarında durur ve log'a/kanıta yazılmaz.
+  `CREATE TABLE IF NOT EXISTS legacy_key_migrations (
+    id TEXT PRIMARY KEY NOT NULL,
+    binary_object_id TEXT NOT NULL UNIQUE REFERENCES binary_objects(id),
+    document_id TEXT NOT NULL REFERENCES archive_documents(id) ON DELETE CASCADE,
+    object_class TEXT NOT NULL,
+    bucket_or_namespace TEXT NOT NULL,
+    source_object_key TEXT NOT NULL UNIQUE,
+    target_object_key TEXT NOT NULL UNIQUE,
+    masked_key_pattern TEXT NOT NULL,
+    classification_json TEXT NOT NULL,
+    metadata_findings_json TEXT,
+    source_sha256 TEXT NOT NULL,
+    target_sha256 TEXT,
+    status TEXT NOT NULL DEFAULT 'QUEUED',
+    attempt INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 5,
+    next_attempt_at TEXT,
+    lease_token TEXT,
+    lease_expires_at TEXT,
+    failure_code TEXT,
+    last_error TEXT,
+    verified_at TEXT,
+    completed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (status IN ('QUEUED', 'COPYING', 'RETRY', 'COMPLETED', 'FAILED')),
+    CHECK (length(source_sha256) = 64),
+    CHECK (target_sha256 IS NULL OR length(target_sha256) = 64),
+    CHECK (attempt >= 0 AND max_attempts BETWEEN 1 AND 20)
+  )`,
+  "CREATE INDEX IF NOT EXISTS legacy_key_migrations_claim_idx ON legacy_key_migrations (status, next_attempt_at, lease_expires_at, created_at)",
+
 
   `CREATE TABLE IF NOT EXISTS promotion_receipts (
     id TEXT PRIMARY KEY NOT NULL,

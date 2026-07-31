@@ -41,7 +41,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 18;
+export const ARCHIVE_SCHEMA_VERSION = 19;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -720,6 +720,13 @@ async function migrateOriginalShaUniqueness(db: D1Database) {
   await db.prepare("DROP INDEX IF EXISTS archive_documents_sha256_unique").run();
 }
 
+/** F1.8: eski anahtar envanter/taşıma tablosu mevcut kurulumlara eklenir. */
+async function createLegacyKeyMigrationTable(db: D1Database) {
+  for (const statement of ingestTableStatements.filter((sql) => sql.includes("legacy_key_migrations"))) {
+    await db.prepare(statement).run();
+  }
+}
+
 /** F1.7 / ADR-015: bölümlü erişim türevleri sayfa aralığıyla kaydedilir. */
 async function migrateBinaryObjectPageRange(db: D1Database) {
   if (!(await tableExists(db, "binary_objects"))) return;
@@ -1140,6 +1147,8 @@ const structuralMigrations: MigrationStep[] = [
   { version: 17, run: migrateBinaryObjectPageRange },
   // 17 → 18: segment kuşağı ve renderer kanıtı; profil yükseltmesi engellenmez.
   { version: 18, run: migrateDerivativeGenerationEvidence },
+  // 18 → 19: eski anahtarların maskeli envanteri ve taşıma durumu.
+  { version: 19, run: createLegacyKeyMigrationTable },
 ];
 
 /**

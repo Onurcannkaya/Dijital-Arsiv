@@ -612,6 +612,40 @@ export const derivativeJobs = sqliteTable("derivative_jobs", {
   check("derivative_jobs_attempt_check", sql`${table.attempt} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 20`),
 ]);
 
+/** F1.8 — `lib/ingest-schema.ts` eski anahtar taşıma envanterinin tip aynası. */
+export const legacyKeyMigrations = sqliteTable("legacy_key_migrations", {
+  id: text("id").primaryKey(),
+  binaryObjectId: text("binary_object_id").notNull().unique().references(() => binaryObjects.id),
+  documentId: text("document_id").notNull().references(() => archiveDocuments.id, { onDelete: "cascade" }),
+  objectClass: text("object_class").notNull(),
+  bucketOrNamespace: text("bucket_or_namespace").notNull(),
+  sourceObjectKey: text("source_object_key").notNull().unique(),
+  targetObjectKey: text("target_object_key").notNull().unique(),
+  maskedKeyPattern: text("masked_key_pattern").notNull(),
+  classificationJson: text("classification_json").notNull(),
+  metadataFindingsJson: text("metadata_findings_json"),
+  sourceSha256: text("source_sha256").notNull(),
+  targetSha256: text("target_sha256"),
+  status: text("status").notNull().default("QUEUED"),
+  attempt: integer("attempt").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  nextAttemptAt: text("next_attempt_at"),
+  leaseToken: text("lease_token"),
+  leaseExpiresAt: text("lease_expires_at"),
+  failureCode: text("failure_code"),
+  lastError: text("last_error"),
+  verifiedAt: text("verified_at"),
+  completedAt: text("completed_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("legacy_key_migrations_claim_idx").on(table.status, table.nextAttemptAt, table.leaseExpiresAt, table.createdAt),
+  check("legacy_key_migrations_status_check", sql`${table.status} IN ('QUEUED', 'COPYING', 'RETRY', 'COMPLETED', 'FAILED')`),
+  check("legacy_key_migrations_source_sha_check", sql`length(${table.sourceSha256}) = 64`),
+  check("legacy_key_migrations_target_sha_check", sql`${table.targetSha256} IS NULL OR length(${table.targetSha256}) = 64`),
+  check("legacy_key_migrations_attempt_check", sql`${table.attempt} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 20`),
+]);
+
 export const promotionReceipts = sqliteTable("promotion_receipts", {
   id: text("id").primaryKey(),
   promotionJobId: text("promotion_job_id").notNull().references(() => promotionJobs.id),

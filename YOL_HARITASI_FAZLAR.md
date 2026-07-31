@@ -606,6 +606,25 @@ tam doğrulama tamamlanmadan bu iş çalıştırılmaz.
 - Anahtar ve custom metadata taramasında doğrulanmış kişisel veri kalmaz.
 - Loglarda özgün dosya adı, açık adres, kişi adı veya erişim belirteci bulunmaz.
 
+**Uygulama durumu (F1.8):** Şema v19 ile `legacy_key_migrations` maskeli
+envanter/taşıma tablosu eklendi. `lib/key-classification.ts` anahtarları
+yapısal olarak sınıflandırır (`LIKE '%.%'` göstergesinin render bölümü yanlış
+pozitifleri düzeltildi), göstergeleri (uzantı, boşluk, ASCII dışı, 11 haneli
+dizi, ad benzeri büyük harf) çıkarır ve ham anahtarı asla log'a/kanıta
+yazmayan maskeleme uygular. Envanter dilimi rowid su işaretiyle sayfalanır;
+taşıma işi kiralı/backoff'lu kuyrukta çalışır: kaynak if-absent `promote`
+ile güvenli hedefe kopyalanır (eski metadata taşınmaz, temiz sözleşme
+alanları yazılır), hedef akışla tam okunup SHA-256 yetkili kayıtla
+doğrulanır ve `binary_objects.object_key` referansı denetim olayıyla birlikte
+tek kira-çitli batch'te atomik değiştirilir. Dolu hedef ezilmez; aynı içerikli
+hedef yanıt kaybı kurtarması olarak doğrulanıp kabul edilir. Eski nesne
+silinmez (tasfiye ADR-016 prosedürüne aittir) ve uzlaştırma taşınmış kaynak
+ile kopya penceresindeki hedefi sahipsiz saymaz. Metadata alan adları
+sınıflandırılır, değerler okunmaz. `archive_documents.storage_key` makbuz
+olarak dokunulmadan kalır; çift yazma yeniden kurulmaz. Kuyruk ve envanter
+kapsamı genel bakışta `keyMigrations` alanındadır. Gerçek eski anahtar
+seti üzerinde T-11 kanıtı staging koşusuna (F1.11) aittir.
+
 ### F1.9 — Görüntüleme bileti ve depolama görev ayrılığı
 
 **Amaç:** Görüntüleme/indirme erişimini kısa ömürlü, amaç bağlı ve denetlenebilir

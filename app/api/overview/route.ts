@@ -1,8 +1,8 @@
 import { authorizeRequest } from "../../../lib/authorization";
 import {
   readDerivativeSummary, readIntegrityProgress, readIntegritySummary,
-  readMaintenanceProgress, readReconciliationSummary, requireArchiveSchema,
-  getArchiveBindings,
+  readKeyMigrationSummary, readMaintenanceProgress, readReconciliationSummary,
+  requireArchiveSchema, getArchiveBindings,
 } from "../../../lib/archive-storage";
 import { failure } from "../../../lib/errors";
 
@@ -59,11 +59,12 @@ export async function GET(request: Request) {
             WHERE p.confirmed_text IS NULL AND (? = '*' OR d.unit = ?)) AS pages_pending`)
         .bind(scope, scope, scope, scope, scope, scope).first<Record<string, number>>(),
       bindings.DB.prepare(`SELECT COUNT(*) AS objects, COALESCE(SUM(o.byte_size), 0) AS bytes,
-          -- Politika öncesi yazılmış anahtarlar dosya adı taşır
-          -- (S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md §6). Asıl nesne
-          -- değiştirilemediği için bunlar yalnız yetkili yeniden kabul ile
-          -- taşınabilir; sayı görünür kalsın diye raporlanır.
-          SUM(CASE WHEN o.object_key LIKE '%.%' THEN 1 ELSE 0 END) AS legacy_keys,
+          -- Kaba gösterge: nokta içeren anahtarlar. Politika uyumlu render
+          -- bölümleri (part-NNNN.pdf) sayılmaz; yetkili sınıflandırma F1.8
+          -- envanteridir (yanıttaki keyMigrations alanı).
+          SUM(CASE WHEN o.object_key LIKE '%.%'
+            AND o.object_key NOT GLOB 'derivatives/*part-[0-9][0-9][0-9][0-9].pdf'
+            THEN 1 ELSE 0 END) AS legacy_keys,
           -- Erişim türevi olmayan belgelerde görüntüleme asılı sunmak zorunda
           -- kalır; sayı görünür kalsın diye raporlanır.
           (SELECT COUNT(*) FROM archive_documents ad WHERE (? = '*' OR ad.unit = ?)
@@ -121,6 +122,9 @@ export async function GET(request: Request) {
       reconciliation: await readReconciliationSummary(bindings.DB),
       // F1.7: PDF erişim türevi kuyruğu; REVIEW_REQUIRED işletim metriğidir (ADR-015).
       derivatives: await readDerivativeSummary(bindings.DB),
+      // F1.8: `LIKE '%.%'` göstergesinin yerini alan yetkili envanter. `pending`
+      // sınıflandırılmış eski anahtar sayısıdır; kapsam `inventory` alanındadır.
+      keyMigrations: await readKeyMigrationSummary(bindings.DB),
       // Kapasite kotası, yedekleme durumu ve servis sağlığı henüz ölçülmüyor;
       // uydurma değer döndürmek yerine açıkça bildirilmez.
       unmeasured: ["storageQuota", "lastBackup", "serviceHealth"],
