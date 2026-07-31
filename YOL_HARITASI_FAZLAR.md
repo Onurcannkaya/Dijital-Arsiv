@@ -729,22 +729,37 @@ Taşınabilir paket en az şunları içerir:
   sayılmaz.
 - Tatbikat RPO/RTO hedefleri ve gerçek sürelerle raporlanır.
 
-**Uygulama durumu (F1.10 — paket bölümü):** `lib/storage-manifest.ts`
-taşınabilir paketi üretir: kanonik (deterministik) JSON manifest; mantıksal
-kimlikler, nesne sınıfı/boyut/medya/SHA-256, belge üst verisi + profil sürümü,
-doğrulanmış varlık ilişkileri, OCR metin bağlamı ve denetim zincirinin bağ
-bütünlüğü doğrulanan bölümü. Sağlayıcı anahtarı/ETag/sürüm kimliği pakete
-girmez; testler manifestte bu alanların bulunmadığını ve farklı sağlayıcı
-kimlikleri üreten ikinci S3 uyumlu adaptörde doğrulamanın yalnız içerik
-SHA'sıyla geçtiğini kanıtlar. Dışa aktarım her nesneyi kaynağından akışla
-okuyup hedefe yetkili SHA beyanıyla yazar; `verifyPortablePackage` hedeften
-tam okuma ile doğrular; `restorePortablePackage` bağımsız veritabanı ve
-geri yükleme alanına belge bağlamını (nesneler, ilişkiler, OCR metni) açar ve
-bozuk denetim zinciri bağını geri yüklemeden önce reddeder.
-`scripts/verify-storage-manifest.mjs` diske aktarılmış paketi tatbikat kanıtı
-için doğrular. OCR kelime koordinatları pilot pakete alınmaz (metin bağlamı
-taşınır). Gerçek yedek işleri, RPO/RTO tatbikatı, ikinci gerçek sağlayıcı
-koşusu ve T-09/T-10 kanıtları staging'e (F1.11) aittir.
+**Uygulama durumu (F1.10 — paket v2 bölümü):** `lib/storage-manifest.ts`
+kanonik JSON manifesti mantıksal kimlikler, nesne sınıfı/boyut/medya/SHA-256,
+belge üst verisi + profil sürümü + özgün yükleyen, doğrulanmış ilişkiler ve
+parsel/adres/bina alt kayıtları, OCR metin bağlamı ve tam denetim olayı
+içeriğiyle üretir. Sağlayıcı anahtarı/ETag/sürüm kimliği pakete girmez.
+
+Dışa aktarım kaynak nesneyi akışla yeniden hashler, hedefte yalnız koşullu ilk
+yazma kullanır ve manifesti en son commit işareti olarak yazar. Aktarım boyunca
+veritabanı bağlamı değişirse manifest commit edilmez. Doğrulama, paketin içinden
+gelmemesi gereken `expectedManifestDigest` değerini yedek kataloğu/değişmez
+denetim kaydı olarak zorunlu tutar; böylece saldırganın manifest ve nesneleri
+birlikte yeniden üretmesi başarı sayılmaz. Denetim olaylarının yalnız zincir
+bağı değil actor/action/details/zaman içeriği de kaynak hash algoritmasıyla
+yeniden hesaplanır. Güvenilmeyen kimlikler, mükerrerler, türev döngüleri,
+metadata uyuşmazlıkları ve yol/prefix kaçışları fail-closed reddedilir.
+
+`restorePortablePackage` benzersiz koşu önekine yazar, her nesneyi geri okuyup
+SHA ile doğrular, veritabanını tek batch'te kurar; hata halinde yalnız koşunun
+yazdığı nesneleri temizler. Kaynak denetim zinciri korunur ve manifest özeti
+ile koşu kimliğini taşıyan yerel geri yükleme alındısı zincire eklenir.
+`scripts/verify-storage-manifest.mjs` çevrimdışı doğrulamada aynı dış güven
+özetini ve güvenli kök sınırını zorunlu tutar.
+
+Açık operasyonel kapsam: paket kişisel veri ve OCR metni taşıdığı için gerçek
+hedefte KMS/envelope encryption, anahtar döndürme ve erişim politikası kanıtı;
+OCR kelime koordinatları, doğrulanmış alanlar ve metin revizyonlarının paket
+kapsamına alınması; zamanlanmış yedek işi, RPO/RTO tatbikatı, ikinci gerçek
+sağlayıcı koşusu ve T-09/T-10 kanıtları staging'e (F1.11) aittir. Ayrıca mevcut
+denetim hash kanonikleştirmesindeki locale-bağımlı anahtar sırası, eski zincirleri
+bozmadan `audit_hash_version` ile sürümlenecek ayrı ADR+göç işi olarak açıktır.
+Bu kanıtlar olmadan F1.10 operasyonel olarak kapanmış sayılmaz.
 
 ### F1.11 — Otomatik kabul ve kanıt kapısı
 

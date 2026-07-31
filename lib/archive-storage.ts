@@ -39,9 +39,12 @@ export {
 } from "./key-migration.ts";
 export { classifyObjectKey, maskObjectKey, secureTargetKey } from "./key-classification.ts";
 export {
-  PORTABLE_PACKAGE_VERSION, buildPortableManifest, canonicalJson, exportPortablePackage,
-  manifestDigest, restorePortablePackage, verifyAuditLinkage, verifyPortablePackage,
-  type PortableManifest,
+  MAX_PORTABLE_MANIFEST_BYTES, PORTABLE_PACKAGE_VERSION,
+  buildPortableManifest, canonicalJson, exportPortablePackage, manifestDigest,
+  restorePortablePackage, validatePortableManifest, verifyAuditChain,
+  verifyAuditLinkage, verifyPortablePackage,
+  type PortableManifest, type RestorePortableOptions, type RestoreStorageTarget,
+  type VerifyPortableOptions,
 } from "./storage-manifest.ts";
 export {
   ACCESS_SESSION_ABSOLUTE_MS, ACCESS_SESSION_IDLE_MS, ACCESS_TICKET_TTL_SECONDS,
