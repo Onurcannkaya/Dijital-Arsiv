@@ -1,4 +1,8 @@
-import { env } from "cloudflare:workers";
+// Çalışma zamanı önyüklemesi: Workers ortamını bağlama dikişine kaydeder.
+// Kurum içi Node build'i bu importu Node önyüklemesiyle takas eder (P1/P4).
+import "./workers-runtime.ts";
+
+import { resolveArchiveBindings, type ArchiveBindings } from "./archive-bindings.ts";
 import type { ObjectStorage } from "./object-storage.ts";
 import { createObjectStorage, R2ImmutableVaultWriter, R2ObjectReader, R2StagingStorage } from "./r2-object-storage.ts";
 
@@ -54,36 +58,18 @@ export {
 } from "./access-tickets.ts";
 export { isPendingDerivative, type PendingDerivative } from "./binary-objects.ts";
 
-export type ArchiveBindings = {
-  DB: D1Database;
-  ARCHIVE_FILES: R2Bucket;
-  DERIVATIVE_FILES?: R2Bucket;
-  TEMPORARY_FILES?: R2Bucket;
-  QUARANTINE_FILES?: R2Bucket;
-  OCR_SERVICE_URL?: string;
-  OCR_SERVICE_TOKEN?: string;
-  CONTENT_SCAN_SERVICE_URL?: string;
-  CONTENT_SCAN_SERVICE_TOKEN?: string;
-  DOCUMENT_RENDER_SERVICE_URL?: string;
-  DOCUMENT_RENDER_SERVICE_TOKEN?: string;
-  DOCUMENT_RENDER_IMAGE_DIGEST?: string;
-  ARCHIVE_ADMIN_EMAILS?: string;
-  /** Şema göç uç noktasının anahtarı; tanımlı değilse uç nokta kapalıdır. */
-  ARCHIVE_MIGRATION_TOKEN?: string;
-  APP_ENV?: string;
-  /** Yaln?z staging kabul kan?t? okuma u? noktas?n?n ayr?, en-dar yetki anahtar?d?r. */
-  ARCHIVE_ACCEPTANCE_TOKEN?: string;
-};
+// Bağlama tipi ve Node sağlayıcı fabrikası dikiş modülünde yaşar; tüketiciler
+// için buradan yeniden dışa aktarılır (kurum içi port P1).
+export {
+  createNodeEnvBindingsProvider, setArchiveBindingsProvider,
+  type ArchiveBindings, type ArchiveBindingsProvider, type NodeRuntimeAdapters,
+} from "./archive-bindings.ts";
 
 /** S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md §5 nesne sınıfları. */
 export type ObjectClass = "original" | "access" | "ocr" | "preservation" | "thumbnail" | "quarantine" | "temporary";
 
 export function getArchiveBindings(): ArchiveBindings {
-  const bindings = env as unknown as Partial<ArchiveBindings>;
-  if (!bindings.DB || !bindings.ARCHIVE_FILES) {
-    throw new Error("Arşiv veritabanı veya dosya kasası bağlaması kullanılamıyor.");
-  }
-  return bindings as ArchiveBindings;
+  return resolveArchiveBindings();
 }
 
 /** F1.3 yükleme rolü yalnız geçici ve karantina yetki alanlarını alır. */
