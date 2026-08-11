@@ -2,6 +2,7 @@ import {
   AcceptanceEvidenceNotFoundError,
   readAcceptanceEvidence,
   enqueueAcceptanceSecondDerivative,
+  exportAcceptancePortableManifest,
   resolveAcceptancePrivateObjectLocator,
   acceptanceEvidenceAccessDecision,
 } from "../../../../../lib/acceptance-evidence";
@@ -114,6 +115,16 @@ export async function POST(request: Request, context: RouteContext) {
         findingId: probe.finding.id,
       });
       return noStore(Response.json(probe), requestId);
+    }
+    if (body?.action === "EXPORT_PORTABLE_MANIFEST") {
+      const exported = await exportAcceptancePortableManifest(bindings.DB, id);
+      logEvent("info", "acceptance.portable-manifest-exported", {
+        correlationId: requestId,
+        // Fiziksel anahtarlar loglanmaz; yaln?z kabul ko?usu belle?ine d?ner.
+        objectCount: exported.objectLocators.length,
+        manifestDigest: exported.manifestDigest,
+      });
+      return noStore(Response.json(exported), requestId);
     }
     if (body?.action === "RUN_RECONCILIATION_PROBE") {
       await readAcceptanceEvidence(bindings.DB, id);

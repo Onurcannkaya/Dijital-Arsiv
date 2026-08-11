@@ -95,6 +95,8 @@ function scopedConfig(test) {
       endpoint: process.env.ACCEPTANCE_S3_ENDPOINT,
       originalBucket: process.env.ACCEPTANCE_ORIGINAL_BUCKET,
       quarantineBucket: process.env.ACCEPTANCE_QUARANTINE_BUCKET,
+      // İsteğe bağlı: türev nesneler de paket tatbikatına girecekse verilir.
+      derivativeBucket: process.env.ACCEPTANCE_DERIVATIVE_BUCKET,
       restoreBucket: process.env.ACCEPTANCE_RESTORE_BUCKET,
       lockProfile: process.env.ACCEPTANCE_LOCK_PROFILE,
       lockBucket: process.env.ACCEPTANCE_LOCK_BUCKET,
@@ -136,7 +138,19 @@ function scopedConfig(test) {
     config.secondProvider = {
       endpoint: process.env.ACCEPTANCE_SECOND_S3_ENDPOINT,
       bucket: process.env.ACCEPTANCE_SECOND_BUCKET,
+      region: process.env.ACCEPTANCE_SECOND_S3_REGION || "auto",
+      credentials: {
+        accessKeyId: process.env.ACCEPTANCE_SECOND_S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.ACCEPTANCE_SECOND_S3_SECRET_ACCESS_KEY,
+        sessionToken: process.env.ACCEPTANCE_SECOND_S3_SESSION_TOKEN,
+      },
     };
+  }
+  if (test.requires.includes("restoreDrill")) {
+    // ADR-017 tatbikatının RTO hedefi; ortam değişkeni saniye cinsinden geçersiz
+    // kılabilir, varsayılan 15 dakikadır.
+    const rto = Number(process.env.ACCEPTANCE_RESTORE_RTO_SECONDS);
+    config.restoreRtoSeconds = Number.isSafeInteger(rto) && rto > 0 ? rto : 900;
   }
   if (test.requires.includes("logAccess")) {
     config.logEndpoint = process.env.ACCEPTANCE_LOG_ENDPOINT;

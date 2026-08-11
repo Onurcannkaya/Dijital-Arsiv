@@ -21,8 +21,8 @@ export const TEST_CATALOG = Object.freeze([
   { id: "T-06", title: "Yetkisiz rol aslı okuyamaz veya silemez", executor: "Bilgi Güvenliği", approver: "Bilgi İşlem yöneticisi", requires: ["iamIdentities"], evidenceKinds: ["access-denial", "integrity"] },
   { id: "T-07", title: "Sürümleme/Object Lock ve yasal bekletme", executor: "Depolama İşletimi + Bilgi Güvenliği", approver: "Arşiv + Hukuk/KVKK + Bilgi İşlem", requires: ["providerLockProfile"], evidenceKinds: ["immutability-control", "integrity"] },
   { id: "T-08", title: "Bütünlük taraması uyuşmazlığı yakalar", executor: "Kalite Güvence", approver: "Bilgi Güvenliği + Depolama İşletimi", requires: ["staging", "s3"], evidenceKinds: ["finding", "alarm"] },
-  { id: "T-09", title: "Belge bağlamıyla yedekten geri yüklenir", executor: "Yedekleme/Depolama İşletimi", approver: "Arşiv + Bilgi İşlem yöneticisi", requires: ["restoreDrill"], evidenceKinds: ["restore", "integrity"] },
-  { id: "T-10", title: "Sağlayıcı taşınabilirlik manifesti doğrulanır", executor: "Depolama İşletimi", approver: "Bilgi Güvenliği + Arşiv", requires: ["secondProvider"], evidenceKinds: ["portability", "integrity"] },
+  { id: "T-09", title: "Belge bağlamıyla yedekten geri yüklenir", executor: "Yedekleme/Depolama İşletimi", approver: "Arşiv + Bilgi İşlem yöneticisi", requires: ["staging", "restoreDrill"], evidenceKinds: ["restore", "integrity"] },
+  { id: "T-10", title: "Sağlayıcı taşınabilirlik manifesti doğrulanır", executor: "Depolama İşletimi", approver: "Bilgi Güvenliği + Arşiv", requires: ["staging", "s3", "secondProvider"], evidenceKinds: ["portability", "integrity"] },
   { id: "T-11", title: "Anahtar ve erişim logunda kişisel veri yoktur", executor: "Kalite Güvence + Veri Koruma", approver: "Hukuk/KVKK + Bilgi Güvenliği", requires: ["staging", "logAccess"], evidenceKinds: ["secret-scan", "finding-summary"] },
   { id: "T-12", title: "İki yönlü uzlaştırma rapor üretir", executor: "Kalite Güvence", approver: "Depolama İşletimi + Arşiv", requires: ["staging", "s3"], evidenceKinds: ["reconciliation", "finding"] },
   { id: "K-1", title: "MIME/magic-byte uyuşmazlığı reddedilir", executor: "Kalite Güvence", approver: "Bilgi Güvenliği", requires: ["staging"], evidenceKinds: ["validation", "absence"] },
@@ -110,7 +110,9 @@ export function resolveCapabilities(env) {
       && env.ACCEPTANCE_RESTORE_BUCKET !== env.ACCEPTANCE_ORIGINAL_BUCKET,
     secondProvider: isHttpsUrl(env.ACCEPTANCE_SECOND_S3_ENDPOINT)
       && hasText(env, "ACCEPTANCE_SECOND_BUCKET")
-      && env.ACCEPTANCE_SECOND_S3_ENDPOINT !== env.ACCEPTANCE_S3_ENDPOINT,
+      && env.ACCEPTANCE_SECOND_S3_ENDPOINT !== env.ACCEPTANCE_S3_ENDPOINT
+      // İkinci adaptör kendi dar kimlik bilgisiyle sürülür; yoksa BLOCKED.
+      && hasCredentialPair(env, "ACCEPTANCE_SECOND_S3"),
     logAccess: staging && s3 && isHttpsUrl(env.ACCEPTANCE_LOG_ENDPOINT)
       && hasText(env, "ACCEPTANCE_LOG_TOKEN") && env.ACCEPTANCE_LOG_TOKEN.trim().length >= 32
       && ["VIEWER", "APPLICATION", "SCANNER", "OCR"]

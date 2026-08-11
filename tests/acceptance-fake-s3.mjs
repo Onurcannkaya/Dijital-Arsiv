@@ -222,3 +222,55 @@ export function fakeLockS3({
 
   return { fetcher, objects, bucket, lockedPrefix, unlockedPrefix };
 }
+
+/**
+ * T-09/T-10 için genel aktarma hedefi: izole geri yükleme kovası ya da ikinci
+ * sağlayıcı. İmzalı her istek kabul edilir; `if-none-match: *` koşullu ilk
+ * yazma sözleşmesi uygulanır. ETag'ler bilinçli olarak kaynaktan farklı üretilir:
+ * bütünlük kararının içerik SHA-256'sına dayandığını kanıtlamak için.
+ */
+export function fakeTransferTarget({ bucket, denyWrites = false, corruptReads = false } = {}) {
+  const store = new Map();
+
+  async function fetcher(urlValue, init = {}) {
+    const url = new URL(urlValue);
+    const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+    const requestBucket = parts.shift();
+    const key = parts.join("/");
+    const method = init.method ?? "GET";
+    if (requestBucket !== bucket) return xmlError("NoSuchBucket", 404);
+
+    if (method === "GET" || method === "HEAD") {
+      const payload = store.get(key);
+      if (!payload) return xmlError("NoSuchKey", 404);
+      const bytes = Uint8Array.from(payload);
+      if (corruptReads) bytes[0] ^= 0xff;
+      return new Response(method === "HEAD" ? null : bytes, {
+        status: 200,
+        headers: {
+          "content-length": String(bytes.byteLength),
+          etag: `"target-${sha256(payload).slice(0, 24)}"`,
+          "x-amz-version-id": "target-version-1",
+        },
+      });
+    }
+    if (method === "PUT") {
+      if (denyWrites) return xmlError("AccessDenied", 403);
+      if (init.headers?.["if-none-match"] === "*" && store.has(key)) {
+        return xmlError("PreconditionFailed", 412);
+      }
+      const payload = new Uint8Array(await new Response(init.body).arrayBuffer());
+      store.set(key, payload);
+      return new Response(null, {
+        status: 200,
+        headers: {
+          etag: `"target-${sha256(payload).slice(0, 24)}"`,
+          "x-amz-version-id": "target-version-1",
+        },
+      });
+    }
+    return xmlError("AccessDenied", 403);
+  }
+
+  return { fetcher, store, bucket };
+}

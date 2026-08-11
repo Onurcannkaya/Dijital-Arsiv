@@ -9,6 +9,8 @@
 
 import { createHash } from "node:crypto";
 
+import { canonicalJson } from "../scripts/phase-one-acceptance-core.mjs";
+
 const sha256Hex = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const ok = (body, status = 200) => ({ status, ok: true, body });
 const err = (status, code) => ({ status, ok: false, body: { error: code, code } });
@@ -241,6 +243,57 @@ export function fakeStaging(options = {}) {
             sha256: sha256Hex(session.payload),
             byteSize: session.payload.byteLength,
           });
+        }
+        if (request.body?.action === "EXPORT_PORTABLE_MANIFEST") {
+          if (options.manifestExportStatus) return err(options.manifestExportStatus, "MANIFEST_EXPORT_FAILED");
+          const document = documents.find((entry) => entry.id === session.documentId);
+          if (!document) return err(404, "DOCUMENT_NOT_ACCEPTED");
+          const manifest = {
+            packageVersion: "portable-package-v2",
+            generatedAt: "2026-07-31T12:00:00.000Z",
+            document: {
+              id: document.id,
+              referenceNo: document.referenceNo,
+              originalName: document.originalName,
+              mediaType: document.mediaType,
+              byteSize: document.byteSize,
+              sha256: document.sha256,
+              documentType: "Tasnif bekliyor",
+              unit: document.unit,
+            },
+            objects: [{
+              id: `original-${document.id}`,
+              objectClass: "original",
+              mediaType: document.mediaType,
+              byteSize: document.byteSize,
+              sha256: document.sha256,
+              pageStart: null,
+              pageEnd: null,
+              derivedFromId: null,
+              generator: "ingest-promotion",
+              retentionStatus: "ACTIVE",
+              legalHoldStatus: "NONE",
+              createdAt: "2026-07-31T11:00:00.000Z",
+            }],
+            relations: [],
+            ocrPages: [],
+            auditChain: [{ eventNumber: 1, action: "document.received" }],
+          };
+          let response = {
+            documentId: document.id,
+            manifest,
+            manifestDigest: sha256Hex(Buffer.from(canonicalJson(manifest), "utf8")),
+            objectLocators: [{
+              id: `original-${document.id}`,
+              objectClass: "original",
+              namespace: "ARCHIVE_FILES",
+              objectKey: `original/${session.id}`,
+              byteSize: document.byteSize,
+              sha256: document.sha256,
+            }],
+          };
+          if (options.portableManifestTransform) response = options.portableManifestTransform(response, session);
+          return ok(response);
         }
         if (request.body?.action === "RUN_INTEGRITY_MISMATCH_PROBE") {
           const sessionSha = session.payload ? sha256Hex(session.payload) : "0".repeat(64);

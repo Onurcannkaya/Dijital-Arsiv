@@ -5,13 +5,16 @@ import {
   AcceptanceEvidenceNotFoundError,
   ACCEPTANCE_SECOND_DERIVATIVE_PROFILE,
   enqueueAcceptanceSecondDerivative,
+  exportAcceptancePortableManifest,
   acceptanceEvidenceAccessDecision,
   readAcceptanceEvidence,
   resolveAcceptancePrivateObjectLocator,
   secureAcceptanceTokenEqual,
 } from "../lib/acceptance-evidence.ts";
 import { applyArchiveMigrations } from "../lib/archive-schema.ts";
+import { writeAuditEvent } from "../lib/audit.ts";
 import { transitionIngestSession } from "../lib/ingest-events.ts";
+import { canonicalJson, manifestDigest } from "../lib/storage-manifest.ts";
 import { createSqliteD1 } from "./sqlite-d1.ts";
 
 const SESSION_ID = "acceptance-session-001";
@@ -144,37 +147,71 @@ test("kan?t u? noktas? ?retimde g?r?nmez ve staging'de ayr? s?rla fail-closed ?a
   }), null);
 });
 
-test("ikinci profil kuyru?u idempotenttir ve kan?t yaln?z g?venli envanteri d?nd?r?r", async () => {
+async function acceptedSessionDb() {
   const db = createSqliteD1();
   await applyArchiveMigrations(db);
-  try {
-    await db.prepare(`INSERT INTO upload_sessions
-      (id, user_id, unit, original_name, requested_document_type, idempotency_key,
-       status, expected_byte_size, declared_media_type, expires_at)
-      VALUES ('accepted-session-001', 'acceptance@sivas.bel.tr', 'Kabul Testleri',
-       'accepted.pdf', 'Tasnif bekliyor', 'accepted-idempotency-001', 'ACCEPTED',
-       128, 'application/pdf', '2026-08-01T00:00:00.000Z')`).run();
-    await db.prepare(`INSERT INTO ingest_receipts
-      (id, upload_session_id, result, sha256, byte_size, declared_media_type,
-       detected_media_type, type_validation_result, parser_name, parser_version,
-       parser_result, scanner_engine, scanner_version, scanner_signature_version, scanner_result)
-      VALUES ('accepted-receipt', 'accepted-session-001', 'VERIFIED', ?, 128,
-       'application/pdf', 'application/pdf', 'MATCH', 'qpdf', '1', 'VALID',
-       'clamav', '1.4.3', '2026073101', 'CLEAN')`).bind(SHA).run();
-    await db.prepare(`INSERT INTO archive_documents
-      (id, reference_no, original_name, storage_key, media_type, byte_size, sha256, uploaded_by)
-      VALUES ('accepted-document', 'ARS-2026-TEST', 'accepted.pdf', 'opaque-test-key',
-       'application/pdf', 128, ?, 'acceptance@sivas.bel.tr')`).bind(SHA).run();
-    await db.prepare(`INSERT INTO binary_objects
-      (id, document_id, object_class, object_key, storage_version_id, media_type, byte_size, sha256)
-      VALUES ('accepted-original', 'accepted-document', 'original', 'opaque-test-key',
-       'provider-version-1', 'application/pdf', 128, ?)`).bind(SHA).run();
-    await db.prepare(`INSERT INTO promotion_jobs
-      (id, upload_session_id, ingest_receipt_id, document_id, binary_object_id,
-       target_object_key, sha256, status)
-      VALUES ('accepted-promotion', 'accepted-session-001', 'accepted-receipt',
-       'accepted-document', 'accepted-original', 'opaque-test-key', ?, 'COMPLETED')`).bind(SHA).run();
+  await db.prepare(`INSERT INTO upload_sessions
+    (id, user_id, unit, original_name, requested_document_type, idempotency_key,
+     status, expected_byte_size, declared_media_type, expires_at)
+    VALUES ('accepted-session-001', 'acceptance@sivas.bel.tr', 'Kabul Testleri',
+     'accepted.pdf', 'Tasnif bekliyor', 'accepted-idempotency-001', 'ACCEPTED',
+     128, 'application/pdf', '2026-08-01T00:00:00.000Z')`).run();
+  await db.prepare(`INSERT INTO ingest_receipts
+    (id, upload_session_id, result, sha256, byte_size, declared_media_type,
+     detected_media_type, type_validation_result, parser_name, parser_version,
+     parser_result, scanner_engine, scanner_version, scanner_signature_version, scanner_result)
+    VALUES ('accepted-receipt', 'accepted-session-001', 'VERIFIED', ?, 128,
+     'application/pdf', 'application/pdf', 'MATCH', 'qpdf', '1', 'VALID',
+     'clamav', '1.4.3', '2026073101', 'CLEAN')`).bind(SHA).run();
+  await db.prepare(`INSERT INTO archive_documents
+    (id, reference_no, original_name, storage_key, media_type, byte_size, sha256, uploaded_by)
+    VALUES ('accepted-document', 'ARS-2026-TEST', 'accepted.pdf', 'opaque-test-key',
+     'application/pdf', 128, ?, 'acceptance@sivas.bel.tr')`).bind(SHA).run();
+  await db.prepare(`INSERT INTO binary_objects
+    (id, document_id, object_class, object_key, storage_version_id, media_type, byte_size, sha256)
+    VALUES ('accepted-original', 'accepted-document', 'original', 'opaque-test-key',
+     'provider-version-1', 'application/pdf', 128, ?)`).bind(SHA).run();
+  await db.prepare(`INSERT INTO promotion_jobs
+    (id, upload_session_id, ingest_receipt_id, document_id, binary_object_id,
+     target_object_key, sha256, status)
+    VALUES ('accepted-promotion', 'accepted-session-001', 'accepted-receipt',
+     'accepted-document', 'accepted-original', 'opaque-test-key', ?, 'COMPLETED')`).bind(SHA).run();
+  return db;
+}
 
+test("ta??nabilir manifest ACCEPTED oturumdan sa?lay?c? alan? s?zd?rmadan d??a aktar?l?r", async () => {
+  const db = await acceptedSessionDb();
+  try {
+    await writeAuditEvent(db, {
+      documentId: "accepted-document", actor: "system:ingest-promotion",
+      action: "document.received", details: { source: "acceptance-test" },
+    });
+    const exported = await exportAcceptancePortableManifest(db, "accepted-session-001");
+    assert.equal(exported.documentId, "accepted-document");
+    // ?zet, d?nen manifestin kanonik JSON'?ndan yeniden ?retilebilir olmal?d?r.
+    assert.equal(exported.manifestDigest, await manifestDigest(exported.manifest));
+    assert.deepEqual(exported.objectLocators, [{
+      id: "accepted-original",
+      objectClass: "original",
+      namespace: "ARCHIVE_FILES",
+      objectKey: "opaque-test-key",
+      byteSize: 128,
+      sha256: SHA,
+    }]);
+    // Manifest sa?lay?c? alan? ta??maz; fiziksel anahtar yaln?z locator'dad?r.
+    const serialized = canonicalJson(exported.manifest);
+    assert.doesNotMatch(serialized, /opaque-test-key|ARCHIVE_FILES|object_key|etag/i);
+    // ACCEPTED olmayan oturum tek tip bulunamad? hatas? verir.
+    await assert.rejects(() => exportAcceptancePortableManifest(db, "unknown-session"),
+      AcceptanceEvidenceNotFoundError);
+  } finally {
+    db.close();
+  }
+});
+
+test("ikinci profil kuyru?u idempotenttir ve kan?t yaln?z g?venli envanteri d?nd?r?r", async () => {
+  const db = await acceptedSessionDb();
+  try {
     const first = await enqueueAcceptanceSecondDerivative(db, "accepted-session-001");
     const second = await enqueueAcceptanceSecondDerivative(db, "accepted-session-001");
     assert.equal(first.enqueued, true);

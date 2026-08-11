@@ -807,11 +807,13 @@ ortam onayı koşuyu çalıştırma yetkisidir; sonuçlar oluşmadan verildiği 
 imzası sayılmaz. Bilgi İşlem, Bilgi Güvenliği ve Arşiv imzaları teknik manifest
 üretildikten sonra ona bağlanan ayrı release kapısında tamamlanmalıdır.
 
-**Canlı yürütücüler ve gerçek staging kanıtı hâlâ açık operasyon işidir:**
-`ACCEPTANCE_EXECUTOR_MODULE` tanımlı değilse bütün uygun testler
-`EXECUTOR_NOT_CONFIGURED` nedeniyle dürüstçe `BLOCKED` kalır. Gerçek R2/IAM kaynakları,
-dar test kimlikleri, T-01…T-12 ve K-1…K-7 yürütücüleri ile yetkili onay kayıtları
-bağlanmadan F1.11 ve Faz 1 tamamlanmış sayılmaz.
+**Gerçek staging kanıtı hâlâ açık operasyon işidir:** T-01…T-12 ve K-1…K-7'nin
+tamamının canlı yürütücüleri repoda sürümlenmiştir ve `ACCEPTANCE_EXECUTOR_MODULE`
+varsayılan olarak `scripts/acceptance-executors/pipeline.mjs`'e bağlıdır; modül
+tanımsızsa bütün uygun testler `EXECUTOR_NOT_CONFIGURED` nedeniyle dürüstçe
+`BLOCKED` kalır. Gerçek R2/IAM kaynakları, dar test kimlikleri (ikinci sağlayıcı
+ve geri yükleme kovası dahil) ile yetkili onay kayıtları bağlanmadan F1.11 ve
+Faz 1 tamamlanmış sayılmaz.
 ## 7. Dosya bazında planlanan değişiklikler
 
 | Dosya/alan | Değişiklik |

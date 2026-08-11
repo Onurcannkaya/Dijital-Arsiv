@@ -1,4 +1,7 @@
 import { digestToHex } from "./content-hasher.ts";
+import {
+  buildPortableManifest, manifestDigest, validatePortableManifest, verifyAuditChain,
+} from "./storage-manifest.ts";
 
 const SAFE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/;
 
@@ -385,6 +388,66 @@ export async function resolveAcceptancePrivateObjectLocator(
     objectClass: row.object_class,
     sha256: row.sha256,
     byteSize: Number(row.byte_size),
+  };
+}
+
+type PortableObjectLocationRow = {
+  id: string;
+  object_class: string;
+  bucket_or_namespace: string;
+  object_key: string;
+  byte_size: number;
+  sha256: string | null;
+};
+
+/**
+ * T-09/T-10 — ACCEPTED oturumun belgesi için F1.10 taşınabilir manifestini ve
+ * nesnelerin fiziksel konumlarını üretir. Manifest sağlayıcı alanı taşımaz;
+ * konum listesi yalnız kabul koşusu belleğinde kullanılır, kanıt dosyasına ve
+ * loglara fiziksel anahtar yazılmaz. Manifest özeti yanıtla birlikte döner;
+ * koşucu özeti kendi tarafında yeniden hesaplayarak güven kökü edinir.
+ */
+export async function exportAcceptancePortableManifest(db: D1Database, sessionId: string) {
+  if (!isSafeAcceptanceSessionId(sessionId)) throw new AcceptanceEvidenceNotFoundError();
+  const document = await db.prepare(`SELECT p.document_id, p.binary_object_id
+    FROM upload_sessions s INNER JOIN promotion_jobs p ON p.upload_session_id = s.id
+    WHERE s.id = ? AND s.status = 'ACCEPTED' AND p.status = 'COMPLETED'
+    LIMIT 1`).bind(sessionId).first<AcceptanceDocumentRow>();
+  if (!document) throw new AcceptanceEvidenceNotFoundError();
+
+  const manifest = await buildPortableManifest(db, document.document_id);
+  validatePortableManifest(manifest);
+  if (!await verifyAuditChain(manifest.document.id, manifest.auditChain)) {
+    throw new Error("Kaynak denetim zinciri kriptografik doğrulamadan geçmedi.");
+  }
+  const digest = await manifestDigest(manifest);
+
+  const locations = await db.prepare(`SELECT id, object_class, bucket_or_namespace,
+      object_key, byte_size, sha256 FROM binary_objects
+    WHERE document_id = ? AND retention_status <> 'DISPOSED' ORDER BY id`)
+    .bind(document.document_id).all<PortableObjectLocationRow>();
+  const locationById = new Map((locations.results ?? []).map((row) => [row.id, row]));
+  const objectLocators = manifest.objects.map((object) => {
+    const row = locationById.get(object.id);
+    if (!row?.sha256 || row.sha256 !== object.sha256
+      || Number(row.byte_size) !== object.byteSize) {
+      throw new Error("Paket nesnesinin depolama kaydı manifest kanıtıyla uyuşmuyor.");
+    }
+    return {
+      id: object.id,
+      objectClass: object.objectClass,
+      namespace: row.bucket_or_namespace,
+      objectKey: row.object_key,
+      byteSize: object.byteSize,
+      sha256: object.sha256,
+    };
+  });
+
+  return {
+    documentId: document.document_id,
+    manifest,
+    manifestDigest: digest,
+    objectLocators,
   };
 }
 

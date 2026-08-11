@@ -1,10 +1,11 @@
 /**
- * F1.11 — Kabul hattı canlı yürütücüleri (dikey dilim: K-1, K-2, K-3, K-7, T-02).
+ * F1.11 — Kabul hattı canlı yürütücüleri (katalogdaki 19 testin tamamı).
  *
- * Her yürütücü gerçek staging uygulamasını HTTP üzerinden sürer ve sonucu
- * fiziksel JSON kanıtla döndürür. Bu modül `ACCEPTANCE_EXECUTOR_MODULE` ile
- * yalnız scripts/acceptance-executors altından yüklenir. Beş test birlikte
- * API → karantina → tarama → terfi → değişmez asıl zincirini uçtan uca kanıtlar.
+ * Her yürütücü gerçek staging uygulamasını ve/veya S3 uyumlu depoyu sürer,
+ * sonucu fiziksel JSON kanıtla döndürür. Bu modül `ACCEPTANCE_EXECUTOR_MODULE`
+ * ile yalnız scripts/acceptance-executors altından yüklenir. Testler birlikte
+ * API → karantina → tarama → terfi → değişmez asıl → türev/erişim → yedek ve
+ * taşınabilirlik zincirini uçtan uca kanıtlar.
  */
 
 import { ExecutorConfigError, createAppClient, evidenceWriter } from "./contract.mjs";
@@ -27,6 +28,8 @@ import { runPostPromotionDbFailure } from "./post-promotion-db-failure.mjs";
 import { runIntegrityMismatchDetection } from "./integrity-mismatch.mjs";
 import { runMaximumProfileConcurrency } from "./maximum-profile-concurrency.mjs";
 import { runProviderLockProfile } from "./provider-lock-profile.mjs";
+import { runRestoreDrill } from "./restore-drill.mjs";
+import { runProviderPortability } from "./portability.mjs";
 function bindExecutor(run, { app = true } = {}) {
   return async (input) => {
     const client = app ? createAppClient({
@@ -57,6 +60,8 @@ export const executors = {
   "T-05": bindExecutor(runExpiredViewTicket),
   "T-06": bindExecutor(runOriginalIamSeparation),
   "T-07": bindExecutor(runProviderLockProfile, { app: false }),
+  "T-09": bindExecutor(runRestoreDrill),
+  "T-10": bindExecutor(runProviderPortability),
   "K-4": bindExecutor(runQuarantineIamSeparation),
   "T-12": bindExecutor(runBidirectionalReconciliation),
   "T-11": bindExecutor(runPersonalDataSurfaceScan),
@@ -84,4 +89,6 @@ export {
   runIntegrityMismatchDetection,
   runMaximumProfileConcurrency,
   runProviderLockProfile,
+  runRestoreDrill,
+  runProviderPortability,
 };
