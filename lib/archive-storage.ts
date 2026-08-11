@@ -70,6 +70,9 @@ export type ArchiveBindings = {
   ARCHIVE_ADMIN_EMAILS?: string;
   /** Şema göç uç noktasının anahtarı; tanımlı değilse uç nokta kapalıdır. */
   ARCHIVE_MIGRATION_TOKEN?: string;
+  APP_ENV?: string;
+  /** Yaln?z staging kabul kan?t? okuma u? noktas?n?n ayr?, en-dar yetki anahtar?d?r. */
+  ARCHIVE_ACCEPTANCE_TOKEN?: string;
 };
 
 /** S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md §5 nesne sınıfları. */

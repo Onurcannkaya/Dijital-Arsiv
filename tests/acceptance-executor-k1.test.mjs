@@ -27,6 +27,24 @@ function fakeClient(plan) {
       if (method === "GET" && path.startsWith("/api/uploads?id=")) {
         return plan.poll.shift() ?? plan.poll[plan.poll.length - 1];
       }
+      if (method === "GET" && path.startsWith("/api/admin/acceptance-evidence/")) {
+        return plan.evidence ?? {
+          status: 200,
+          ok: true,
+          body: {
+            terminalStatus: "REJECTED",
+            decisionCode: "TYPE_MISMATCH",
+            receipt: { typeValidationResult: "MISMATCH" },
+            transitionChain: { valid: true, events: [] },
+            counts: {
+              documents: 0,
+              originalObjects: 0,
+              ocrJobs: 0,
+              verifiedPromotions: 0,
+            },
+          },
+        };
+      }
       throw new Error(`beklenmeyen json çağrısı: ${method} ${path}`);
     },
     async putPart(path) {
@@ -48,6 +66,7 @@ async function withEvidenceDir(run) {
 function ctx(dir, overrides = {}) {
   return {
     runId: "run-0007",
+    acceptanceToken: "a".repeat(32),
     config: { baseUrl: "https://staging.example", uploaderIdentity: "u@sivas.bel.tr", unit: "Yazı İşleri" },
     signal: undefined,
     writeEvidence: evidenceWriter(dir),
@@ -56,6 +75,29 @@ function ctx(dir, overrides = {}) {
 }
 
 const ok = (session) => ({ status: 200, ok: true, body: { session } });
+
+function acceptanceEvidence(overrides = {}) {
+  const receipt = { typeValidationResult: "MISMATCH", ...(overrides.receipt ?? {}) };
+  const counts = {
+    documents: 0,
+    originalObjects: 0,
+    ocrJobs: 0,
+    verifiedPromotions: 0,
+    ...(overrides.counts ?? {}),
+  };
+  return {
+    status: 200,
+    ok: true,
+    body: {
+      terminalStatus: "REJECTED",
+      decisionCode: "TYPE_MISMATCH",
+      transitionChain: { valid: true, events: [] },
+      ...overrides,
+      receipt,
+      counts,
+    },
+  };
+}
 
 test("magic-byte uyuşmazlığı REJECTED ile sonuçlanır: PASS ve iki kanıt", async () => {
   await withEvidenceDir(async (dir) => {
@@ -131,6 +173,39 @@ test("terminale ulaşmadan süre dolarsa FAIL: K1_INCONCLUSIVE_TIMEOUT", async (
   });
 });
 
+
+test("genel REJECTED sonucu t?r uyu?mazl??? kan?t? say?lmaz", async () => {
+  await withEvidenceDir(async (dir) => {
+    const client = fakeClient({
+      create: { status: 201, ok: true, body: { session: { id: "sess-reason", status: "UPLOADING" } } },
+      part: { status: 200, ok: true, body: {} },
+      complete: ok({ status: "QUARANTINED" }),
+      poll: [ok({ status: "REJECTED" })],
+      evidence: acceptanceEvidence({
+        decisionCode: "MALWARE_DETECTED",
+        receipt: { typeValidationResult: "MATCH", scannerResult: "MALICIOUS" },
+      }),
+    });
+    const outcome = await runMimeMismatch(client, ctx(dir, { intervalMs: 0 }));
+    assert.equal(outcome.result, "FAIL");
+    assert.equal(outcome.errorCode, "K1_REJECTION_REASON_UNPROVEN");
+  });
+});
+
+test("t?r reddi sonras?nda as?l veya OCR say?m? s?f?r de?ilse FAIL", async () => {
+  await withEvidenceDir(async (dir) => {
+    const client = fakeClient({
+      create: { status: 201, ok: true, body: { session: { id: "sess-artifact", status: "UPLOADING" } } },
+      part: { status: 200, ok: true, body: {} },
+      complete: ok({ status: "QUARANTINED" }),
+      poll: [ok({ status: "REJECTED" })],
+      evidence: acceptanceEvidence({ counts: { originalObjects: 1, ocrJobs: 1 } }),
+    });
+    const outcome = await runMimeMismatch(client, ctx(dir, { intervalMs: 0 }));
+    assert.equal(outcome.result, "FAIL");
+    assert.equal(outcome.errorCode, "K1_FORBIDDEN_ARTIFACT_CREATED");
+  });
+});
 test("modül K-1 yürütücüsünü sözleşme imzasıyla dışa aktarır", () => {
   assert.equal(typeof executors["K-1"], "function");
 });

@@ -193,6 +193,7 @@ export const ingestTableStatements: readonly string[] = [
   )`,
   "CREATE INDEX IF NOT EXISTS derivative_jobs_claim_idx ON derivative_jobs (status, next_attempt_at, lease_expires_at, created_at)",
 
+  "CREATE UNIQUE INDEX IF NOT EXISTS derivative_jobs_document_profile_unique ON derivative_jobs (document_id, profile_version)",
   // F1.8: politika öncesi anahtarların maskeli envanteri ve taşıma durumu.
   // key_pattern/classification alanları maskeli biçimdir; ham anahtar yalnız
   // source/target kolonlarında durur ve log'a/kanıta yazılmaz.

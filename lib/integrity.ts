@@ -253,6 +253,29 @@ async function fullChecks(
   }
   return null;
 }
+/** Staging kabul probu ve dar s?zle?me testleri i?in ?retim tam-SHA karar?n? ?al??t?r?r. */
+export async function evaluateFullIntegrityObject(
+  reader: ObjectReader,
+  hasher: StreamingHasher,
+  input: {
+    id: string;
+    objectKey: string;
+    byteSize: number;
+    sha256: string;
+    storageVersionId?: string | null;
+    namespace?: string;
+  },
+) {
+  return fullChecks(reader, hasher, {
+    scan_rowid: 0,
+    id: input.id,
+    object_key: input.objectKey,
+    byte_size: input.byteSize,
+    sha256: input.sha256,
+    storage_version_id: input.storageVersionId ?? null,
+    bucket_or_namespace: input.namespace ?? "ARCHIVE_FILES",
+  });
+}
 
 function fenced(results: D1Result<unknown>[], lease: MaintenanceLease) {
   if (!results.every((result) => Boolean(result.meta.changes))) {

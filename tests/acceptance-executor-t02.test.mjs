@@ -28,6 +28,7 @@ async function withEvidenceDir(run) {
 function ctx(dir, overrides = {}) {
   return {
     runId: "run-0052",
+    acceptanceToken: "a".repeat(32),
     config: { baseUrl: "https://staging.example", uploaderIdentity: "u@sivas.bel.tr", unit: "Yazı İşleri" },
     signal: undefined,
     intervalMs: 0,
@@ -110,5 +111,19 @@ test("yükleme kabul edilmezse FAIL: T02_UPLOAD_NOT_ACCEPTED", async () => {
     const outcome = await runPostWriteShaVerification(client, ctx(dir));
     assert.equal(outcome.result, "FAIL");
     assert.equal(outcome.errorCode, "T02_UPLOAD_NOT_ACCEPTED");
+  });
+});
+
+test("terfi kan?t?ndaki belge/as?l/OCR say?mlar? eksikse FAIL", async () => {
+  await withEvidenceDir(async (dir) => {
+    const client = fakeStaging({
+      evidenceTransform: (body) => ({
+        ...body,
+        counts: { ...body.counts, originalObjects: 0 },
+      }),
+    });
+    const outcome = await runPostWriteShaVerification(client, ctx(dir));
+    assert.equal(outcome.result, "FAIL");
+    assert.equal(outcome.errorCode, "T02_ARTIFACT_COUNTS_INVALID");
   });
 });

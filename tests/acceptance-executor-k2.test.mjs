@@ -29,6 +29,7 @@ async function withEvidenceDir(run) {
 function ctx(dir, overrides = {}) {
   return {
     runId: "run-0021",
+    acceptanceToken: "a".repeat(32),
     config: { baseUrl: "https://staging.example", uploaderIdentity: "u@sivas.bel.tr", unit: "Yazı İşleri" },
     signal: undefined,
     intervalMs: 0,
@@ -107,5 +108,22 @@ test("oturum açılamazsa FAIL ve iki kanıt yine üretilir", async () => {
     const detail = JSON.parse(await readFile(join(dir, "K-2-malware-scan.json"), "utf8"));
     assert.equal(detail.eicar.failed.stage, "create");
     assert.equal(detail.eicar.failed.response.status, 403);
+  });
+});
+
+test("tarama motoru veya imza s?r?m? bilinmiyorsa PASS verilmez", async () => {
+  await withEvidenceDir(async (dir) => {
+    const client = fakeStaging({
+      planFor: rejectEicarAcceptControl,
+      evidenceTransform: (body, session) => session.name.includes("-eicar.pdf")
+        ? {
+            ...body,
+            receipt: { ...body.receipt, scannerVersion: "unknown" },
+          }
+        : body,
+    });
+    const outcome = await runEicarQuarantine(client, ctx(dir));
+    assert.equal(outcome.result, "FAIL");
+    assert.equal(outcome.errorCode, "K2_SCANNER_VERSION_UNPROVEN");
   });
 });

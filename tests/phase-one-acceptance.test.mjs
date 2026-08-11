@@ -174,6 +174,7 @@ test("yetenek çözümü HTTPS, sentetik staging ve fiziksel ayrım arar", () =>
     ACCEPTANCE_ENVIRONMENT: "staging",
     ACCEPTANCE_SYNTHETIC_ONLY: "enabled",
     ACCEPTANCE_UPLOADER_IDENTITY: "acceptance-uploader@sivas.bel.tr",
+    ARCHIVE_ACCEPTANCE_TOKEN: "a".repeat(32),
   };
   const staged = resolveCapabilities(stagingEnv);
   assert.equal(staged.staging, true);
@@ -182,6 +183,29 @@ test("yetenek çözümü HTTPS, sentetik staging ve fiziksel ayrım arar", () =>
   // Sentetik yükleyici kimliği olmadan staging yetenekleri BLOCKED kalır.
   const noIdentity = resolveCapabilities({ ...stagingEnv, ACCEPTANCE_UPLOADER_IDENTITY: "" });
   assert.equal(noIdentity.staging, false);
+
+  const s3Base = {
+    ...stagingEnv,
+    ACCEPTANCE_S3_ENDPOINT: "https://s3.example",
+    ACCEPTANCE_ORIGINAL_BUCKET: "original",
+    ACCEPTANCE_QUARANTINE_BUCKET: "quarantine",
+    ACCEPTANCE_S3_ACCESS_KEY_ID: "promotion",
+    ACCEPTANCE_S3_SECRET_ACCESS_KEY: "promotion-secret",
+  };
+  assert.equal(resolveCapabilities({ ...s3Base, ACCEPTANCE_S3_SECRET_ACCESS_KEY: "" }).s3, false);
+  assert.equal(resolveCapabilities(s3Base).s3, true);
+  const iamBase = {
+    ...s3Base,
+    ACCEPTANCE_VIEWER_IDENTITY: "viewer@sivas.bel.tr",
+    ACCEPTANCE_UNAUTHORIZED_IDENTITY: "none@sivas.bel.tr",
+  };
+  assert.equal(resolveCapabilities(iamBase).iamIdentities, false);
+  const withIam = { ...iamBase };
+  for (const role of ["VIEWER", "APPLICATION", "SCANNER", "OCR"]) {
+    withIam[`ACCEPTANCE_${role}_S3_ACCESS_KEY_ID`] = role.toLowerCase();
+    withIam[`ACCEPTANCE_${role}_S3_SECRET_ACCESS_KEY`] = `${role.toLowerCase()}-secret`;
+  }
+  assert.equal(resolveCapabilities(withIam).iamIdentities, true);
 
   const unsafe = resolveCapabilities({
     ACCEPTANCE_BASE_URL: "http://production.example",
@@ -194,6 +218,7 @@ test("yetenek çözümü HTTPS, sentetik staging ve fiziksel ayrım arar", () =>
 
 test("kanıt bağlamı sır, bucket değeri ve URL yolunu sızdırmaz", () => {
   const masked = maskContext({
+
     baseUrl: "https://staging.example/gizli/yol?token=abc",
     ARCHIVE_MIGRATION_TOKEN: "cok-gizli-token",
     staging: true,

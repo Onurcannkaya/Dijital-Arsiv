@@ -28,7 +28,7 @@ type ProfileInfo = { code:string; name:string; version:string; status:string; ow
 type VocabularyMap = Record<string, Array<{ code:string; label:string }> | null>;
 type DetailPage = { pageNumber:number; width:number; height:number; rawText:string; fullText:string; searchText:string; confirmedText:string|null; confirmedBy:string|null; confirmedAt:string|null; words:Array<{text:string;confidence:number;box:[number,number,number,number]}>; averageConfidence:number; model:string };
 type DetailDocument = { id:string; referenceNo:string; originalName:string; mediaType:string; byteSize:number; sha256:string; documentType:string; unit:string; status:string; uploadedBy:string; createdAt:string; updatedAt:string; fileUrl:string };
-type BinaryObject = { id:string; objectClass:string; objectKey:string; mediaType:string; byteSize:number; sha256:string; retentionStatus:string; legalHoldStatus:string; generator:string|null; createdAt:string };
+type BinaryObject = { id:string; objectClass:string; mediaType:string; byteSize:number; sha256:string; retentionStatus:string; legalHoldStatus:string; generator:string|null; createdAt:string };
 type AuditEvent = { eventNumber:number; actor:string; action:string; details:unknown; previousHash:string|null; eventHash:string; createdAt:string };
 type DetailPayload = { document:DetailDocument; profile:ProfileInfo; vocabularies:VocabularyMap; pages:DetailPage[]; fields:DetailValue[]; fieldGroups:FieldGroup[]; relations:EntityRelation[]; objects:BinaryObject[]; audit:AuditEvent[] };
 

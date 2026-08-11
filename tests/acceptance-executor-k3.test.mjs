@@ -29,6 +29,7 @@ async function withEvidenceDir(run) {
 function ctx(dir, overrides = {}) {
   return {
     runId: "run-0031",
+    acceptanceToken: "a".repeat(32),
     config: { baseUrl: "https://staging.example", uploaderIdentity: "u@sivas.bel.tr", unit: "Yazı İşleri" },
     signal: undefined,
     intervalMs: 0,
@@ -77,6 +78,27 @@ test("bozuk parça kabul edilirse FAIL: K3_CORRUPTION_NOT_DETECTED", async () =>
   });
 });
 
+for (const rejection of [
+  { status: 401, code: "UNAUTHORIZED" },
+  { status: 500, code: "INTERNAL_ERROR" },
+]) {
+  test(`bozuk par?a ${rejection.status} ile reddedilirse kan?t say?lmaz`, async () => {
+    await withEvidenceDir(async (dir) => {
+      const client = fakeStaging({
+        partSize: 512,
+        partChecksumError: {
+          status: rejection.status,
+          ok: false,
+          body: { error: rejection.code, code: rejection.code },
+        },
+      });
+      const outcome = await runMultipartResume(client, ctx(dir));
+      assert.equal(outcome.result, "FAIL");
+      assert.equal(outcome.errorCode, "K3_CORRUPTION_REJECTION_UNPROVEN");
+    });
+  });
+}
+
 test("devralmada parça envanteri kaybolursa FAIL: K3_RESUME_STATE_LOST", async () => {
   await withEvidenceDir(async (dir) => {
     const client = fakeStaging({
@@ -113,5 +135,14 @@ test("oturum multipart değilse FAIL: K3_NOT_MULTIPART", async () => {
     const outcome = await runMultipartResume(client, ctx(dir));
     assert.equal(outcome.result, "FAIL");
     assert.equal(outcome.errorCode, "K3_NOT_MULTIPART");
+  });
+});
+
+test("yetkili kabul kan?t? okunamazsa HTTP sonucu tek ba??na PASS ?retmez", async () => {
+  await withEvidenceDir(async (dir) => {
+    const client = fakeStaging({ partSize: 512, evidenceStatus: 503 });
+    const outcome = await runMultipartResume(client, ctx(dir));
+    assert.equal(outcome.result, "FAIL");
+    assert.equal(outcome.errorCode, "K3_EVIDENCE_UNAVAILABLE");
   });
 });

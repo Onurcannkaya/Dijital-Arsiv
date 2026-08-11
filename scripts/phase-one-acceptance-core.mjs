@@ -71,31 +71,56 @@ function isHttpsUrl(value) {
   }
 }
 
+function hasCredentialPair(env, prefix) {
+  return hasText(env, `${prefix}_ACCESS_KEY_ID`)
+    && hasText(env, `${prefix}_SECRET_ACCESS_KEY`);
+}
+
 /** Ortam değişkenlerinden yalnız güvenli kabul topolojisinin yeteneklerini çözer. */
 export function resolveCapabilities(env) {
   const staging = isHttpsUrl(env.ACCEPTANCE_BASE_URL) && hasText(env, "ARCHIVE_MIGRATION_TOKEN")
+    && hasText(env, "ARCHIVE_ACCEPTANCE_TOKEN") && env.ARCHIVE_ACCEPTANCE_TOKEN.trim().length >= 32
     && env.ACCEPTANCE_ENVIRONMENT === "staging" && env.ACCEPTANCE_SYNTHETIC_ONLY === "enabled"
     // Yürütücüler uygulamayı sentetik yükleyici kimliğiyle sürer; yoksa BLOCKED.
     && hasText(env, "ACCEPTANCE_UPLOADER_IDENTITY") && env.ACCEPTANCE_UPLOADER_IDENTITY.includes("@");
   const s3 = isHttpsUrl(env.ACCEPTANCE_S3_ENDPOINT) && hasText(env, "ACCEPTANCE_ORIGINAL_BUCKET")
     && hasText(env, "ACCEPTANCE_QUARANTINE_BUCKET")
-    && env.ACCEPTANCE_ORIGINAL_BUCKET !== env.ACCEPTANCE_QUARANTINE_BUCKET;
+    && env.ACCEPTANCE_ORIGINAL_BUCKET !== env.ACCEPTANCE_QUARANTINE_BUCKET
+    && hasCredentialPair(env, "ACCEPTANCE_S3");
+  const lockProfile = env.ACCEPTANCE_LOCK_PROFILE?.trim();
+  const lockTarget = hasText(env, "ACCEPTANCE_LOCK_BUCKET")
+    && hasText(env, "ACCEPTANCE_LOCKED_PREFIX");
+  const r2LockProfile = lockProfile === "r2-bucket-lock-pilot-v1" && lockTarget
+    && hasText(env, "ACCEPTANCE_UNLOCKED_PREFIX")
+    && env.ACCEPTANCE_LOCKED_PREFIX !== env.ACCEPTANCE_UNLOCKED_PREFIX
+    && hasCredentialPair(env, "ACCEPTANCE_LOCK_PROBE_S3");
+  const s3LockProfile = lockProfile === "s3-object-lock-compliance-v1" && lockTarget
+    && hasCredentialPair(env, "ACCEPTANCE_RETENTION_ADMIN_S3");
   return {
     staging,
     s3,
     iamIdentities: staging && hasText(env, "ACCEPTANCE_VIEWER_IDENTITY")
       && hasText(env, "ACCEPTANCE_UNAUTHORIZED_IDENTITY")
-      && env.ACCEPTANCE_VIEWER_IDENTITY !== env.ACCEPTANCE_UNAUTHORIZED_IDENTITY,
-    providerLockProfile: s3 && hasText(env, "ACCEPTANCE_LOCK_PROFILE"),
+      && env.ACCEPTANCE_VIEWER_IDENTITY !== env.ACCEPTANCE_UNAUTHORIZED_IDENTITY
+      && ["VIEWER", "APPLICATION", "SCANNER", "OCR"]
+        .every((role) => hasCredentialPair(env, `ACCEPTANCE_${role}_S3`))
+      && s3,
+    providerLockProfile: s3 && (r2LockProfile || s3LockProfile),
     restoreDrill: s3 && hasText(env, "ACCEPTANCE_RESTORE_BUCKET")
       && env.ACCEPTANCE_RESTORE_BUCKET !== env.ACCEPTANCE_ORIGINAL_BUCKET,
     secondProvider: isHttpsUrl(env.ACCEPTANCE_SECOND_S3_ENDPOINT)
       && hasText(env, "ACCEPTANCE_SECOND_BUCKET")
       && env.ACCEPTANCE_SECOND_S3_ENDPOINT !== env.ACCEPTANCE_S3_ENDPOINT,
-    logAccess: staging && isHttpsUrl(env.ACCEPTANCE_LOG_ENDPOINT),
+    logAccess: staging && s3 && isHttpsUrl(env.ACCEPTANCE_LOG_ENDPOINT)
+      && hasText(env, "ACCEPTANCE_LOG_TOKEN") && env.ACCEPTANCE_LOG_TOKEN.trim().length >= 32
+      && ["VIEWER", "APPLICATION", "SCANNER", "OCR"]
+        .every((role) => hasCredentialPair(env, `ACCEPTANCE_${role}_S3`))
+      && hasText(env, "ACCEPTANCE_VIEWER_IDENTITY"),
     faultInjection: staging && env.ACCEPTANCE_FAULT_INJECTION === "enabled"
       && env.ACCEPTANCE_PRODUCTION_GUARD === "confirmed-non-production",
-    largeFixtures: staging && env.ACCEPTANCE_LARGE_FIXTURES === "enabled",
+    largeFixtures: staging && env.ACCEPTANCE_LARGE_FIXTURES === "enabled"
+      && isHttpsUrl(env.ACCEPTANCE_RESOURCE_METRICS_ENDPOINT)
+      && hasText(env, "ACCEPTANCE_RESOURCE_METRICS_TOKEN"),
   };
 }
 

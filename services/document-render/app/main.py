@@ -34,7 +34,7 @@ app = FastAPI(title="Sivas Arşiv Belge Render Servisi", version="1.1.0")
 
 class RenderRequest(BaseModel):
     renderId: str = Field(pattern=SAFE_ID_PATTERN)
-    profileVersion: str = Field(pattern=r"^access-pdf-v1$")
+    profileVersion: str = Field(pattern=r"^access-pdf-v[1-9][0-9]*$")
     expectedRendererImageDigest: str = Field(pattern=IMAGE_DIGEST_PATTERN)
     documentId: str = Field(pattern=SAFE_ID_PATTERN)
     objectKey: str = Field(min_length=1, max_length=1024)
@@ -152,7 +152,7 @@ def render_pages(source: Path, workdir: Path) -> list[Path]:
         document.close()
 
 
-def assemble_segment(page_files: list[Path], destination: Path) -> None:
+def assemble_segment(page_files: list[Path], destination: Path, profile_version: str) -> None:
     import pikepdf
 
     try:
@@ -161,7 +161,7 @@ def assemble_segment(page_files: list[Path], destination: Path) -> None:
                 with pikepdf.open(page_file) as source_pdf:
                     target.pages.extend(source_pdf.pages)
             with target.open_metadata(set_pikepdf_as_editor=False) as metadata:
-                metadata["xmp:CreatorTool"] = f"sivas-arsiv-render {PROFILE_VERSION}"
+                metadata["xmp:CreatorTool"] = f"sivas-arsiv-render {profile_version}"
             target.save(destination, linearize=True)
     except Exception as exc:
         raise ReviewRequired(f"Erişim bölümü güvenle oluşturulamadı: {type(exc).__name__}") from exc
@@ -263,7 +263,7 @@ def render(reference: RenderRequest) -> dict[str, Any]:
             segments: list[dict[str, Any]] = []
             for part, (start, end) in enumerate(ranges, start=1):
                 segment_pdf = workdir / f"segment-{part:04d}.pdf"
-                assemble_segment(pages[start - 1:end], segment_pdf)
+                assemble_segment(pages[start - 1:end], segment_pdf, reference.profileVersion)
                 uploaded = upload_segment(reference, part, segment_pdf)
                 segments.append({
                     "objectKey": uploaded["key"],
@@ -280,7 +280,7 @@ def render(reference: RenderRequest) -> dict[str, Any]:
                 "renderer": "pdfium",
                 "rendererVersion": pdfium_version(),
                 "rendererImageDigest": image_digest,
-                "profileVersion": PROFILE_VERSION,
+                "profileVersion": reference.profileVersion,
                 "pageCount": len(pages),
                 "segments": segments,
             }

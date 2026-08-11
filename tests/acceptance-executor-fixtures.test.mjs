@@ -83,6 +83,9 @@ test("sözde rastgele dolgu deterministiktir", () => {
 });
 
 test("pipeline dikey dilimin beş yürütücüsünü dışa aktarır", () => {
-  assert.deepEqual(Object.keys(executors).sort(), ["K-1", "K-2", "K-3", "K-7", "T-02"]);
+  assert.deepEqual(Object.keys(executors).sort(), [
+    "K-1", "K-2", "K-3", "K-4", "K-5", "K-6", "K-7",
+    "T-01", "T-02", "T-03", "T-04", "T-05", "T-06", "T-07", "T-08", "T-11", "T-12",
+  ]);
   for (const executor of Object.values(executors)) assert.equal(typeof executor, "function");
 });

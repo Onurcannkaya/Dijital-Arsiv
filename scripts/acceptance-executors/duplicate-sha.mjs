@@ -10,7 +10,9 @@
 
 import { randomUUID } from "node:crypto";
 
-import { driveSingleUpload, fail, failureEvidence } from "./flows.mjs";
+import {
+  driveSingleUpload, fail, failureEvidence, readAcceptanceEvidence, redact,
+} from "./flows.mjs";
 import { buildPdfFixture } from "./fixtures.mjs";
 
 const EVIDENCE_KINDS = ["deduplication", "absence"];
@@ -62,6 +64,12 @@ export async function runDuplicateSha(client, ctx) {
         correlationId, first: flowSummary(first), second: flowSummary(second),
       }));
   }
+  const [firstEvidence, secondEvidence] = await Promise.all([
+    readAcceptanceEvidence(client, ctx, first.sessionId),
+    readAcceptanceEvidence(client, ctx, second.sessionId),
+  ]);
+  const firstDecision = firstEvidence.ok ? firstEvidence.body : null;
+  const secondDecision = secondEvidence.ok ? secondEvidence.body : null;
 
   // Yokluk kanıtı: koşu etiketi benzersizdir; arşivde tek belge görünmelidir.
   const listed = await client.json("GET", `/api/documents?q=${encodeURIComponent(tag)}`);
@@ -75,6 +83,16 @@ export async function runDuplicateSha(client, ctx) {
     contentSha256: first.sha256,
     first: flowSummary(first),
     second: flowSummary(second),
+    authoritative: {
+      first: firstDecision ? {
+        decisionCode: firstDecision.decisionCode,
+        counts: firstDecision.counts,
+      } : { response: redact(firstEvidence) },
+      second: secondDecision ? {
+        decisionCode: secondDecision.decisionCode,
+        duplicateOfDocumentId: secondDecision.duplicateOfDocumentId,
+      } : { response: redact(secondEvidence) },
+    },
   });
   const absence = await writeEvidence("K-7-absence", "absence", {
     testId: "K-7",
@@ -88,6 +106,10 @@ export async function runDuplicateSha(client, ctx) {
     secondReachedAccepted: second.poll.observed.includes("ACCEPTED"),
     secondReachedPromoting: second.poll.observed.includes("PROMOTING"),
     assertion: "a duplicate server-side SHA-256 terminates as DUPLICATE and creates no second document, original or OCR job",
+    authoritativeCounts: secondDecision?.counts ?? null,
+    authoritativeTransitions: secondDecision?.transitionChain?.events
+      ?.map((event) => event.to) ?? null,
+    authoritativeChainValid: secondDecision?.transitionChain?.valid ?? false,
   });
   const evidence = [deduplication, absence];
 
@@ -110,6 +132,30 @@ export async function runDuplicateSha(client, ctx) {
   }
   if (matches[0].sha256 !== first.sha256) {
     return { result: "FAIL", correlationId, errorCode: "K7_DOCUMENT_SHA_DIVERGED", evidence };
+  }
+  if (!firstEvidence.ok || !secondEvidence.ok) {
+    return { result: "FAIL", correlationId, errorCode: "K7_EVIDENCE_UNAVAILABLE", evidence };
+  }
+  if (firstDecision.decisionCode !== "ACCEPTED_AND_VERIFIED"
+      || firstDecision.transitionChain?.valid !== true
+      || firstDecision.counts?.documents !== 1
+      || firstDecision.counts?.originalObjects !== 1
+      || firstDecision.counts?.ocrJobs !== 1
+      || firstDecision.counts?.verifiedPromotions !== 1) {
+    return { result: "FAIL", correlationId, errorCode: "K7_FIRST_EVIDENCE_INVALID", evidence };
+  }
+  const duplicateTransitions = secondDecision.transitionChain?.events
+    ?.map((event) => event.to) ?? [];
+  if (secondDecision.decisionCode !== "DUPLICATE"
+      || secondDecision.transitionChain?.valid !== true
+      || duplicateTransitions.includes("PROMOTING")
+      || duplicateTransitions.includes("ACCEPTED")) {
+    return { result: "FAIL", correlationId, errorCode: "K7_DUPLICATE_PATH_INVALID", evidence };
+  }
+  if (secondDecision.counts?.documents !== 0 || secondDecision.counts?.originalObjects !== 0
+      || secondDecision.counts?.ocrJobs !== 0 || secondDecision.counts?.verifiedPromotions !== 0
+      || secondDecision.duplicateOfDocumentId !== matches[0].id) {
+    return { result: "FAIL", correlationId, errorCode: "K7_FORBIDDEN_ARTIFACT_CREATED", evidence };
   }
   return { result: "PASS", correlationId, evidence };
 }

@@ -11,7 +11,9 @@
 
 import { randomUUID } from "node:crypto";
 
-import { completeAndPoll, fail, failureEvidence, partSlices, redact } from "./flows.mjs";
+import {
+  completeAndPoll, fail, failureEvidence, partSlices, readAcceptanceEvidence, redact,
+} from "./flows.mjs";
 import { buildPdfFixture, sha256Hex } from "./fixtures.mjs";
 
 const EVIDENCE_KINDS = ["multipart", "inventory"];
@@ -76,6 +78,15 @@ export async function runMultipartResume(client, ctx) {
     return fail(correlationId, "K3_CORRUPTION_NOT_DETECTED",
       await failEvidence({ stage: "interrupted-part", response: redact(interrupted) }));
   }
+  if (interrupted.status !== 422 || interrupted.body?.code !== "PART_CHECKSUM_MISMATCH") {
+    return fail(correlationId, "K3_CORRUPTION_REJECTION_UNPROVEN",
+      await failEvidence({
+        stage: "interrupted-part",
+        expectedStatus: 422,
+        expectedCode: "PART_CHECKSUM_MISMATCH",
+        response: redact(interrupted),
+      }));
+  }
 
   // İstemci yeniden başlar: aynı idempotency anahtarı oturumu devralmalıdır.
   const resumed = await client.json("POST", "/api/uploads", {
@@ -114,6 +125,8 @@ export async function runMultipartResume(client, ctx) {
     return fail(correlationId, "K3_COMPLETE_REJECTED",
       await failEvidence({ stage: "complete", response: redact(completed) }));
   }
+  const authoritative = await readAcceptanceEvidence(client, ctx, session.id);
+  const decision = authoritative.ok ? authoritative.body : null;
 
   const multipart = await writeEvidence("K-3-multipart", "multipart", {
     testId: "K-3",
@@ -142,6 +155,10 @@ export async function runMultipartResume(client, ctx) {
     shaMatches,
     byteSize: bytes.byteLength,
     finalStatus: poll.status,
+    decisionCode: decision?.decisionCode ?? null,
+    transitionChainValid: decision?.transitionChain?.valid ?? false,
+    authoritativeCounts: decision?.counts ?? null,
+    evidenceResponse: authoritative.ok ? null : redact(authoritative),
     assertion: "verified parts survive an interrupted attempt; the reassembled object hashes to the client-side digest",
   });
   const evidence = [multipart, inventory];
@@ -154,6 +171,20 @@ export async function runMultipartResume(client, ctx) {
   }
   if (!shaMatches) {
     return { result: "FAIL", correlationId, errorCode: "K3_SHA_MISMATCH", evidence };
+  }
+  if (!authoritative.ok) {
+    return { result: "FAIL", correlationId, errorCode: "K3_EVIDENCE_UNAVAILABLE", evidence };
+  }
+  if (decision.decisionCode !== "ACCEPTED_AND_VERIFIED"
+      || decision.receipt?.sha256 !== localSha256) {
+    return { result: "FAIL", correlationId, errorCode: "K3_ACCEPTANCE_EVIDENCE_INVALID", evidence };
+  }
+  if (decision.transitionChain?.valid !== true) {
+    return { result: "FAIL", correlationId, errorCode: "K3_EVENT_CHAIN_INVALID", evidence };
+  }
+  if (decision.counts?.documents !== 1 || decision.counts?.originalObjects !== 1
+      || decision.counts?.ocrJobs !== 1 || decision.counts?.verifiedPromotions !== 1) {
+    return { result: "FAIL", correlationId, errorCode: "K3_ARTIFACT_COUNTS_INVALID", evidence };
   }
   return { result: "PASS", correlationId, evidence };
 }

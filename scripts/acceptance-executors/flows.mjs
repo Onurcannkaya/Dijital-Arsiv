@@ -72,6 +72,45 @@ export async function completeAndPoll(client, sessionId, ctx, { timeoutMs, inter
   return { completed, afterComplete, serverSha, poll };
 }
 
+/** Staging'e ?zel, maskeli kabul kan?t?n? ayr? en-dar yetki anahtar?yla okur. */
+export async function readAcceptanceEvidence(client, ctx, sessionId) {
+  const token = ctx.config.acceptanceToken ?? ctx.acceptanceToken;
+  if (typeof token !== "string" || token.length < 32) {
+    return {
+      status: 0,
+      ok: false,
+      body: { code: "ACCEPTANCE_EVIDENCE_TOKEN_MISSING" },
+    };
+  }
+  return client.json("GET", `/api/admin/acceptance-evidence/${encodeURIComponent(sessionId)}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+}
+/** Fiziksel anahtar? yaln?z s?re? belle?ine alan staging-y?netici i?lemi. */
+export async function resolvePrivateObjectLocator(client, ctx, sessionId, objectClass) {
+  const token = ctx.config.acceptanceToken ?? ctx.acceptanceToken;
+  if (typeof token !== "string" || token.length < 32) {
+    return { status: 0, ok: false, body: { code: "ACCEPTANCE_EVIDENCE_TOKEN_MISSING" } };
+  }
+  return client.json("POST", `/api/admin/acceptance-evidence/${encodeURIComponent(sessionId)}`, {
+    headers: { authorization: `Bearer ${token}` },
+    body: { action: "RESOLVE_PRIVATE_OBJECT_LOCATOR", objectClass },
+  });
+}
+
+
+/** Staging kabul ko?usuna ?zg? ikinci profil t?rev i?ini idempotent kuyru?a al?r. */
+export async function enqueueAcceptanceSecondDerivative(client, ctx, sessionId) {
+  const token = ctx.config.acceptanceToken ?? ctx.acceptanceToken;
+  if (typeof token !== "string" || token.length < 32) {
+    return { status: 0, ok: false, body: { code: "ACCEPTANCE_EVIDENCE_TOKEN_MISSING" } };
+  }
+  return client.json("POST", `/api/admin/acceptance-evidence/${encodeURIComponent(sessionId)}`, {
+    headers: { authorization: `Bearer ${token}` },
+    body: { action: "ENQUEUE_SECOND_DERIVATIVE_PROFILE" },
+  });
+}
+
 /**
  * Tek parçalı tam akış: oturum aç → parçayı yükle → tamamla → terminali bekle.
  * Erken hata `failed.stage` ile döner; çağıran yürütücü kendi hata koduyla

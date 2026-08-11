@@ -11,7 +11,9 @@
 
 import { randomUUID } from "node:crypto";
 
-import { driveSingleUpload, fail, failureEvidence } from "./flows.mjs";
+import {
+  driveSingleUpload, fail, failureEvidence, readAcceptanceEvidence, redact,
+} from "./flows.mjs";
 import { EICAR_SHA256, buildPdfFixture, eicarSignature } from "./fixtures.mjs";
 
 const EVIDENCE_KINDS = ["malware-scan", "absence"];
@@ -34,8 +36,12 @@ export async function runEicarQuarantine(client, ctx) {
   const unit = ctx.config.unit ?? "Yazı İşleri";
   const tag = `k2-${ctx.runId}-${randomUUID()}`;
 
-  const eicarBytes = buildPdfFixture({ text: `${tag}-eicar`, commentLine: eicarSignature() });
-  const controlBytes = buildPdfFixture({ text: `${tag}-control` });
+  // A/B ?ifti yaln?z EICAR yorum sat?r? bak?m?ndan farkl?d?r. G?r?n?r PDF
+  // i?eri?ini veya yap?sal nesneleri de?i?tirmek, reddin taray?c?ya
+  // atfedilmesini zay?flat?rd?.
+  const fixtureText = `${tag}-control`;
+  const eicarBytes = buildPdfFixture({ text: fixtureText, commentLine: eicarSignature() });
+  const controlBytes = buildPdfFixture({ text: fixtureText });
   const timeoutMs = ctx.timeoutMs ?? 3.5 * 60_000;
 
   // İki akış paralel sürülür: tek yürütücü zaman bütçesine iki tam hat sığar.
@@ -66,6 +72,12 @@ export async function runEicarQuarantine(client, ctx) {
         control: flowSummary(controlFlow),
       }));
   }
+  const [eicarEvidence, controlEvidence] = await Promise.all([
+    readAcceptanceEvidence(client, ctx, eicarFlow.sessionId),
+    readAcceptanceEvidence(client, ctx, controlFlow.sessionId),
+  ]);
+  const eicarDecision = eicarEvidence.ok ? eicarEvidence.body : null;
+  const controlDecision = controlEvidence.ok ? controlEvidence.body : null;
 
   const scan = await writeEvidence("K-2-malware-scan", "malware-scan", {
     testId: "K-2",
@@ -79,6 +91,15 @@ export async function runEicarQuarantine(client, ctx) {
     },
     eicar: flowSummary(eicarFlow),
     control: flowSummary(controlFlow),
+    authoritative: eicarDecision ? {
+      decisionCode: eicarDecision.decisionCode,
+      receipt: eicarDecision.receipt,
+      transitionChainValid: eicarDecision.transitionChain?.valid ?? false,
+    } : {
+      response: redact(eicarEvidence),
+    },
+    controlDecisionCode: controlDecision?.decisionCode ?? null,
+    controlTransitionChainValid: controlDecision?.transitionChain?.valid ?? false,
   });
   const absence = await writeEvidence("K-2-absence", "absence", {
     testId: "K-2",
@@ -88,6 +109,8 @@ export async function runEicarQuarantine(client, ctx) {
     controlFinalStatus: controlFlow.poll.status,
     finalStatus: eicarFlow.poll.status,
     assertion: "no original or OCR job is created for a malware-rejected upload; the clean twin proves the rejection is content-based",
+    authoritativeCounts: eicarDecision?.counts ?? null,
+    controlCounts: controlDecision?.counts ?? null,
   });
   const evidence = [scan, absence];
 
@@ -98,8 +121,34 @@ export async function runEicarQuarantine(client, ctx) {
     // Temiz eş kabul edilmiyorsa red kararı içerik taramasına atfedilemez.
     return { result: "FAIL", correlationId, errorCode: "K2_CONTROL_NOT_ACCEPTED", evidence };
   }
-  if (eicarFlow.poll.status === "REJECTED" && !eicarFlow.poll.observed.includes("ACCEPTED")) {
-    return { result: "PASS", correlationId, evidence };
+  if (eicarFlow.poll.status !== "REJECTED" || eicarFlow.poll.observed.includes("ACCEPTED")) {
+    return { result: "FAIL", correlationId, errorCode: "K2_MALWARE_NOT_BLOCKED", evidence };
   }
-  return { result: "FAIL", correlationId, errorCode: "K2_MALWARE_NOT_BLOCKED", evidence };
+  if (!eicarEvidence.ok || !controlEvidence.ok) {
+    return { result: "FAIL", correlationId, errorCode: "K2_EVIDENCE_UNAVAILABLE", evidence };
+  }
+  if (controlDecision.decisionCode !== "ACCEPTED_AND_VERIFIED"
+      || controlDecision.transitionChain?.valid !== true) {
+    return { result: "FAIL", correlationId, errorCode: "K2_CONTROL_EVIDENCE_INVALID", evidence };
+  }
+  const receipt = eicarDecision.receipt;
+  if (eicarDecision.decisionCode !== "MALWARE_DETECTED"
+      || receipt?.scannerResult !== "MALICIOUS"
+      || receipt?.typeValidationResult !== "MATCH"
+      || receipt?.parserResult !== "VALID") {
+    return { result: "FAIL", correlationId, errorCode: "K2_REJECTION_REASON_UNPROVEN", evidence };
+  }
+  if (!receipt.scannerEngine || !receipt.scannerVersion || !receipt.scannerSignatureVersion
+      || [receipt.scannerEngine, receipt.scannerVersion, receipt.scannerSignatureVersion]
+        .some((value) => value === "unknown")) {
+    return { result: "FAIL", correlationId, errorCode: "K2_SCANNER_VERSION_UNPROVEN", evidence };
+  }
+  if (eicarDecision.transitionChain?.valid !== true) {
+    return { result: "FAIL", correlationId, errorCode: "K2_EVENT_CHAIN_INVALID", evidence };
+  }
+  if (eicarDecision.counts?.documents !== 0 || eicarDecision.counts?.originalObjects !== 0
+      || eicarDecision.counts?.ocrJobs !== 0 || eicarDecision.counts?.verifiedPromotions !== 0) {
+    return { result: "FAIL", correlationId, errorCode: "K2_FORBIDDEN_ARTIFACT_CREATED", evidence };
+  }
+  return { result: "PASS", correlationId, evidence };
 }

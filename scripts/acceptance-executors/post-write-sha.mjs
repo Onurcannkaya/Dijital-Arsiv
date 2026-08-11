@@ -10,7 +10,9 @@
 
 import { randomUUID } from "node:crypto";
 
-import { driveSingleUpload, fail, failureEvidence } from "./flows.mjs";
+import {
+  driveSingleUpload, fail, failureEvidence, readAcceptanceEvidence, redact,
+} from "./flows.mjs";
 import { buildPdfFixture, sha256Hex } from "./fixtures.mjs";
 
 const EVIDENCE_KINDS = ["receipt", "integrity"];
@@ -43,6 +45,23 @@ export async function runPostWriteShaVerification(client, ctx) {
   if (flow.serverSha !== flow.sha256) {
     return fail(correlationId, "T02_QUARANTINE_SHA_MISMATCH",
       await failEvidence({ quarantineSha256: flow.serverSha }));
+  }
+  const authoritative = await readAcceptanceEvidence(client, ctx, flow.sessionId);
+  if (!authoritative.ok) {
+    return fail(correlationId, "T02_EVIDENCE_UNAVAILABLE",
+      await failEvidence({ evidenceResponse: redact(authoritative) }));
+  }
+  const decision = authoritative.body;
+  if (decision.decisionCode !== "ACCEPTED_AND_VERIFIED"
+      || decision.transitionChain?.valid !== true
+      || decision.receipt?.sha256 !== flow.sha256) {
+    return fail(correlationId, "T02_PROMOTION_EVIDENCE_INVALID",
+      await failEvidence({ decisionCode: decision.decisionCode }));
+  }
+  if (decision.counts?.documents !== 1 || decision.counts?.originalObjects !== 1
+      || decision.counts?.ocrJobs !== 1 || decision.counts?.verifiedPromotions !== 1) {
+    return fail(correlationId, "T02_ARTIFACT_COUNTS_INVALID",
+      await failEvidence({ authoritativeCounts: decision.counts ?? null }));
   }
 
   // ACCEPTED sonrası yetkili kayıt: belge listesi koşu etiketiyle aranır.
@@ -94,6 +113,10 @@ export async function runPostWriteShaVerification(client, ctx) {
     documentSha256: document.sha256,
     observedStatuses: flow.poll.observed,
     finalStatus: flow.poll.status,
+    decisionCode: decision.decisionCode,
+    transitionChainValid: decision.transitionChain.valid,
+    authoritativeCounts: decision.counts,
+    promotionReceiptSha256: decision.receipt.sha256,
   });
   const shaMatches = downloadedSha256 === flow.sha256
     && download.bytes.byteLength === bytes.byteLength;

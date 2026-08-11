@@ -70,6 +70,7 @@
           "OCR_SERVICE_URL",
           "OCR_SERVICE_TOKEN",
           "ARCHIVE_MIGRATION_TOKEN",
+          "ARCHIVE_ACCEPTANCE_TOKEN",
           "ARCHIVE_ADMIN_EMAILS"
         ]
       },

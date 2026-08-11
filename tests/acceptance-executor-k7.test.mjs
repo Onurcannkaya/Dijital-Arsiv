@@ -28,6 +28,7 @@ async function withEvidenceDir(run) {
 function ctx(dir, overrides = {}) {
   return {
     runId: "run-0047",
+    acceptanceToken: "a".repeat(32),
     config: { baseUrl: "https://staging.example", uploaderIdentity: "u@sivas.bel.tr", unit: "Yazı İşleri" },
     signal: undefined,
     intervalMs: 0,
@@ -105,5 +106,28 @@ test("ilk yükleme kabul edilmezse FAIL: K7_FIRST_UPLOAD_NOT_ACCEPTED", async ()
     assert.equal(outcome.errorCode, "K7_FIRST_UPLOAD_NOT_ACCEPTED");
     // İkinci akış hiç başlatılmadı: tek oturum açıldı.
     assert.equal(client.calls.filter((call) => call.method === "POST" && call.path === "/api/uploads").length, 1);
+  });
+});
+
+test("yoklamada ka?an PROMOTING olay? yetkili zincirde g?r?l?rse FAIL", async () => {
+  await withEvidenceDir(async (dir) => {
+    const client = fakeStaging({
+      planFor: acceptThenDuplicate,
+      evidenceTransform: (body) => body.terminalStatus === "DUPLICATE"
+        ? {
+            ...body,
+            transitionChain: {
+              ...body.transitionChain,
+              events: [
+                ...body.transitionChain.events,
+                { number: 99, from: "VERIFIED", to: "PROMOTING", actorKind: "service" },
+              ],
+            },
+          }
+        : body,
+    });
+    const outcome = await runDuplicateSha(client, ctx(dir));
+    assert.equal(outcome.result, "FAIL");
+    assert.equal(outcome.errorCode, "K7_DUPLICATE_PATH_INVALID");
   });
 });

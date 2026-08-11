@@ -21,6 +21,7 @@ import {
 } from "./phase-one-acceptance-core.mjs";
 
 const EXECUTOR_TIMEOUT_MS = 5 * 60 * 1000;
+const LARGE_EXECUTOR_TIMEOUT_MS = 45 * 60 * 1000;
 const SECRET_NAME = /(TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL)/i;
 const SENSITIVE_CONTENT = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
@@ -80,27 +81,56 @@ function scopedConfig(test) {
     baseUrl: process.env.ACCEPTANCE_BASE_URL,
     environment: process.env.ACCEPTANCE_ENVIRONMENT,
   };
-  if (test.requires.includes("staging")) {
+  if (test.requires.includes("staging") || test.requires.includes("iamIdentities")
+      || test.requires.includes("faultInjection") || test.requires.includes("largeFixtures")) {
     // Sentetik yükleyici kimliği ve müdürlük kapsamı yalnız uygulamayı süren
     // testlere verilir; kalıcı sır değildir, staging kimlik başlığıdır.
     config.uploaderIdentity = process.env.ACCEPTANCE_UPLOADER_IDENTITY;
     config.unit = process.env.ACCEPTANCE_UPLOADER_UNIT;
+    config.acceptanceToken = process.env.ARCHIVE_ACCEPTANCE_TOKEN;
   }
-  if (test.requires.includes("s3") || test.requires.includes("providerLockProfile")
-      || test.requires.includes("restoreDrill")) {
+  if (test.requires.includes("s3") || test.requires.includes("iamIdentities") || test.requires.includes("logAccess")
+      || test.requires.includes("providerLockProfile") || test.requires.includes("restoreDrill")) {
     config.s3 = {
       endpoint: process.env.ACCEPTANCE_S3_ENDPOINT,
       originalBucket: process.env.ACCEPTANCE_ORIGINAL_BUCKET,
       quarantineBucket: process.env.ACCEPTANCE_QUARANTINE_BUCKET,
       restoreBucket: process.env.ACCEPTANCE_RESTORE_BUCKET,
       lockProfile: process.env.ACCEPTANCE_LOCK_PROFILE,
+      lockBucket: process.env.ACCEPTANCE_LOCK_BUCKET,
+      lockedPrefix: process.env.ACCEPTANCE_LOCKED_PREFIX,
+      unlockedPrefix: process.env.ACCEPTANCE_UNLOCKED_PREFIX,
+      region: process.env.ACCEPTANCE_S3_REGION || "auto",
+      credentials: {
+        accessKeyId: process.env.ACCEPTANCE_S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.ACCEPTANCE_S3_SECRET_ACCESS_KEY,
+        sessionToken: process.env.ACCEPTANCE_S3_SESSION_TOKEN,
+      },
+      lockProbeCredentials: {
+        accessKeyId: process.env.ACCEPTANCE_LOCK_PROBE_S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.ACCEPTANCE_LOCK_PROBE_S3_SECRET_ACCESS_KEY,
+        sessionToken: process.env.ACCEPTANCE_LOCK_PROBE_S3_SESSION_TOKEN,
+      },
+      retentionAdminCredentials: {
+        accessKeyId: process.env.ACCEPTANCE_RETENTION_ADMIN_S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.ACCEPTANCE_RETENTION_ADMIN_S3_SECRET_ACCESS_KEY,
+        sessionToken: process.env.ACCEPTANCE_RETENTION_ADMIN_S3_SESSION_TOKEN,
+      },
     };
   }
-  if (test.requires.includes("iamIdentities")) {
+  if (test.requires.includes("iamIdentities") || test.requires.includes("logAccess")) {
     config.identities = {
       viewer: process.env.ACCEPTANCE_VIEWER_IDENTITY,
       unauthorized: process.env.ACCEPTANCE_UNAUTHORIZED_IDENTITY,
     };
+    config.iamRoles = Object.fromEntries(["viewer", "application", "scanner", "ocr"].map((role) => {
+      const prefix = `ACCEPTANCE_${role.toUpperCase()}_S3`;
+      return [role, {
+        accessKeyId: process.env[`${prefix}_ACCESS_KEY_ID`],
+        secretAccessKey: process.env[`${prefix}_SECRET_ACCESS_KEY`],
+        sessionToken: process.env[`${prefix}_SESSION_TOKEN`],
+      }];
+    }));
   }
   if (test.requires.includes("secondProvider")) {
     config.secondProvider = {
@@ -108,7 +138,14 @@ function scopedConfig(test) {
       bucket: process.env.ACCEPTANCE_SECOND_BUCKET,
     };
   }
-  if (test.requires.includes("logAccess")) config.logEndpoint = process.env.ACCEPTANCE_LOG_ENDPOINT;
+  if (test.requires.includes("logAccess")) {
+    config.logEndpoint = process.env.ACCEPTANCE_LOG_ENDPOINT;
+    config.logToken = process.env.ACCEPTANCE_LOG_TOKEN;
+  }
+  if (test.requires.includes("largeFixtures")) {
+    config.resourceMetricsEndpoint = process.env.ACCEPTANCE_RESOURCE_METRICS_ENDPOINT;
+    config.resourceMetricsToken = process.env.ACCEPTANCE_RESOURCE_METRICS_TOKEN;
+  }
   return Object.freeze(config);
 }
 
@@ -153,7 +190,7 @@ async function collectEvidence(testId, descriptors, evidenceRoot, packageRoot, s
   return records;
 }
 
-async function runWithTimeout(executor, input) {
+async function runWithTimeout(executor, input, timeoutMs = EXECUTOR_TIMEOUT_MS) {
   const controller = new AbortController();
   let timeout;
   try {
@@ -163,7 +200,7 @@ async function runWithTimeout(executor, input) {
         timeout = setTimeout(() => {
           controller.abort();
           reject(new Error("EXECUTOR_TIMEOUT"));
-        }, EXECUTOR_TIMEOUT_MS);
+        }, timeoutMs);
       }),
     ]);
   } finally {
@@ -204,7 +241,7 @@ for (const test of TEST_CATALOG) {
       config: scopedConfig(test),
       evidenceDir: evidenceRoot,
       runId,
-    });
+    }, test.id === "K-6" ? LARGE_EXECUTOR_TIMEOUT_MS : EXECUTOR_TIMEOUT_MS);
     const records = await collectEvidence(test.id, outcome.evidence, evidenceRoot, packageRoot, secrets);
     evidenceFiles.push(...records);
     results.push({

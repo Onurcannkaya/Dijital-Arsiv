@@ -36,7 +36,7 @@ export class ExecutorConfigError extends Error {
  * `oai-authenticated-user-email` başlığıyla taşınır (lib/authorization.ts);
  * kabul ortamı bu sentetik kimliği kabul edecek şekilde yapılandırılır.
  */
-export function createAppClient({ baseUrl, identity, signal, fetcher = fetch }) {
+export function createAppClient({ baseUrl, identity, signal, fetcher = fetch, correlationId }) {
   if (typeof baseUrl !== "string" || !/^https:\/\//.test(baseUrl)) {
     throw new ExecutorConfigError("Kabul yürütücüsü HTTPS taban adresi gerektirir.");
   }
@@ -44,7 +44,11 @@ export function createAppClient({ baseUrl, identity, signal, fetcher = fetch }) 
     throw new ExecutorConfigError("Kabul yürütücüsü sentetik yükleyici kimliği gerektirir.");
   }
   const root = baseUrl.replace(/\/$/, "");
-  const identityHeaders = { "oai-authenticated-user-email": identity };
+  const identityHeaders = {
+    "oai-authenticated-user-email": identity,
+    ...(typeof correlationId === "string" && /^[A-Za-z0-9._-]{8,80}$/.test(correlationId)
+      ? { "x-correlation-id": correlationId } : {}),
+  };
 
   async function json(method, path, { body, headers } = {}) {
     const response = await fetcher(`${root}${path}`, {
@@ -77,6 +81,12 @@ export function createAppClient({ baseUrl, identity, signal, fetcher = fetch }) 
       bytes,
       contentType: response.headers.get("content-type"),
       contentLength: Number(response.headers.get("content-length") ?? bytes.byteLength),
+      objectClass: response.headers.get("x-archive-object-class"),
+      pageStart: response.headers.get("x-archive-page-start"),
+      pageEnd: response.headers.get("x-archive-page-end"),
+      contentDisposition: response.headers.get("content-disposition"),
+      // Yaln?z sonraki HTTP ad?m?nda kullan?l?r; kan?t dosyas?na yaz?lmas? yasakt?r.
+      sessionToken: response.headers.get("x-archive-session"),
     };
   }
 

@@ -10,7 +10,9 @@
 
 import { randomUUID } from "node:crypto";
 
-import { completeAndPoll, fail, failureEvidence, redact } from "./flows.mjs";
+import {
+  completeAndPoll, fail, failureEvidence, readAcceptanceEvidence, redact,
+} from "./flows.mjs";
 import { sha256Hex } from "./fixtures.mjs";
 
 export async function runMimeMismatch(client, ctx) {
@@ -48,6 +50,8 @@ export async function runMimeMismatch(client, ctx) {
   }
 
   const { afterComplete, poll } = await completeAndPoll(client, sessionId, ctx);
+  const authoritative = await readAcceptanceEvidence(client, ctx, sessionId);
+  const decision = authoritative.ok ? authoritative.body : null;
 
   const validation = await writeEvidence("K-1-validation", "validation", {
     testId: "K-1",
@@ -62,6 +66,10 @@ export async function runMimeMismatch(client, ctx) {
     observedStatuses: poll.observed,
     finalStatus: poll.status,
     timedOut: poll.timedOut,
+    decisionCode: decision?.decisionCode ?? null,
+    receiptTypeValidation: decision?.receipt?.typeValidationResult ?? null,
+    transitionChainValid: decision?.transitionChain?.valid ?? false,
+    evidenceResponse: authoritative.ok ? null : redact(authoritative),
   });
   const absence = await writeEvidence("K-1-absence", "absence", {
     testId: "K-1",
@@ -71,15 +79,31 @@ export async function runMimeMismatch(client, ctx) {
     reachedDuplicate: poll.observed.includes("DUPLICATE"),
     finalStatus: poll.status,
     assertion: "no original or OCR job is created for a type-rejected upload",
+    authoritativeCounts: decision?.counts ?? null,
   });
 
-  if (poll.status === "REJECTED" && !poll.observed.includes("ACCEPTED")) {
-    return { result: "PASS", correlationId, evidence: [validation, absence] };
-  }
+  const evidence = [validation, absence];
   if (poll.timedOut) {
-    return { result: "FAIL", correlationId, errorCode: "K1_INCONCLUSIVE_TIMEOUT", evidence: [validation, absence] };
+    return { result: "FAIL", correlationId, errorCode: "K1_INCONCLUSIVE_TIMEOUT", evidence };
   }
-  return { result: "FAIL", correlationId, errorCode: "K1_TYPE_MISMATCH_NOT_ENFORCED", evidence: [validation, absence] };
+  if (poll.status !== "REJECTED" || poll.observed.includes("ACCEPTED")) {
+    return { result: "FAIL", correlationId, errorCode: "K1_TYPE_MISMATCH_NOT_ENFORCED", evidence };
+  }
+  if (!authoritative.ok) {
+    return { result: "FAIL", correlationId, errorCode: "K1_EVIDENCE_UNAVAILABLE", evidence };
+  }
+  if (decision.decisionCode !== "TYPE_MISMATCH"
+      || decision.receipt?.typeValidationResult !== "MISMATCH") {
+    return { result: "FAIL", correlationId, errorCode: "K1_REJECTION_REASON_UNPROVEN", evidence };
+  }
+  if (decision.transitionChain?.valid !== true) {
+    return { result: "FAIL", correlationId, errorCode: "K1_EVENT_CHAIN_INVALID", evidence };
+  }
+  if (decision.counts?.documents !== 0 || decision.counts?.originalObjects !== 0
+      || decision.counts?.ocrJobs !== 0 || decision.counts?.verifiedPromotions !== 0) {
+    return { result: "FAIL", correlationId, errorCode: "K1_FORBIDDEN_ARTIFACT_CREATED", evidence };
+  }
+  return { result: "PASS", correlationId, evidence };
 }
 
 async function evidenceForFailure(writeEvidence, detail) {
