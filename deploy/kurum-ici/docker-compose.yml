@@ -1,0 +1,146 @@
+# Kurum içi port P6 — tek makinelik referans yığın.
+#
+# Bileşenler: MinIO (4 kova; asıl kasa Object Lock'lu), Node API, üç Python
+# servisi ve oai-* kimlik başlıklarını yöneten nginx ters vekili. Sırlar bu
+# dosyada DEĞİL, yanındaki .env dosyasındadır (.env.example'dan üretilir ve
+# sürüm kontrolüne girmez). Üretimde her servis kendi dar MinIO kullanıcısını
+# almalıdır; bu iskelet tek uygulama kimliğiyle başlar (README §IAM).
+#
+#   docker compose --project-name sivas-arsiv up -d --build
+
+name: sivas-arsiv
+
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+    volumes:
+      - minio-veri:/data
+    networks: [arsiv-ic]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # Kovalar tek seferlik kurulur: asıl kasa sürümleme + Object Lock ile açılır
+  # (gerçek WORM; ADR-016). Mevcut kovalarda komutlar idempotenttir.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        mc alias set kurum http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing --with-lock kurum/arsiv-asil
+        mc version enable kurum/arsiv-asil
+        mc mb --ignore-existing kurum/arsiv-turev
+        mc mb --ignore-existing kurum/arsiv-gecici
+        mc mb --ignore-existing kurum/arsiv-karantina
+        mc admin user add kurum "$${ARCHIVE_S3_ACCESS_KEY_ID}" "$${ARCHIVE_S3_SECRET_ACCESS_KEY}" || true
+        mc admin policy attach kurum readwrite --user "$${ARCHIVE_S3_ACCESS_KEY_ID}" || true
+        echo "MinIO kurulumu tamam"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+      ARCHIVE_S3_ACCESS_KEY_ID: ${ARCHIVE_S3_ACCESS_KEY_ID:?}
+      ARCHIVE_S3_SECRET_ACCESS_KEY: ${ARCHIVE_S3_SECRET_ACCESS_KEY:?}
+    networks: [arsiv-ic]
+
+  api:
+    build:
+      context: ../..
+      dockerfile: server/Dockerfile
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      ARCHIVE_S3_ENDPOINT: http://minio:9000
+      ARCHIVE_S3_ALLOW_HTTP: enabled            # yalnız bu izole ağ içindir
+      ARCHIVE_S3_ACCESS_KEY_ID: ${ARCHIVE_S3_ACCESS_KEY_ID:?}
+      ARCHIVE_S3_SECRET_ACCESS_KEY: ${ARCHIVE_S3_SECRET_ACCESS_KEY:?}
+      ARCHIVE_S3_BUCKET_ARCHIVE: arsiv-asil
+      ARCHIVE_S3_BUCKET_DERIVATIVE: arsiv-turev
+      ARCHIVE_S3_BUCKET_TEMPORARY: arsiv-gecici
+      ARCHIVE_S3_BUCKET_QUARANTINE: arsiv-karantina
+      ARCHIVE_CANONICAL_HOST: ${ARCHIVE_CANONICAL_HOST:?}
+      ARCHIVE_ADMIN_EMAILS: ${ARCHIVE_ADMIN_EMAILS:?}
+      ARCHIVE_MIGRATION_TOKEN: ${ARCHIVE_MIGRATION_TOKEN:?}
+      APP_ENV: ${APP_ENV:-staging}
+      ARCHIVE_ACCEPTANCE_TOKEN: ${ARCHIVE_ACCEPTANCE_TOKEN:-}
+      CONTENT_SCAN_SERVICE_URL: http://content-scan:8091
+      CONTENT_SCAN_SERVICE_TOKEN: ${CONTENT_SCAN_SERVICE_TOKEN:?}
+      OCR_SERVICE_URL: http://ocr:8090
+      OCR_SERVICE_TOKEN: ${OCR_SERVICE_TOKEN:?}
+      DOCUMENT_RENDER_SERVICE_URL: http://document-render:8100
+      DOCUMENT_RENDER_SERVICE_TOKEN: ${DOCUMENT_RENDER_SERVICE_TOKEN:?}
+      DOCUMENT_RENDER_IMAGE_DIGEST: ${DOCUMENT_RENDER_IMAGE_DIGEST:-}
+    volumes:
+      - api-veri:/veri
+    networks: [arsiv-ic]
+
+  content-scan:
+    build:
+      context: ../../services/content-scan
+    environment:
+      CONTENT_SCAN_SERVICE_TOKEN: ${CONTENT_SCAN_SERVICE_TOKEN:?}
+      CONTENT_SCAN_QUARANTINE_BUCKET: arsiv-karantina
+      CONTENT_SCAN_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${ARCHIVE_S3_ACCESS_KEY_ID:?}
+      AWS_SECRET_ACCESS_KEY: ${ARCHIVE_S3_SECRET_ACCESS_KEY:?}
+      AWS_DEFAULT_REGION: auto
+    networks: [arsiv-ic]
+    # ClamAV imzaları 24 saatten eskiyse servis fail-closed kapanır; kapalı
+    # ağda freshclam için kurum içi imza aynası gerekir (README §ClamAV).
+
+  ocr:
+    build:
+      context: ../../services/ocr
+    environment:
+      OCR_SERVICE_TOKEN: ${OCR_SERVICE_TOKEN:?}
+      OCR_ORIGINAL_BUCKET: arsiv-asil
+      OCR_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${ARCHIVE_S3_ACCESS_KEY_ID:?}
+      AWS_SECRET_ACCESS_KEY: ${ARCHIVE_S3_SECRET_ACCESS_KEY:?}
+      AWS_DEFAULT_REGION: auto
+    networks: [arsiv-ic]
+
+  document-render:
+    build:
+      context: ../../services/document-render
+    environment:
+      DOCUMENT_RENDER_SERVICE_TOKEN: ${DOCUMENT_RENDER_SERVICE_TOKEN:?}
+      RENDER_ORIGINAL_BUCKET: arsiv-asil
+      RENDER_DERIVATIVE_BUCKET: arsiv-turev
+      RENDER_S3_ENDPOINT_URL: http://minio:9000
+      RENDERER_IMAGE_DIGEST: ${DOCUMENT_RENDER_IMAGE_DIGEST:-}
+      AWS_ACCESS_KEY_ID: ${ARCHIVE_S3_ACCESS_KEY_ID:?}
+      AWS_SECRET_ACCESS_KEY: ${ARCHIVE_S3_SECRET_ACCESS_KEY:?}
+      AWS_DEFAULT_REGION: auto
+    networks: [arsiv-ic]
+
+  # Tek dış kapı: kimlik başlıklarını yöneten ters vekil. SSO entegrasyonu
+  # (Keycloak/AD, P5) bu katmana eklenir; API'ye doğrudan ağ erişimi yoktur.
+  proxy:
+    image: nginx:1.27-alpine
+    depends_on: [api]
+    ports:
+      - "${ARCHIVE_PROXY_PORT:-8080}:8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [arsiv-ic]
+
+volumes:
+  minio-veri:
+  api-veri:
+
+networks:
+  arsiv-ic:
+    driver: bridge

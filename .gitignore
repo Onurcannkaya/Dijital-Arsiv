@@ -56,3 +56,6 @@ next-env.d.ts
 /outputs/
 /work/
 *.tsbuildinfo
+
+# kurum içi yığın sırları
+deploy/kurum-ici/.env

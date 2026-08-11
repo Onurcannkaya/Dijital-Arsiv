@@ -234,6 +234,21 @@ test("tasfiye silmesi nesneyi kaldırır; staging silmesi idempotenttir", async 
   await staging.delete("zaten-yok"); // hata fırlatmamalı
 });
 
+test("düz HTTP ucu yalnız açık izinle kabul edilir", () => {
+  const server = fakeS3Server();
+  const base = {
+    endpoint: "http://minio.internal:9000",
+    bucket: server.bucket,
+    credentials: { accessKeyId: "port-test", secretAccessKey: "s".repeat(24) },
+    fetcher: server.fetcher,
+  };
+  assert.throws(
+    () => new NodeS3ObjectReader(base),
+    (error: unknown) => isObjectStorageError(error, "INVALID_ARGUMENT"),
+  );
+  assert.ok(new NodeS3ObjectReader({ ...base, allowHttp: true }));
+});
+
 test("sağlayıcı 5xx hatası PROVIDER_UNAVAILABLE koduna eşlenir", async () => {
   const { reader, staging } = harness({ failWithStatus: 503 });
   await assert.rejects(

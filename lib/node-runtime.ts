@@ -81,6 +81,8 @@ export function bootstrapNodeRuntime(options: NodeRuntimeOptions = {}): NodeRunt
 
   const s3Base = {
     endpoint: requireEnv(env, "ARCHIVE_S3_ENDPOINT"),
+    // Yalnız izole konteyner ağı içindeki MinIO için düz HTTP'ye açık izin.
+    allowHttp: env.ARCHIVE_S3_ALLOW_HTTP === "enabled",
     region: env.ARCHIVE_S3_REGION || "auto",
     credentials: {
       accessKeyId: requireEnv(env, "ARCHIVE_S3_ACCESS_KEY_ID"),

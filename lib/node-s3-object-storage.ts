@@ -60,6 +60,12 @@ export type NodeS3Config = {
   fetcher?: typeof fetch;
   /** Akış gövdelerinde iç multipart parça boyutu (test için küçültülebilir). */
   internalPartBytes?: number;
+  /**
+   * Yalnız izole konteyner ağı içindeki MinIO için düz HTTP'ye açık izin
+   * (ör. http://minio:9000). Varsayılan kapalıdır; ağ dışına çıkan uçlarda
+   * kullanılmamalıdır.
+   */
+  allowHttp?: boolean;
   now?: () => Date;
 };
 
@@ -170,8 +176,11 @@ class S3Http {
 
   constructor(config: NodeS3Config) {
     this.base = new URL(config.endpoint);
-    if (this.base.protocol !== "https:" || !config.bucket || config.bucket.includes("/")) {
-      throw new ObjectStorageError("INVALID_ARGUMENT", "S3 adaptörü HTTPS uç noktası ve güvenli kova adı gerektirir.");
+    const protocolAllowed = this.base.protocol === "https:"
+      || (this.base.protocol === "http:" && config.allowHttp === true);
+    if (!protocolAllowed || !config.bucket || config.bucket.includes("/")) {
+      throw new ObjectStorageError("INVALID_ARGUMENT",
+        "S3 adaptörü HTTPS uç noktası (ya da açıkça izin verilmiş konteyner içi HTTP) ve güvenli kova adı gerektirir.");
     }
     if (!config.credentials?.accessKeyId || !config.credentials?.secretAccessKey) {
       throw new ObjectStorageError("INVALID_ARGUMENT", "S3 adaptörü erişim kimliği gerektirir.");
