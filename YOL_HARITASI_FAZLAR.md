@@ -813,7 +813,8 @@ varsayılan olarak `scripts/acceptance-executors/pipeline.mjs`'e bağlıdır; mo
 tanımsızsa bütün uygun testler `EXECUTOR_NOT_CONFIGURED` nedeniyle dürüstçe
 `BLOCKED` kalır. Gerçek R2/IAM kaynakları, dar test kimlikleri (ikinci sağlayıcı
 ve geri yükleme kovası dahil) ile yetkili onay kayıtları bağlanmadan F1.11 ve
-Faz 1 tamamlanmış sayılmaz.
+Faz 1 tamamlanmış sayılmaz. Kurum içi yerleşim kararıyla staging hedefi artık
+Cloudflare yerine MinIO'lu kurum içi yığın da olabilir; port durumu için §13.
 ## 7. Dosya bazında planlanan değişiklikler
 
 | Dosya/alan | Değişiklik |
@@ -962,3 +963,32 @@ Faz 1 tamamlandı denebilmesi için:
 
 Bu kapı kapanmadan yeni müdürlüklerin toplu devreye alınması veya sistemin
 kurumsal üretim çekirdeği ilan edilmesi uygun değildir.
+
+## 13. Kurum içi port durumu (KURUM_ICI_PORT_KAPSAMI.md)
+
+Üretim yerleşimi kararı gereği pilot (Workers + D1 + R2), belediye
+altyapısında çalışacak biçimde taşınmıştır. Kapsam ve gerekçe
+`KURUM_ICI_PORT_KAPSAMI.md`; aşama durumu:
+
+| Aşama | İçerik | Durum |
+|---|---|---|
+| P1 | Bağlama dikişi: `cloudflare:workers` tek dosyaya indirildi, sağlayıcı kaydı (`lib/archive-bindings.ts`) | ✅ Tamam |
+| P2 | Üretim sınıfı SQLite D1 sarmalayıcısı: WAL + tam fsync, atomik batch (`lib/node-sqlite-d1.ts`) | ✅ Tamam |
+| P3 | MinIO/S3 rol adaptörleri: SigV4, koşullu ilk yazma, sınırlı bellekle iç multipart (`lib/node-s3-object-storage.ts`) | ✅ Tamam |
+| P4 | Node çalışma zamanı: rota modülleri değişmeden HTTP köprüsü + iş zamanlayıcı (`server/`), depolama rol dikişi (`lib/storage-roles.ts`), uçtan uca kabul akışı testi | ✅ Tamam |
+| P5 | Kimlik sınırı: oauth2-proxy + Keycloak kaplaması, kabul koşusu için fail-closed jetonlu geçit (`deploy/kurum-ici/sso/`) | ✅ Yapılandırma hazır; Keycloak↔AD bağlantısı kurulum işi |
+| P6 | Paketleme: API imajı (bağımlılıksız), compose yığını, CI imaj kapısı (`server/Dockerfile`, `deploy/kurum-ici/`) | ✅ Tamam; imaj derlemesi CI'da doğrulanıyor |
+| P7 | İşletim: ayağa kaldırma runbook'u + duman testi + çalışma zamanı ClamAV imza tazeleme (`deploy/kurum-ici/AYAGA_KALDIRMA.md`, `smoke.sh`) | ✅ Repo tarafı tamam; gerçek makinede ilk kurulum bekliyor |
+| P8 | Kabul koşusu: 19 test MinIO'lu kurum içi staging'e karşı yeniden koşulur (`KABUL_ORTAM_KURULUMU.md` uçları çevrilir) | ⬜ Açık — makine + sır kurulumu |
+| P9 | (2. dalga, opsiyonel) PostgreSQL geçişi ve arama iyileştirmesi | ⬜ Planlanmadı; portun ön koşulu değil |
+
+Değişmeyenler: Workers pilotu davranışsal olarak korunur (tam takım her
+commit'te Workers build'iyle koşar); kabul yürütücüleri, şema, iş mantığı ve
+kanıt sözleşmesi iki çalışma zamanında ortaktır. Kazanım: `arsiv-asil`
+kovası kurum içinde MinIO Object Lock ile GERÇEK WORM'dur (R2 pilotunda
+telafi kontrolüydü, ADR-016).
+
+Bölüm 12'deki tamamlanma tanımı değişmez: kurum içi yerleşimde de Faz 1,
+ancak P8 kabul koşusu teknik kapıyı yeniden açtığında tamamlanmış sayılır.
+UI'nin kurum içi sunumu ve mevcut belediye sistemleriyle entegrasyon bu
+portun bilinçli kapsam dışıdır (KURUM_ICI_PORT_KAPSAMI.md §7).
