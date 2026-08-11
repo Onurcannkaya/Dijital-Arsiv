@@ -15,9 +15,14 @@ WORKDIR /service
 COPY requirements.txt .
 RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY app ./app
+# İmza tazeliği çalışma zamanında freshclam ile korunur (entrypoint.sh);
+# kapalı ağda FRESHCLAM_MIRROR kurum içi aynaya yöneltilir.
+COPY entrypoint.sh /service/entrypoint.sh
+RUN chmod +x /service/entrypoint.sh
 
 USER scanner
 EXPOSE 8091
+ENTRYPOINT ["/service/entrypoint.sh"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD ["python", "-c", "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8091/health',timeout=4)); raise SystemExit(0 if d.get('scannerReady') else 1)"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8091"]

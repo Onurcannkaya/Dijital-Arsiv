@@ -96,9 +96,11 @@ services:
       AWS_ACCESS_KEY_ID: ${ARCHIVE_S3_ACCESS_KEY_ID:?}
       AWS_SECRET_ACCESS_KEY: ${ARCHIVE_S3_SECRET_ACCESS_KEY:?}
       AWS_DEFAULT_REGION: auto
+      # İmzalar entrypoint'te açılışta ve periyodik freshclam ile tazelenir;
+      # kapalı ağda kurum içi ayna adresi verilir (README §ClamAV).
+      FRESHCLAM_MIRROR: ${FRESHCLAM_MIRROR:-database.clamav.net}
+      FRESHCLAM_INTERVAL_HOURS: ${FRESHCLAM_INTERVAL_HOURS:-6}
     networks: [arsiv-ic]
-    # ClamAV imzaları 24 saatten eskiyse servis fail-closed kapanır; kapalı
-    # ağda freshclam için kurum içi imza aynası gerekir (README §ClamAV).
 
   ocr:
     build:

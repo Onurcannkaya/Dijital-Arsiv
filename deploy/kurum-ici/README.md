@@ -6,11 +6,14 @@ değişkenleri: `KABUL_ORTAM_KURULUMU.md`.
 
 ## Kurulum
 
+Adım adım runbook: `AYAGA_KALDIRMA.md` (ön koşullar, doğrulama sırası,
+duman testi `./smoke.sh`, SSO, kalıcılaştırma ve sorun giderme). Kısa yol:
+
 ```bash
 cd deploy/kurum-ici
 cp .env.example .env      # sırları doldurun: openssl rand -hex 32
 docker compose up -d --build
-curl -s http://127.0.0.1:8080/api/health
+./smoke.sh
 ```
 
 Sağlık yanıtı ilk açılışta `degraded` olabilir: OCR modeli ve ClamAV imzaları
