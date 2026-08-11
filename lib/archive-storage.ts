@@ -4,7 +4,9 @@ import "./workers-runtime.ts";
 
 import { resolveArchiveBindings, type ArchiveBindings } from "./archive-bindings.ts";
 import type { ObjectStorage } from "./object-storage.ts";
-import { createObjectStorage, R2ImmutableVaultWriter, R2ObjectReader, R2StagingStorage } from "./r2-object-storage.ts";
+import {
+  storageObjectStorage, storageReader, storageStaging, storageVaultWriter,
+} from "./storage-roles.ts";
 
 export {
   ARCHIVE_SCHEMA_VERSION, applyArchiveMigrations, assertSchemaReady,
@@ -78,13 +80,13 @@ export function getIngestStorages(bindings: Pick<ArchiveBindings, "TEMPORARY_FIL
     throw new Error("TEMPORARY_FILES ve QUARANTINE_FILES fiziksel depolama bağları yapılandırılmalıdır.");
   }
   return {
-    temporary: new R2StagingStorage(bindings.TEMPORARY_FILES),
-    quarantine: new R2StagingStorage(bindings.QUARANTINE_FILES),
+    temporary: storageStaging(bindings.TEMPORARY_FILES),
+    quarantine: storageStaging(bindings.QUARANTINE_FILES),
   };
 }
 /** Çalışma zamanı nesne kasasını ADR-012 arayüzüne dönüştürür. */
 export function getArchiveObjectStorage(bindings: Pick<ArchiveBindings, "ARCHIVE_FILES">): ObjectStorage {
-  return createObjectStorage(bindings.ARCHIVE_FILES);
+  return storageObjectStorage(bindings.ARCHIVE_FILES);
 }
 
 /** Yetkili kayıttaki namespace'i dar okuma rolüne çevirir; bilinmeyen alan fail-closed'dur. */
@@ -92,9 +94,9 @@ export function getObjectReaderForNamespace(
   bindings: Pick<ArchiveBindings, "ARCHIVE_FILES" | "DERIVATIVE_FILES">,
   namespace: string,
 ) {
-  if (namespace === "ARCHIVE_FILES") return new R2ObjectReader(bindings.ARCHIVE_FILES);
+  if (namespace === "ARCHIVE_FILES") return storageReader(bindings.ARCHIVE_FILES);
   if (namespace === "DERIVATIVE_FILES" && bindings.DERIVATIVE_FILES) {
-    return new R2ObjectReader(bindings.DERIVATIVE_FILES);
+    return storageReader(bindings.DERIVATIVE_FILES);
   }
   throw new Error(`Depolama okuma rolü yapılandırılmamış: ${namespace}`);
 }
@@ -104,14 +106,14 @@ export function getDerivativeViewReader(
   bindings: Pick<ArchiveBindings, "DERIVATIVE_FILES">,
 ) {
   if (!bindings.DERIVATIVE_FILES) throw new Error("DERIVATIVE_FILES görüntüleme rolü yapılandırılmamış.");
-  return new R2ObjectReader(bindings.DERIVATIVE_FILES);
+  return storageReader(bindings.DERIVATIVE_FILES);
 }
 
 /** DOWNLOAD yolu yalnız asıl kovanın dar okuma rolünü alabilir. */
 export function getOriginalDownloadReader(
   bindings: Pick<ArchiveBindings, "ARCHIVE_FILES">,
 ) {
-  return new R2ObjectReader(bindings.ARCHIVE_FILES);
+  return storageReader(bindings.ARCHIVE_FILES);
 }
 
 /** F1.5 promotion role: quarantine read, immutable vault write, and vault read-back. */
@@ -121,11 +123,11 @@ export function getPromotionStorages(
   if (!bindings.QUARANTINE_FILES) {
     throw new Error("QUARANTINE_FILES must be configured for promotion.");
   }
-  const quarantineReader = new R2ObjectReader(bindings.QUARANTINE_FILES);
+  const quarantineReader = storageReader(bindings.QUARANTINE_FILES);
   return {
     quarantineReader,
-    vaultReader: new R2ObjectReader(bindings.ARCHIVE_FILES),
-    vaultWriter: new R2ImmutableVaultWriter(bindings.ARCHIVE_FILES, quarantineReader),
+    vaultReader: storageReader(bindings.ARCHIVE_FILES),
+    vaultWriter: storageVaultWriter(bindings.ARCHIVE_FILES, quarantineReader),
   };
 }
 

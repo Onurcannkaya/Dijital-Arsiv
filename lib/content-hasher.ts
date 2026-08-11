@@ -31,14 +31,29 @@ type DigestStreamConstructor = new (algorithm: string) => WritableStream<Uint8Ar
 };
 
 /**
- * Cloudflare Workers uygulaması: `crypto.DigestStream` ile sabit bellekte
- * akışlı SHA-256. Node testleri aynı sözleşmeyi `node:crypto` tabanlı test
- * uygulamasıyla doğrular (`tests/object-storage-contract.test.ts`).
+ * Cloudflare Workers'ta `crypto.DigestStream`, kurum içi Node çalışma
+ * zamanında `node:crypto` ile sabit bellekte akışlı SHA-256 (P4). Her iki yol
+ * da aynı sözleşmeyi karşılar; Node dalı Workers paketine tembel importla
+ * girer ve orada hiç çalışmaz.
  */
 export function createDigestStreamHasher(): StreamingHasher {
   const DigestStream = (globalThis.crypto as unknown as { DigestStream?: DigestStreamConstructor }).DigestStream;
   if (!DigestStream) {
-    throw new Error("Bu çalışma zamanında crypto.DigestStream yok; çalışma zamanına uygun StreamingHasher sağlayın.");
+    return {
+      async sha256(stream: ReadableStream<Uint8Array>): Promise<StreamDigest> {
+        const { createHash } = await import("node:crypto");
+        const hash = createHash("sha256");
+        let byteSize = 0;
+        const reader = stream.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          hash.update(value);
+          byteSize += value.byteLength;
+        }
+        return { sha256Hex: hash.digest("hex"), byteSize };
+      },
+    };
   }
   return {
     async sha256(stream: ReadableStream<Uint8Array>): Promise<StreamDigest> {

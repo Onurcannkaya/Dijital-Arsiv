@@ -2,7 +2,7 @@
 import { createDigestStreamHasher, digestToHex } from "./content-hasher.ts";
 import { evaluateFullIntegrityObject } from "./integrity.ts";
 import { logEvent } from "./observability.ts";
-import { R2ObjectReader } from "./r2-object-storage.ts";
+import { storageReader, type StorageBinding } from "./storage-roles.ts";
 
 type TargetRow = {
   scan_rowid: number;
@@ -20,7 +20,7 @@ async function sha256Text(value: string) {
 
 export async function runAcceptanceIntegrityProbe(input: {
   db: D1Database;
-  archive: R2Bucket;
+  archive: StorageBinding;
   sessionId: string;
 }) {
   const target = await input.db.prepare(`SELECT b.rowid AS scan_rowid, b.id, b.object_key,
@@ -31,7 +31,7 @@ export async function runAcceptanceIntegrityProbe(input: {
     LIMIT 1`).bind(input.sessionId).first<TargetRow>();
   if (!target) throw new Error("B?t?nl?k kabul probu i?in as?l nesne bulunamad?.");
 
-  const base = new R2ObjectReader(input.archive);
+  const base = storageReader(input.archive);
   const hasher = createDigestStreamHasher();
   const targetInput = {
     id: target.id,

@@ -3,7 +3,7 @@ import { processNextContentScanJob } from "./content-scan.ts";
 import { assertSchemaReady, runMaintenanceSlice } from "./archive-schema.ts";
 import { getPromotionStorages, type ArchiveBindings } from "./archive-storage.ts";
 import { processNextPromotionJob } from "./ingest-promotion.ts";
-import { R2ImmutableVaultWriter, R2ObjectReader, R2StagingStorage, R2StorageInventory } from "./r2-object-storage.ts";
+import { storageInventory, storageReader, storageStaging, storageVaultWriter } from "./storage-roles.ts";
 import { createDigestStreamHasher } from "./content-hasher.ts";
 import { processNextDerivativeJob } from "./document-render.ts";
 import { expireIncompleteUploads } from "./ingest-service.ts";
@@ -99,7 +99,7 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
         if (Date.now() < deadline) {
           const result = await processNextDerivativeJob({
             db: bindings.DB,
-            derivativeReader: new R2ObjectReader(bindings.DERIVATIVE_FILES!),
+            derivativeReader: storageReader(bindings.DERIVATIVE_FILES!),
             hasher: createDigestStreamHasher(),
             serviceUrl: bindings.DOCUMENT_RENDER_SERVICE_URL!,
             serviceToken: bindings.DOCUMENT_RENDER_SERVICE_TOKEN!,
@@ -160,8 +160,8 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
       if (bindings.TEMPORARY_FILES && bindings.QUARANTINE_FILES) {
         const lifecycle = await expireIncompleteUploads({
           db: bindings.DB,
-          temporary: new R2StagingStorage(bindings.TEMPORARY_FILES),
-          quarantine: new R2StagingStorage(bindings.QUARANTINE_FILES),
+          temporary: storageStaging(bindings.TEMPORARY_FILES),
+          quarantine: storageStaging(bindings.QUARANTINE_FILES),
           hasher: createDigestStreamHasher(),
         });
         ingestLifecycle = { ...lifecycle, skipped: false };
@@ -169,18 +169,18 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
 
       // F1.8: envanter bütün kalıcı ad alanlarını tarar; tüketici ise her kovanın
       // kendi dar reader/writer rolüyle çalışır. Böylece türev işleri açılıp sahipsiz kalmaz.
-      const archiveReader = new R2ObjectReader(bindings.ARCHIVE_FILES);
+      const archiveReader = storageReader(bindings.ARCHIVE_FILES);
       const migrationTargets = [{
         namespace: "ARCHIVE_FILES",
         reader: archiveReader,
-        writer: new R2ImmutableVaultWriter(bindings.ARCHIVE_FILES, archiveReader),
+        writer: storageVaultWriter(bindings.ARCHIVE_FILES, archiveReader),
       }];
       if (bindings.DERIVATIVE_FILES) {
-        const derivativeReader = new R2ObjectReader(bindings.DERIVATIVE_FILES);
+        const derivativeReader = storageReader(bindings.DERIVATIVE_FILES);
         migrationTargets.push({
           namespace: "DERIVATIVE_FILES",
           reader: derivativeReader,
-          writer: new R2ImmutableVaultWriter(bindings.DERIVATIVE_FILES, derivativeReader),
+          writer: storageVaultWriter(bindings.DERIVATIVE_FILES, derivativeReader),
         });
       }
       const readerForNamespace = (namespace: string) => {
@@ -225,9 +225,9 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
   }
   if (cron === INTEGRITY_CRON) {
     await measured("cron.integrity", { cron }, async () => {
-      const archiveReader = new R2ObjectReader(bindings.ARCHIVE_FILES);
+      const archiveReader = storageReader(bindings.ARCHIVE_FILES);
       const derivativeReader = bindings.DERIVATIVE_FILES
-        ? new R2ObjectReader(bindings.DERIVATIVE_FILES) : null;
+        ? storageReader(bindings.DERIVATIVE_FILES) : null;
       const readerForNamespace = (namespace: string) => {
         if (namespace === "ARCHIVE_FILES") return archiveReader;
         if (namespace === "DERIVATIVE_FILES" && derivativeReader) return derivativeReader;
@@ -238,13 +238,13 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
       );
       const namespaces = [{
         name: "ARCHIVE_FILES",
-        inventory: new R2StorageInventory(bindings.ARCHIVE_FILES),
+        inventory: storageInventory(bindings.ARCHIVE_FILES),
         reader: archiveReader,
       }];
       if (bindings.DERIVATIVE_FILES && derivativeReader) {
         namespaces.push({
           name: "DERIVATIVE_FILES",
-          inventory: new R2StorageInventory(bindings.DERIVATIVE_FILES),
+          inventory: storageInventory(bindings.DERIVATIVE_FILES),
           reader: derivativeReader,
         });
       }

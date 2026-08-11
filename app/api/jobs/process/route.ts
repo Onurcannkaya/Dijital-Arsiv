@@ -12,7 +12,7 @@ import {
 import { relationStatement, resolveParcelEntity } from "../../../../lib/entities";
 import { PublicError, failure, isPublicError } from "../../../../lib/errors";
 import { MISSING_VALUE, assessRisk, isMultiValueField, requiredFields } from "../../../../lib/field-policy";
-import { ExtractedField, OcrProfilePayload, parseOcrServiceResult } from "../../../../lib/ocr-contract";
+import { parseOcrServiceResult, type ExtractedField, type OcrProfilePayload } from "../../../../lib/ocr-contract";
 import { logEvent } from "../../../../lib/observability";
 import { normalizeSearch } from "../../../../lib/text-search";
 

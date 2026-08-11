@@ -16,12 +16,14 @@
  * Node testlerinde doğrudan yüklenebilir.
  */
 
+import type { StorageBinding } from "./storage-roles.ts";
+
 export type ArchiveBindings = {
   DB: D1Database;
-  ARCHIVE_FILES: R2Bucket;
-  DERIVATIVE_FILES?: R2Bucket;
-  TEMPORARY_FILES?: R2Bucket;
-  QUARANTINE_FILES?: R2Bucket;
+  ARCHIVE_FILES: StorageBinding;
+  DERIVATIVE_FILES?: StorageBinding;
+  TEMPORARY_FILES?: StorageBinding;
+  QUARANTINE_FILES?: StorageBinding;
   OCR_SERVICE_URL?: string;
   OCR_SERVICE_TOKEN?: string;
   CONTENT_SCAN_SERVICE_URL?: string;
@@ -68,10 +70,10 @@ export function resolveArchiveBindings(): ArchiveBindings {
  */
 export type NodeRuntimeAdapters = {
   db: D1Database;
-  archiveFiles: R2Bucket;
-  derivativeFiles?: R2Bucket;
-  temporaryFiles?: R2Bucket;
-  quarantineFiles?: R2Bucket;
+  archiveFiles: StorageBinding;
+  derivativeFiles?: StorageBinding;
+  temporaryFiles?: StorageBinding;
+  quarantineFiles?: StorageBinding;
 };
 
 const NODE_CONFIG_KEYS = [

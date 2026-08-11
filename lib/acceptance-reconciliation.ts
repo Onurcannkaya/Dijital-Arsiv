@@ -2,8 +2,9 @@
 
 import { digestToHex } from "./content-hasher.ts";
 import {
-  R2DispositionStorage, R2ImmutableVaultWriter, R2ObjectReader, R2StorageInventory,
-} from "./r2-object-storage.ts";
+  storageDisposition, storageInventory, storageReader, storageVaultWriter,
+  type StorageBinding,
+} from "./storage-roles.ts";
 import { ObjectStorageError } from "./object-storage.ts";
 import {
   RECONCILIATION_MIN_AGE_MINUTES, RECONCILIATION_TASK, runReconciliationSlice,
@@ -17,7 +18,7 @@ async function sha256Text(value: string) {
 
 export async function runAcceptanceReconciliationProbe(input: {
   db: D1Database;
-  archive: R2Bucket;
+  archive: StorageBinding;
   sessionId: string;
   now?: () => Date;
 }) {
@@ -34,9 +35,9 @@ export async function runAcceptanceReconciliationProbe(input: {
   const contentSha = digestToHex(await crypto.subtle.digest("SHA-256", bytes));
   const oldIso = new Date(now.getTime() - (RECONCILIATION_MIN_AGE_MINUTES + 5) * 60_000).toISOString();
 
-  const reader = new R2ObjectReader(input.archive);
-  const writer = new R2ImmutableVaultWriter(input.archive, reader);
-  const disposer = new R2DispositionStorage(input.archive);
+  const reader = storageReader(input.archive);
+  const writer = storageVaultWriter(input.archive, reader);
+  const disposer = storageDisposition(input.archive);
   const putOptions = {
     contentType: "application/octet-stream",
     customMetadata: { objectClass: "acceptance-probe", sha256: contentSha },
@@ -75,7 +76,7 @@ export async function runAcceptanceReconciliationProbe(input: {
       updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('DONE', 'FAILED')`)
     .bind(RECONCILIATION_TASK).run();
 
-  const baseInventory = new R2StorageInventory(input.archive);
+  const baseInventory = storageInventory(input.archive);
   const inventory = {
     async list(options?: { prefix?: string; cursor?: string; limit?: number }) {
       const page = await baseInventory.list(options);
