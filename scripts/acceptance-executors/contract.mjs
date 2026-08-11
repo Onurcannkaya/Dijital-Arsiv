@@ -35,8 +35,13 @@ export class ExecutorConfigError extends Error {
  * Uygulama HTTP istemcisi. Kimlik, uygulamanın güvendiği
  * `oai-authenticated-user-email` başlığıyla taşınır (lib/authorization.ts);
  * kabul ortamı bu sentetik kimliği kabul edecek şekilde yapılandırılır.
+ *
+ * Kurum içi staging SSO vekilinin arkasındaysa (deploy/kurum-ici/sso),
+ * vekil istemci kimlik başlıklarını siler; sentetik kimlik yalnız
+ * `proxyToken` ile açılan kabul geçidinden geçer. Jeton kalıcı sır değildir,
+ * koşuya özel vekil geçiş anahtarıdır ve kanıtlara yazılmaz.
  */
-export function createAppClient({ baseUrl, identity, signal, fetcher = fetch, correlationId }) {
+export function createAppClient({ baseUrl, identity, signal, fetcher = fetch, correlationId, proxyToken }) {
   if (typeof baseUrl !== "string" || !/^https:\/\//.test(baseUrl)) {
     throw new ExecutorConfigError("Kabul yürütücüsü HTTPS taban adresi gerektirir.");
   }
@@ -46,6 +51,8 @@ export function createAppClient({ baseUrl, identity, signal, fetcher = fetch, co
   const root = baseUrl.replace(/\/$/, "");
   const identityHeaders = {
     "oai-authenticated-user-email": identity,
+    ...(typeof proxyToken === "string" && proxyToken.trim().length >= 32
+      ? { "x-acceptance-proxy-token": proxyToken.trim() } : {}),
     ...(typeof correlationId === "string" && /^[A-Za-z0-9._-]{8,80}$/.test(correlationId)
       ? { "x-correlation-id": correlationId } : {}),
   };

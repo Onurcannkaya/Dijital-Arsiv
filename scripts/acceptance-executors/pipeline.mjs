@@ -37,6 +37,8 @@ function bindExecutor(run, { app = true } = {}) {
       identity: input.config.uploaderIdentity,
       signal: input.signal,
       correlationId: `${input.runId}-${input.test.id}`,
+      // Kurum içi staging SSO vekilinin sentetik kimlik geçidi (yoksa boş).
+      proxyToken: input.config.acceptanceProxyToken,
     }) : null;
     return run(client, {
       runId: input.runId,

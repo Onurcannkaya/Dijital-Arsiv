@@ -20,8 +20,10 @@ iniyordur; `docker compose ps` sağlık sütununu izleyin.
 
 - **Kimlik**: Uygulama `oai-authenticated-user-email` başlığına güvenir; bu
   başlığı YALNIZ ters vekil verebilir (`nginx.conf` istemci başlıklarını
-  koşulsuz siler). SSO (Keycloak/AD, P5) bağlanana kadar vekil kimliksiz
-  istekleri kimliksiz bırakır ve uygulama 401 döner.
+  koşulsuz siler). SSO bağlanana kadar vekil kimliksiz istekleri kimliksiz
+  bırakır ve uygulama 401 döner. SSO katmanı hazırdır:
+  `docker-compose.sso.yml` kaplaması oauth2-proxy + Keycloak bağlar
+  (kurulum: `sso/README.md`).
 - **Ağ**: API, MinIO ve servisler yalnız `arsiv-ic` ağındadır; dışarıya tek
   kapı vekilin portudur.
 - **Değişmezlik**: `arsiv-asil` kovası sürümleme + Object Lock ile açılır

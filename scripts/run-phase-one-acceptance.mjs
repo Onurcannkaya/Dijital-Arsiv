@@ -88,6 +88,8 @@ function scopedConfig(test) {
     config.uploaderIdentity = process.env.ACCEPTANCE_UPLOADER_IDENTITY;
     config.unit = process.env.ACCEPTANCE_UPLOADER_UNIT;
     config.acceptanceToken = process.env.ARCHIVE_ACCEPTANCE_TOKEN;
+    // Kurum içi staging SSO vekili varsa sentetik kimlik geçidi anahtarı.
+    config.acceptanceProxyToken = process.env.ACCEPTANCE_PROXY_TOKEN;
   }
   if (test.requires.includes("s3") || test.requires.includes("iamIdentities") || test.requires.includes("logAccess")
       || test.requires.includes("providerLockProfile") || test.requires.includes("restoreDrill")) {

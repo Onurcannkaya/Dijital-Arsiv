@@ -82,6 +82,9 @@ gh secret set ACCEPTANCE_BASE_URL --env phase-one-acceptance          # staging 
 gh secret set ARCHIVE_MIGRATION_TOKEN --env phase-one-acceptance      # Faz A'dakiyle aynı
 gh secret set ARCHIVE_ACCEPTANCE_TOKEN --env phase-one-acceptance     # Faz A'dakiyle aynı, >= 32 karakter
 gh secret set ACCEPTANCE_UPLOADER_IDENTITY --env phase-one-acceptance # ör. kabul-yukleyici@sivas.bel.tr
+# Yalnız kurum içi SSO vekilli staging: vekilin sentetik kimlik geçidi jetonu
+# (deploy/kurum-ici/sso/README.md; .env ACCEPTANCE_PROXY_TOKEN ile AYNI değer)
+gh secret set ACCEPTANCE_PROXY_TOKEN --env phase-one-acceptance
 
 gh variable set ACCEPTANCE_UPLOADER_UNIT --env phase-one-acceptance --body "Kabul Testleri"
 gh variable set ACCEPTANCE_SCHEMA_VERSION --env phase-one-acceptance --body "<sema-surumu>"
