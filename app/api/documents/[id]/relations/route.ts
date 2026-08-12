@@ -3,6 +3,9 @@ import { authorizeRequest, canAccessUnit } from "../../../../../lib/authorizatio
 import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
 import { failure } from "../../../../../lib/errors";
 import {
+  RELATION_REJECTION_REASONS, type ValidatedRejection, validateRejection,
+} from "../../../../../lib/rejection-reasons";
+import {
   isRelationType, listDocumentRelations, relationStatement,
   resolveAddressEntity, resolveParcelEntity, type RelationType,
 } from "../../../../../lib/entities";
@@ -148,7 +151,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 }
 
-type SubmittedRelation = { id?: unknown; action?: unknown; reason?: unknown };
+type SubmittedRelation = { id?: unknown; action?: unknown; reasonCode?: unknown; reasonNote?: unknown };
 type RelationRow = { id: string; entity_id: string; relation_type: string; relation_source: string; verification_status: string; display_label: string };
 
 /** OCR önerisi olan ilişkileri personel onayına veya reddine bağlar. */
@@ -172,10 +175,23 @@ export async function PATCH(request: Request, context: RouteContext) {
   const operations = submitted.map((entry) => ({
     id: typeof entry.id === "string" ? entry.id : "",
     action: typeof entry.action === "string" ? entry.action : "",
-    reason: typeof entry.reason === "string" ? entry.reason.trim().slice(0, 300) : "",
+    rejection: entry,
   }));
   if (operations.some((operation) => !operation.id || !["verify", "reject"].includes(operation.action))) {
     return jsonError("Her ilişki için `verify` veya `reject` eylemi gereklidir.");
+  }
+  /*
+   * Ret gerekçesi zorunludur: değişmez izde "kim ve ne zaman" duruyordu ama
+   * "neden" durmuyordu, oysa taşınmaz dosyasında yıllar sonra sorulacak soru
+   * budur. Kontrollü kod, serbest metnin üreteceği raporlanamaz girdileri
+   * önler ve OCR'ın nerede yanıldığının ölçülmesini sağlar.
+   */
+  const rejectionByRelation = new Map<string, ValidatedRejection>();
+  for (const operation of operations) {
+    if (operation.action !== "reject") continue;
+    const validated = validateRejection(operation.rejection, RELATION_REJECTION_REASONS);
+    if (typeof validated === "string") return jsonError(validated);
+    rejectionByRelation.set(operation.id, validated);
   }
   if (new Set(operations.map((operation) => operation.id)).size !== operations.length) {
     return jsonError("Aynı ilişki birden fazla gönderilemez.");
@@ -198,7 +214,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       relationId: operation.id, entityId: current.entity_id, displayLabel: current.display_label,
       relationType: current.relation_type, from: current.verification_status,
       to: operation.action === "verify" ? "VERIFIED" : "REJECTED",
-      reason: operation.reason || undefined,
+      ...(rejectionByRelation.get(operation.id) ?? {}),
     };
   }).sort((left, right) => left.relationId.localeCompare(right.relationId))
     /*

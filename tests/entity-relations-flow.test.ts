@@ -117,14 +117,14 @@ test("ilişki reddi kaydedilir, geri alınabilir ve tekrarı olay yazmaz", async
     const relationId = created.body.relations?.[0].id ?? "";
 
     const rejected = await call(server, "/api/documents/belge-a/relations", "PATCH",
-      { relations: [{ id: relationId, action: "reject", reason: "Belge bu parsele ait değil" }] });
+      { relations: [{ id: relationId, action: "reject", reasonCode: "WRONG_ENTITY" }] });
     assert.equal(rejected.status, 200);
     assert.equal(rejected.body.relations?.[0].verificationStatus, "REJECTED");
     assert.deepEqual(await auditActions(server, "belge-a"), ["relation.verified", "relation.rejected"]);
 
     // Zaten reddedilmiş ilişkiyi yeniden reddetmek karar değildir.
     const twice = await call(server, "/api/documents/belge-a/relations", "PATCH",
-      { relations: [{ id: relationId, action: "reject" }] });
+      { relations: [{ id: relationId, action: "reject", reasonCode: "WRONG_ENTITY" }] });
     assert.equal(twice.body.unchanged, true);
     assert.deepEqual(await auditActions(server, "belge-a"), ["relation.verified", "relation.rejected"],
       "değişmeyen ret olay yazdı");
@@ -143,7 +143,7 @@ test("reddedilmiş ilişkiyi yeniden eklemek kararı kayda geçirir", async () =
     const created = await call(server, "/api/documents/belge-a/relations", "POST", { parcel: PARCEL });
     const relationId = created.body.relations?.[0].id ?? "";
     await call(server, "/api/documents/belge-a/relations", "PATCH",
-      { relations: [{ id: relationId, action: "reject" }] });
+      { relations: [{ id: relationId, action: "reject", reasonCode: "WRONG_ENTITY" }] });
 
     // Reddedilmiş bir ilişkinin yeniden kurulması durumu DEĞİŞTİRİR; bu
     // no-op değildir ve zincire girmelidir.
@@ -175,9 +175,9 @@ test("eksik ve çelişkili ilişki isteği reddedilir", async () => {
     const created = await call(server, "/api/documents/belge-a/relations", "POST", { parcel: PARCEL });
     const relationId = created.body.relations?.[0].id ?? "";
     for (const [label, body] of [
-      ["belgede olmayan ilişki", { relations: [{ id: "yok", action: "reject" }] }],
+      ["belgede olmayan ilişki", { relations: [{ id: "yok", action: "reject", reasonCode: "MISREAD" }] }],
       ["geçersiz eylem", { relations: [{ id: relationId, action: "sil" }] }],
-      ["aynı ilişki iki kez", { relations: [{ id: relationId, action: "reject" }, { id: relationId, action: "verify" }] }],
+      ["aynı ilişki iki kez", { relations: [{ id: relationId, action: "reject", reasonCode: "MISREAD" }, { id: relationId, action: "verify" }] }],
       ["boş liste", { relations: [] }],
     ] as Array<[string, unknown]>) {
       const response = await call(server, "/api/documents/belge-a/relations", "PATCH", body);

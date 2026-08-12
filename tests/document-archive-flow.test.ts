@@ -225,7 +225,7 @@ test("reddedilen değerin biçimi arşivlemeyi engellemez", async () => {
     assert.equal(written.status, 200);
     const rejected = await call(server, `/api/documents/${id}/fields`, {
       method: "PATCH", headers: JSON_IDENTITY,
-      body: JSON.stringify({ values: [{ id: `${id}-f4`, action: "reject", reason: "Kanıt okunamıyor" }] }),
+      body: JSON.stringify({ values: [{ id: `${id}-f4`, action: "reject", reasonCode: "ILLEGIBLE" }] }),
     });
     assert.equal(rejected.status, 200);
 
@@ -256,7 +256,7 @@ test("reddedilen zorunlu alan arşivlemeyi durdurur", async () => {
         values: FIELDS.map(([name], index) => ({
           id: `${id}-f${index}`,
           action: name === "ada" ? "reject" : "confirm",
-          reason: name === "ada" ? "Kanıt okunamıyor" : undefined,
+          reasonCode: name === "ada" ? "ILLEGIBLE" : undefined,
         })),
       }),
     });

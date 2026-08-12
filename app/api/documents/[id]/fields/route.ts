@@ -1,6 +1,9 @@
 import { prepareAuditEvent } from "../../../../../lib/audit";
 import { authorizeRequest, canAccessUnit } from "../../../../../lib/authorization";
 import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
+import {
+  FIELD_REJECTION_REASONS, type ValidatedRejection, validateRejection,
+} from "../../../../../lib/rejection-reasons";
 import { loadProfileByName, loadVocabularyTerms, resolveDocumentProfile, type FieldDefinition } from "../../../../../lib/document-profile";
 import {
   MISSING_VALUE, assessRisk, formatViolation, isMultiValueField, vocabularyViolation,
@@ -18,7 +21,7 @@ type StoredValue = {
 };
 
 type ValueAction = "confirm" | "correct" | "reject";
-type SubmittedValue = { id?: unknown; action?: unknown; value?: unknown; reason?: unknown };
+type SubmittedValue = { id?: unknown; action?: unknown; value?: unknown; reasonCode?: unknown; reasonNote?: unknown };
 type SubmittedAddition = { fieldName?: unknown; value?: unknown };
 
 type PlannedChange = {
@@ -60,13 +63,25 @@ export async function PATCH(request: Request, context: RouteContext) {
     id: typeof entry.id === "string" ? entry.id : "",
     action: entry.action as ValueAction,
     value: readValue(entry.value),
-    reason: readValue(entry.reason).slice(0, 300),
+    rejection: entry,
   }));
   if (operations.some((operation) => !operation.id || !["confirm", "correct", "reject"].includes(operation.action))) {
     return jsonError("Her işlem için geçerli bir değer kimliği ve eylem gereklidir.");
   }
   if (new Set(operations.map((operation) => operation.id)).size !== operations.length) {
     return jsonError("Aynı değer birden fazla gönderilemez.");
+  }
+  /*
+   * Ret gerekçesi zorunludur: değişmez izde "kim ve ne zaman" duruyordu ama
+   * "neden" durmuyordu. Kontrollü kod, serbest metnin üreteceği raporlanamaz
+   * girdileri önler ve OCR'ın hangi alanlarda yanıldığının ölçülmesini sağlar.
+   */
+  const rejectionByValue = new Map<string, ValidatedRejection>();
+  for (const operation of operations) {
+    if (operation.action !== "reject") continue;
+    const validated = validateRejection(operation.rejection, FIELD_REJECTION_REASONS);
+    if (typeof validated === "string") return jsonError(validated);
+    rejectionByValue.set(operation.id, validated);
   }
 
   const document = await DB.prepare(`SELECT status, unit, document_type, document_type_id
@@ -195,7 +210,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       statements.push(DB.prepare(`UPDATE extracted_fields SET verification_status = 'REJECTED',
         verified_by = ?, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND document_id = ?`).bind(principal.email, operation.id, id));
-      changes.push({ id: operation.id, fieldName: current.field_name, action: "reject", from, to: null, riskLevel: "LOW", reason: operation.reason || undefined });
+      changes.push({ id: operation.id, fieldName: current.field_name, action: "reject", from, to: null,
+        riskLevel: "LOW", ...(rejectionByValue.get(operation.id) ?? {}) });
       continue;
     }
     // Personel düzeltmesi: biçim uyarısı işlemi engellemez, riski yükseltir ve
