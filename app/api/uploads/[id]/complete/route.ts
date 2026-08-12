@@ -7,9 +7,9 @@ import {
   requireArchiveSchema,
 } from "../../../../../lib/archive-storage";
 import {
-  IngestOperationError,
   completeUploadSession,
   getUploadSession,
+  ingestErrorResponse,
 } from "../../../../../lib/ingest-service";
 import { failure } from "../../../../../lib/errors";
 
@@ -31,9 +31,7 @@ export async function POST(request: Request, context: RouteContext) {
     const session = await completeUploadSession(dependencies, id, principal.email);
     return Response.json({ session });
   } catch (error) {
-    if (error instanceof IngestOperationError) {
-      return Response.json({ error: error.message, code: error.code }, { status: error.status });
-    }
-    return failure(error, "uploads.complete", "Yükleme tamamlanamadı.", request);
+    return ingestErrorResponse(error)
+      ?? failure(error, "uploads.complete", "Yükleme tamamlanamadı.", request);
   }
 }

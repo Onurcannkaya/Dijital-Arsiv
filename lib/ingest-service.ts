@@ -1,8 +1,9 @@
 import type { StreamingHasher } from "./content-hasher.ts";
-import { assertIngestSize } from "./ingest-contract.ts";
+import { IngestContractError, assertIngestSize } from "./ingest-contract.ts";
 import { transitionIngestSession, type IngestActor } from "./ingest-events.ts";
 import {
   ObjectStorageError,
+  isObjectStorageError,
   type StagingStorage,
   type UploadedPart,
 } from "./object-storage.ts";
@@ -49,6 +50,26 @@ export class IngestOperationError extends Error {
     this.code = code;
     this.status = status;
   }
+}
+
+/**
+ * Kabul hatalarını kullanıcıya anlaşılır yanıta çevirir.
+ *
+ * `IngestContractError` (boyut/durum sözleşmesi) da kullanıcı girdisinden
+ * doğar: yakalanmadığında istek genel bir 500 ve "destek için olay kimliği"
+ * mesajıyla düşer, kullanıcı neyi düzelteceğini bilemez. Geçersiz boyut 400,
+ * geçersiz durum/geçiş ise 409 ile döner. Tanınmayan hata `null` verir ve
+ * çağıran genel hata yolunu kullanır.
+ */
+export function ingestErrorResponse(error: unknown): Response | null {
+  if (error instanceof IngestOperationError) {
+    return Response.json({ error: error.message, code: error.code }, { status: error.status });
+  }
+  if (error instanceof IngestContractError) {
+    return Response.json({ error: error.message, code: error.code },
+      { status: error.code === "INVALID_SIZE" ? 400 : 409 });
+  }
+  return null;
 }
 
 export type IngestDependencies = {
@@ -341,6 +362,18 @@ export async function uploadPart(dependencies: IngestDependencies, input: Upload
     await dependencies.db.prepare("UPDATE upload_sessions SET uploaded_byte_size = ? WHERE id = ?")
       .bind(state.uploadedByteSize, session.id).run();
     return state;
+  } catch (error) {
+    /*
+     * Tek parça yazmada bildirilen SHA-256 sağlayıcıya iletilir ve uyuşmazlık
+     * orada, uygulamanın kendi akış özeti karşılaştırmasından önce yakalanır.
+     * Sağlayıcı hatası ham bırakılırsa istek genel 500 ile düşer; oysa bu bir
+     * istemci hatasıdır ve kabul sözleşmesinde karşılığı vardır.
+     */
+    if (isObjectStorageError(error, "PRECONDITION_FAILED")) {
+      throw new IngestOperationError("PART_CHECKSUM_MISMATCH",
+        "Parça içeriği bildirilen SHA-256 ile eşleşmiyor.", 422);
+    }
+    throw error;
   } finally {
     await releasePartSlot(dependencies, session.id, leaseId);
   }
