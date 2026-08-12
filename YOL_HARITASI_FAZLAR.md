@@ -979,8 +979,8 @@ altyapısında çalışacak biçimde taşınmıştır. Kapsam ve gerekçe
 | P5 | Kimlik sınırı: oauth2-proxy + Keycloak kaplaması, kabul koşusu için fail-closed jetonlu geçit (`deploy/kurum-ici/sso/`) | ✅ Yapılandırma hazır; Keycloak↔AD bağlantısı kurulum işi |
 | P6 | Paketleme: API imajı (bağımlılıksız), compose yığını, CI imaj kapısı (`server/Dockerfile`, `deploy/kurum-ici/`) | ✅ Tamam; imaj derlemesi CI'da doğrulanıyor |
 | P7 | İşletim: ayağa kaldırma runbook'u + duman testi + çalışma zamanı ClamAV imza tazeleme (`deploy/kurum-ici/AYAGA_KALDIRMA.md`, `smoke.sh`) | ✅ Repo tarafı tamam; gerçek makinede ilk kurulum bekliyor |
-| P8 | Kabul koşusu: 19 test MinIO'lu kurum içi staging'e karşı yeniden koşulur (`KABUL_ORTAM_KURULUMU.md` uçları çevrilir) | ⬜ Açık — makine + sır kurulumu |
-| P9 | (2. dalga, opsiyonel) PostgreSQL geçişi ve arama iyileştirmesi | ⬜ Planlanmadı; portun ön koşulu değil |
+| P8 | Kabul koşusu: 19 test MinIO'lu kurum içi staging'e karşı yeniden koşulur (`KABUL_ORTAM_KURULUMU.md` uçları çevrilir) | ⬜ Açık — yerleşim kararı ADR-018 ile onaylandı; makine + sır kurulumu bekliyor |
+| P9 | (2. dalga, opsiyonel) PostgreSQL geçişi, arama iyileştirmesi ve MinIO KES/SSE (ADR-018 Karar 2) | ⬜ Planlanmadı; portun ön koşulu değil |
 
 Değişmeyenler: Workers pilotu davranışsal olarak korunur (tam takım her
 commit'te Workers build'iyle koşar); kabul yürütücüleri, şema, iş mantığı ve

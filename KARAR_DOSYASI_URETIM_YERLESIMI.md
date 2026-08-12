@@ -1,5 +1,9 @@
 # Karar Dosyası — Üretim Yerleşimi ve İş Etki Analizi Kararları
 
+> **DURUM (2026-08-12): Yedi karar da teknik önerilerle onaylanıp imzalandı.**
+> Kalıcı kayıt: `ADR-018-URETIM-YERLESIMI-KARARLARI.md`. İmzalı nüsha kurum
+> arşivindedir; bu dosya tarihsel çalışma belgesi olarak korunur.
+
 Amaç: `S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md`'nin "üretim öncesinde kurum
 sahiplerince onaylanacak kararlar" listesindeki YEDİ kararı tek toplantıda
 sonuçlandırmak. Her karar için bağlam, seçenekler ve teknik öneri hazırdır;

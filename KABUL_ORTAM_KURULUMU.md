@@ -185,7 +185,7 @@ kontrol önekidir.
 ```bash
 # T-09: izole geri yükleme kovası (asıl kovadan farklı; birincil kimlik yazabilmeli)
 gh secret set ACCEPTANCE_RESTORE_BUCKET --env phase-one-acceptance
-gh variable set ACCEPTANCE_RESTORE_RTO_SECONDS --env phase-one-acceptance --body "900"   # isteğe bağlı, varsayılan 900
+gh variable set ACCEPTANCE_RESTORE_RTO_SECONDS --env phase-one-acceptance --body "28800" # ADR-018: onaylı asıl RTO 8 saat
 gh secret set ACCEPTANCE_DERIVATIVE_BUCKET --env phase-one-acceptance                    # isteğe bağlı: türevler de tatbikata girecekse
 
 # T-10: ikinci S3 uyumlu sağlayıcı (birinciden FARKLI uç) ve bağımsız kimlik
