@@ -2,6 +2,7 @@
 
 import { CheckCircle2, LoaderCircle, MapPin, Plus, ShieldCheck, Signpost, ThumbsDown, X } from "lucide-react";
 import { useState } from "react";
+import { OTHER_REASON_CODE, RELATION_REJECTION_REASONS } from "../../lib/rejection-reasons";
 
 export type EntityRelation = {
   id: string;
@@ -55,15 +56,28 @@ export function EntityRelations({ documentId, relations, canReview, archived, on
   const [busy, setBusy] = useState(false);
 
   const pending = relations.filter((relation) => relation.verificationStatus === "SUGGESTED");
+  /*
+   * Ret doğrudan gönderilmez: gerekçe kontrollü koddur ve değişmez ize onunla
+   * birlikte girer. "Neden reddedildi" sorusu taşınmaz dosyasında yıllar sonra
+   * sorulur; o an kaydedilmezse bir daha kaydedilemez.
+   */
+  const [rejecting, setRejecting] = useState<string | null>(null);
+  const [reasonCode, setReasonCode] = useState("");
+  const [reasonNote, setReasonNote] = useState("");
+  const reasonIncomplete = !reasonCode || (reasonCode === OTHER_REASON_CODE && !reasonNote.trim());
+  const openRejection = (relationId: string) => {
+    setRejecting(relationId); setReasonCode(""); setReasonNote("");
+  };
   const editable = canReview && !archived;
 
-  const decide = async (relationId: string, action: "verify" | "reject") => {
+  const decide = async (relationId: string, action: "verify" | "reject",
+    rejection?: { reasonCode: string; reasonNote: string }) => {
     setBusy(true); onError(""); onNotice("");
     try {
       const response = await fetch(`/api/documents/${documentId}/relations`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ relations: [{ id: relationId, action }] }),
+        body: JSON.stringify({ relations: [{ id: relationId, action, ...rejection }] }),
       });
       const payload = await response.json() as { error?: string; unchanged?: boolean; message?: string; relations?: EntityRelation[] };
       if (!response.ok) throw new Error(payload.error || "İlişki güncellenemedi.");
@@ -72,7 +86,8 @@ export function EntityRelations({ documentId, relations, canReview, archived, on
       // diye bildirmek personele olmamış bir işlemi rapor eder.
       onNotice(payload.unchanged
         ? payload.message ?? "İlişki zaten bu durumdaydı."
-        : action === "verify" ? "Varlık ilişkisi personel onayıyla doğrulandı." : "Varlık ilişkisi reddedildi; kayıt denetim izinde korunuyor.");
+        : action === "verify" ? "Varlık ilişkisi personel onayıyla doğrulandı." : "Varlık ilişkisi reddedildi; gerekçesiyle denetim izinde korunuyor.");
+      if (action === "reject") setRejecting(null);
     } catch (reason) {
       onError(reason instanceof Error ? reason.message : "İlişki güncellenemedi.");
     } finally {
@@ -131,7 +146,24 @@ export function EntityRelations({ documentId, relations, canReview, archived, on
         {relation.verifiedBy ? <small className="relation-actor">{relation.verifiedBy}{relation.verifiedAt ? ` · ${new Date(relation.verifiedAt).toLocaleString("tr-TR")}` : ""}</small> : null}
         {editable && relation.verificationStatus === "SUGGESTED" ? <div className="relation-actions">
           <button type="button" className="relation-verify" onClick={() => decide(relation.id, "verify")} disabled={busy}><CheckCircle2 size={13} /> Doğrula</button>
-          <button type="button" className="relation-reject" onClick={() => decide(relation.id, "reject")} disabled={busy}><ThumbsDown size={13} /> Reddet</button>
+          <button type="button" className="relation-reject" onClick={() => openRejection(relation.id)} disabled={busy}><ThumbsDown size={13} /> Reddet</button>
+        </div> : null}
+        {rejecting === relation.id ? <div className="rejection-reason">
+          <select aria-label="Ret gerekçesi" value={reasonCode} onChange={(event) => setReasonCode(event.target.value)}>
+            <option value="">Ret gerekçesi seçin…</option>
+            {RELATION_REJECTION_REASONS.map((reason) => <option key={reason.code} value={reason.code}>{reason.label}</option>)}
+          </select>
+          <input aria-label="Ret açıklaması" maxLength={300} value={reasonNote}
+            placeholder={reasonCode === OTHER_REASON_CODE ? "Açıklama zorunlu" : "Açıklama (isteğe bağlı)"}
+            onChange={(event) => setReasonNote(event.target.value)} />
+          <div className="rejection-actions">
+            <button type="button" onClick={() => setRejecting(null)} disabled={busy}>Vazgeç</button>
+            <button type="button" className="relation-reject" disabled={busy || reasonIncomplete}
+              title={reasonIncomplete ? "Ret gerekçesi seçilmelidir." : undefined}
+              onClick={() => decide(relation.id, "reject", { reasonCode, reasonNote })}>
+              <ThumbsDown size={13} /> Reddi kaydet
+            </button>
+          </div>
         </div> : null}
       </li>)}
     </ul> : null}

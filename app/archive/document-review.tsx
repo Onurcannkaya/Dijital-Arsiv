@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, Download, FileClock, FileCog, F
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EntityRelation, EntityRelations } from "./entity-relations";
 import { auditLabels } from "./audit-labels";
+import { FIELD_REJECTION_REASONS, OTHER_REASON_CODE } from "../../lib/rejection-reasons";
 
 const MISSING_VALUE = "Belirlenmedi";
 
@@ -38,7 +39,9 @@ type OcrJobState = { status:string; attempt:number; maxAttempts:number; deadLett
 type DetailPayload = { document:DetailDocument; ocrJob?:OcrJobState|null; profile:ProfileInfo; vocabularies:VocabularyMap; pages:DetailPage[]; fields:DetailValue[]; fieldGroups:FieldGroup[]; relations:EntityRelation[]; objects:BinaryObject[]; audit:AuditEvent[] };
 
 type Addition = { key:string; fieldName:string; value:string };
-type ValueOperation = { id:string; action:"confirm"|"correct"|"reject"; value?:string };
+type ValueOperation = { id:string; action:"confirm"|"correct"|"reject"; value?:string;
+  reasonCode?:string; reasonNote?:string };
+type RejectionDraft = { code:string; note:string };
 
 const statusLabels: Record<string,string> = { queued:"OCR kuyruğunda", processing:"OCR işleniyor", review:"Doğrulama bekliyor", ready:"Doğrulamaya hazır", archived:"Arşivlendi", ocr_failed:"OCR hatası" };
 const riskLabels: Record<string,string> = { LOW:"Düşük risk", MEDIUM:"Orta risk", HIGH:"Yüksek risk", CRITICAL:"Kritik" };
@@ -52,6 +55,8 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const [detail,setDetail]=useState<DetailPayload|null>(null);
   const [drafts,setDrafts]=useState<Record<string,string>>({});
   const [rejections,setRejections]=useState<Record<string,boolean>>({});
+  /** Ret gerekçesi kontrollü koddur; kayda geçmeden önce burada toplanır. */
+  const [rejectionDrafts,setRejectionDrafts]=useState<Record<string,RejectionDraft>>({});
   const [additions,setAdditions]=useState<Addition[]>([]);
   const [textDrafts,setTextDrafts]=useState<Record<number,string>>({});
   const [loading,setLoading]=useState(true);
@@ -200,7 +205,11 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const saveFields=async()=>{
     if(!detail) return;
     const values=detail.fields.flatMap<ValueOperation>(value=>{
-      if(rejections[value.id]) return value.verificationStatus==="REJECTED"?[]:[{id:value.id,action:"reject"}];
+      if(rejections[value.id]) {
+        if(value.verificationStatus==="REJECTED") return [];
+        const draft=rejectionDrafts[value.id];
+        return [{id:value.id,action:"reject",reasonCode:draft?.code,reasonNote:draft?.note}];
+      }
       const draft=(drafts[value.id]??value.value).trim();
       if(draft&&draft!==value.value) return [{id:value.id,action:"correct",value:draft}];
       if(value.verificationStatus==="SUGGESTED"&&draft!==MISSING_VALUE) return [{id:value.id,action:"confirm"}];
@@ -291,6 +300,15 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const hasTextChanges=detail?.pages.some(page=>(textDrafts[page.pageNumber]??page.confirmedText??page.fullText)!==(page.confirmedText??page.fullText))??false;
   const pendingRelations=detail?.relations.filter(relation=>relation.verificationStatus==="SUGGESTED").length??0;
   // Reddedilen değer arşive girmez; onun biçimi arşivlemeyi engellemez.
+  /*
+   * Gerekçesi tamamlanmamış ret, kaydetmeyi durdurur. Sunucu zaten reddeder;
+   * burada da tutmak personelin sebebi tıkladıktan sonra değil, tıklamadan
+   * önce görmesini sağlar.
+   */
+  const incompleteRejections=detail?.fields.filter(value=>rejections[value.id]
+    &&value.verificationStatus!=="REJECTED"
+    &&(!rejectionDrafts[value.id]?.code
+      ||(rejectionDrafts[value.id]?.code===OTHER_REASON_CODE&&!rejectionDrafts[value.id]?.note.trim())))??[];
   const malformed=detail?.fields.filter(value=>value.formatViolation
     &&value.verificationStatus!=="REJECTED"&&!rejections[value.id])??[];
   const archiveBlocked=pendingValues>0||hasFieldChanges||hasAdditions||textPending
@@ -304,6 +322,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     pendingValues>0?`${pendingValues} alan değeri kontrol bekliyor`:null,
     pendingRelations>0?`${pendingRelations} varlık ilişkisi onay bekliyor`:null,
     malformed.length?`${malformed.length} değer biçim kuralına uymuyor (${[...new Set(malformed.map(value=>value.label))].join(", ")})`:null,
+    incompleteRejections.length?`${incompleteRejections.length} ret gerekçesi seçilmedi`:null,
     textPending?"OCR metni onaylanmadı":null,
     hasFieldChanges||hasAdditions?"kaydedilmemiş alan düzenlemesi var":null,
     hasTextChanges?"kaydedilmemiş metin düzenlemesi var":null,
@@ -321,7 +340,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
       <div>{needsOcr?
         canProcess?<button className="approve" onClick={process} disabled={processing}>{processing?<LoaderCircle className="spin" size={16}/>:<Play size={16}/>} OCR işlemini çalıştır</button>:<span className="archived-lock restricted"><LockKeyhole size={15}/> OCR yetkisi gerekli</span>:
         archived?<span className="archived-lock"><LockKeyhole size={15}/> Salt okunur</span>:
-        <>{canReview?<button className="outline save-fields" onClick={saveFields} disabled={saving||(!pendingValues&&!hasFieldChanges&&!hasAdditions)}>{saving?<LoaderCircle className="spin" size={15}/>:<Save size={15}/>} {pendingValues?"Alanları onayla":"Düzeltmeleri kaydet"}</button>:null}{canArchive?<button className="approve" onClick={approve} disabled={saving||savingText||archiveBlocked} title={archiveBlockers.length?`Arşivlemeden önce tamamlanmalı: ${archiveBlockers.join(", ")}.`:undefined}><CheckCircle2 size={17}/> Doğrula ve arşivle</button>:null}{!canReview&&!canArchive?<span className="archived-lock restricted"><LockKeyhole size={15}/> Görüntüleme yetkisi</span>:null}</>}
+        <>{canReview?<button className="outline save-fields" onClick={saveFields} disabled={saving||incompleteRejections.length>0||(!pendingValues&&!hasFieldChanges&&!hasAdditions)} title={incompleteRejections.length?"Reddedilen her değer için gerekçe seçilmelidir.":undefined}>{saving?<LoaderCircle className="spin" size={15}/>:<Save size={15}/>} {pendingValues?"Alanları onayla":"Düzeltmeleri kaydet"}</button>:null}{canArchive?<button className="approve" onClick={approve} disabled={saving||savingText||archiveBlocked} title={archiveBlockers.length?`Arşivlemeden önce tamamlanmalı: ${archiveBlockers.join(", ")}.`:undefined}><CheckCircle2 size={17}/> Doğrula ve arşivle</button>:null}{!canReview&&!canArchive?<span className="archived-lock restricted"><LockKeyhole size={15}/> Görüntüleme yetkisi</span>:null}</>}
       </div>
       {ocrJob&&(needsOcr||ocrJob.status==="failed")
         ?<p className={`ocr-job-note ${ocrJob.deadLettered?"blocked":""}`}>
@@ -413,8 +432,19 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
                 </small>
                 {canReview&&!archived&&group.multiValue?<div className="value-actions">
                   {rejected
-                    ?<button type="button" onClick={event=>{event.preventDefault();setRejections(current=>({...current,[valueId]:false}));}} disabled={value.verificationStatus==="REJECTED"}><RotateCcw size={12}/> Geri al</button>
-                    :<button type="button" className="value-reject" onClick={event=>{event.preventDefault();setRejections(current=>({...current,[valueId]:true}));}}><ThumbsDown size={12}/> Bu değeri reddet</button>}
+                    ?<button type="button" onClick={event=>{event.preventDefault();setRejections(current=>({...current,[valueId]:false}));setRejectionDrafts(current=>{const next={...current};delete next[valueId];return next;});}} disabled={value.verificationStatus==="REJECTED"}><RotateCcw size={12}/> Geri al</button>
+                    :<button type="button" className="value-reject" onClick={event=>{event.preventDefault();setRejections(current=>({...current,[valueId]:true}));setRejectionDrafts(current=>({...current,[valueId]:{code:"",note:""}}));}}><ThumbsDown size={12}/> Bu değeri reddet</button>}
+                </div>:null}
+                {rejections[valueId]&&value.verificationStatus!=="REJECTED"?<div className="rejection-reason">
+                  <select aria-label="Ret gerekçesi" value={rejectionDrafts[valueId]?.code??""}
+                    onChange={event=>{const code=event.target.value;setRejectionDrafts(current=>({...current,[valueId]:{code,note:current[valueId]?.note??""}}));}}>
+                    <option value="">Ret gerekçesi seçin…</option>
+                    {FIELD_REJECTION_REASONS.map(reason=><option key={reason.code} value={reason.code}>{reason.label}</option>)}
+                  </select>
+                  <input aria-label="Ret açıklaması" maxLength={300}
+                    placeholder={rejectionDrafts[valueId]?.code===OTHER_REASON_CODE?"Açıklama zorunlu":"Açıklama (isteğe bağlı)"}
+                    value={rejectionDrafts[valueId]?.note??""}
+                    onChange={event=>{const note=event.target.value;setRejectionDrafts(current=>({...current,[valueId]:{code:current[valueId]?.code??"",note}}));}}/>
                 </div>:null}
               </label>;
             })}

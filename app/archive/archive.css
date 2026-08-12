@@ -237,3 +237,10 @@
 /* Önizleme hatası, personelin yaptığı işlemin sonucunu ezmesin diye
    üst şeritte değil kendi alanında durur. */
 .preview-error{display:flex;align-items:center;gap:8px;justify-self:stretch;margin:0 0 14px;padding:10px 14px;border:1px solid color-mix(in srgb,var(--ar-amber) 30%,var(--ar-border));border-radius:7px;background:var(--ar-amber-soft);color:var(--ar-amber);font-size:10px}
+
+/* Ret gerekçesi: kontrollü kod + isteğe bağlı açıklama. */
+.rejection-reason{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;padding:9px;border:1px solid color-mix(in srgb,var(--ar-amber) 30%,var(--ar-border));border-radius:7px;background:var(--ar-amber-soft)}
+.rejection-reason select,.rejection-reason input{flex:1 1 150px;height:30px;padding:0 8px;border:1px solid var(--ar-border);border-radius:5px;background:var(--ar-surface);color:var(--ar-text);font-size:10px}
+.rejection-actions{display:flex;gap:6px;flex:1 1 100%;justify-content:flex-end}
+.rejection-actions button{height:28px;padding:0 10px;display:flex;align-items:center;gap:5px;border:1px solid var(--ar-border);border-radius:5px;background:var(--ar-surface);color:var(--ar-text);font-size:10px;font-weight:650}
+.rejection-actions button:disabled{opacity:.55;cursor:not-allowed}
