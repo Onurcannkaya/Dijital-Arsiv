@@ -226,3 +226,10 @@
 
 /* Arşivlemeyi engelleyen eksikler; devre dışı düğmenin nedenini söyler. */
 .archive-blockers{display:flex;align-items:center;gap:8px;margin:10px 0 0;padding:9px 13px;border:1px solid color-mix(in srgb,var(--ar-amber,#c2810a) 32%,transparent);background:color-mix(in srgb,var(--ar-amber,#c2810a) 9%,var(--ar-surface));border-radius:9px;color:var(--ar-amber,#c2810a);font-size:12.5px;font-weight:600}
+
+/* OCR işinin son durumu: deneme sayısı, sıradaki deneme ve son hata. */
+.ocr-job-note{display:flex;align-items:flex-start;gap:9px;margin:10px 0 0;padding:9px 13px;border:1px solid var(--ar-border);background:var(--ar-surface-2);border-radius:9px;font-size:12.5px;color:var(--ar-muted)}
+.ocr-job-note.blocked{border-color:color-mix(in srgb,var(--ar-red) 30%,transparent);background:color-mix(in srgb,var(--ar-red) 7%,var(--ar-surface));color:var(--ar-red)}
+.ocr-job-note span{display:flex;flex-direction:column;gap:3px}
+.ocr-job-note b{font-weight:650}
+.ocr-job-note small{color:var(--ar-muted);font-weight:500}
