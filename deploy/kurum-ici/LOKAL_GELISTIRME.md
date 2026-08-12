@@ -58,6 +58,36 @@ NODE
 Beklenen çıktı: `durum: QUARANTINED | SHA eşleşti: true`. Fiziksel nesne
 `data/storage/arsiv-karantina/objects/` altında görünür.
 
+## Arayüz (UI) geliştirme
+
+Arayüz Workers çalışma zamanında koşar; yerelde Miniflare emülasyonuyla
+`npm run dev` yeterlidir (Docker gerekmez):
+
+```bash
+npm run dev     # http://localhost:3000
+```
+
+İlk açılışta veritabanı boştur ve API'ler 500 döner; şema göçünü bir kez
+çalıştırın (jeton `.dev.vars` içindedir):
+
+```bash
+curl -X POST -H "authorization: Bearer $(grep '^ARCHIVE_MIGRATION_TOKEN=' .dev.vars | cut -d= -f2-)" \
+  http://localhost:3000/api/admin/migrate
+```
+
+Beklenen: `{"applied":true,"fromVersion":0,"toVersion":22}`. Ardından
+`http://localhost:3000/archive` çalışma alanını açar; yerel pilot kimliği
+otomatik yönetici olarak tanınır.
+
+**Yerel durumu sıfırlama.** `.wrangler/state/v3/d1` ve `.../r2` dizinleri
+yerel D1/R2 emülasyon verisidir. Şema hatası alıyorsanız (ör. eski bir
+sürümde kalmış veritabanı `duplicate column` üretir) bu iki dizini silip
+sunucuyu yeniden başlatın ve göçü tekrar çalıştırın.
+
+> Not: `vite.config.ts` içindeki `LOCAL_COMPATIBILITY_DATE`, kurulu workerd
+> binary'sinin desteklediği en yeni tarihtir ve YALNIZ yerel emülasyon
+> içindir; dağıtım tarihi `wrangler.jsonc`'ta kalır.
+
 ## Tarama/terfi de dahil tam hat isteniyorsa
 
 QUARANTINED sonrası ACCEPTED'a giden zincir üç Python servisini ister
