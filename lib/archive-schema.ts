@@ -41,7 +41,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 23;
+export const ARCHIVE_SCHEMA_VERSION = 24;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -463,7 +463,9 @@ const tableStatements: string[] = [
     previous_state TEXT,
     new_state TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CHECK (action IN ('user.created', 'user.updated'))
+    target_kind TEXT NOT NULL DEFAULT 'user',
+    CHECK (action IN ('user.created', 'user.updated', 'unit.created', 'unit.updated')),
+    CHECK (target_kind IN ('user', 'unit'))
   )`,
   "CREATE INDEX IF NOT EXISTS user_admin_events_target_idx ON user_admin_events (target_email, created_at)",
   "CREATE INDEX IF NOT EXISTS user_admin_events_created_idx ON user_admin_events (created_at)",
@@ -765,6 +767,39 @@ async function createUserAdminEventTable(db: D1Database) {
   for (const statement of tableStatements.filter((sql) => sql.includes("user_admin_events"))) {
     await db.prepare(statement).run();
   }
+}
+
+/**
+ * Yönetim denetim kaydı müdürlük (sözlük) olaylarını da taşır.
+ *
+ * `target_email` kolonu adı geriye dönük uyumluluk için korunur; artık genel
+ * hedef kimliğidir: kullanıcı olaylarında e-posta, müdürlük olaylarında
+ * müdürlük kodudur (`target_kind` hangisi olduğunu söyler). CHECK kısıtı
+ * SQLite'ta ALTER ile değiştirilemediğinden yeni kurulumlar genişletilmiş
+ * kısıtı alır; mevcut kurulumlarda kolon eklenir ve eski kısıt yalnız
+ * kullanıcı olaylarını sınırlar — bu yüzden müdürlük olayları için tablo
+ * yeniden oluşturulur.
+ */
+async function widenAdminEventTargets(db: D1Database) {
+  if (!(await tableExists(db, "user_admin_events"))) {
+    await createUserAdminEventTable(db);
+    return;
+  }
+  const columns = await columnNames(db, "user_admin_events");
+  if (columns.has("target_kind")) return;
+  // Denetim kaydı silinemez/değiştirilemez; taşıma için tetikleyiciler
+  // geçici olarak kaldırılır, veri kopyalanır ve yeniden kurulur.
+  await db.prepare("DROP TRIGGER IF EXISTS user_admin_events_no_update").run();
+  await db.prepare("DROP TRIGGER IF EXISTS user_admin_events_no_delete").run();
+  await db.prepare("ALTER TABLE user_admin_events RENAME TO user_admin_events_v23").run();
+  for (const statement of tableStatements.filter((sql) => sql.includes("user_admin_events"))) {
+    await db.prepare(statement).run();
+  }
+  await db.prepare(`INSERT INTO user_admin_events
+      (id, actor, target_email, action, previous_state, new_state, created_at, target_kind)
+    SELECT id, actor, target_email, action, previous_state, new_state, created_at, 'user'
+    FROM user_admin_events_v23`).run();
+  await db.prepare("DROP TABLE user_admin_events_v23").run();
 }
 
 /** F1.9 sertleştirmesi: bilet belge+sınıf bağını ve kapalı amaç kodunu taşır. */
@@ -1237,6 +1272,8 @@ const structuralMigrations: MigrationStep[] = [
   { version: 22, run: hardenAccessTicketBindings },
   // 22 → 23: kullanıcı/rol yönetimi değişmez denetim kaydı.
   { version: 23, run: createUserAdminEventTable },
+  // 23 → 24: yönetim denetim kaydı müdürlük olaylarını da taşır.
+  { version: 24, run: widenAdminEventTargets },
 ];
 
 /**
