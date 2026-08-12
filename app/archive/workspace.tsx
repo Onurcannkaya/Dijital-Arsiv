@@ -6,7 +6,7 @@ import {
   LayoutDashboard, LoaderCircle, Menu, Moon, ScanLine, Search, Settings, ShieldCheck,
   Sun, TriangleAlert, Upload, UserRound, X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DocumentReview } from "./document-review";
 import { StoredDocument, UploadDialog } from "./upload-dialog";
 
@@ -25,6 +25,17 @@ type Overview = {
 const nav = [
   ["dashboard","Genel Bakış",LayoutDashboard], ["inbox","Gelen Evrak",Files],
   ["review","Doğrulama",FileCheck2], ["archive","Dijital Arşiv",FolderArchive],
+] as const;
+
+/**
+ * Henüz uygulanmamış yönetim ekranları. Tıklanabilir görünüp hiçbir şey
+ * yapmayan kontrol, kullanıcıya sessizce yalan söyler; bunlar devre dışı
+ * bırakılıp "Yakında" olarak işaretlenir. Ekran geldiğinde buradan çıkarılır.
+ */
+const upcomingNav = [
+  ["İşlem Geçmişi", History, "Belge bazlı denetim kaydı bugün belge inceleme ekranında görülebiliyor; kurum geneli işlem geçmişi ekranı henüz yok."],
+  ["Kullanıcılar", UserRound, "Kullanıcı ve rol yönetimi ekranı henüz yok; yetkiler şimdilik yönetici e-posta listesi ve veritabanı üzerinden veriliyor."],
+  ["Ayarlar", Settings, "Kurum ayarları ekranı henüz yok."],
 ] as const;
 
 const statusLabels: Record<string,string> = { queued:"OCR kuyruğunda", processing:"İşleniyor", review:"Doğrulama", ready:"Doğrulamaya hazır", archived:"Arşivlendi", ocr_failed:"OCR hatası" };
@@ -129,6 +140,26 @@ export function ArchiveWorkspace(){
   const [overview,setOverview]=useState<Overview|null>(null);
   const [nextCursor,setNextCursor]=useState<string|null>(null);
   const [loadingMore,setLoadingMore]=useState(false);
+  const searchRef=useRef<HTMLInputElement|null>(null);
+
+  // Arama kutusunda gösterilen `Ctrl K` rozeti gerçekten çalışır: kısayol
+  // odağı aramaya taşır, Esc sorguyu temizleyip odağı bırakır.
+  useEffect(()=>{
+    const onKeyDown=(event:KeyboardEvent)=>{
+      if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){
+        event.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        return;
+      }
+      if(event.key==="Escape"&&document.activeElement===searchRef.current){
+        setQuery("");
+        searchRef.current?.blur();
+      }
+    };
+    window.addEventListener("keydown",onKeyDown);
+    return()=>window.removeEventListener("keydown",onKeyDown);
+  },[]);
 
   const searching=query.trim().length>=2;
   const statuses=viewStatuses[view];
@@ -196,7 +227,10 @@ export function ArchiveWorkspace(){
   const openDocument=(id:string)=>{setSelectedId(id);setView("review");setMobile(false)};
   const backToList=()=>{setSelectedId(null);setView("inbox");void refresh()};
 
-  return <div className={`archive-app ${dark?"dark":""}`}><aside className={`sidebar ${mobile?"open":""}`}><div className="brand"><b>SB</b><span><strong>SİVAS</strong><small>Dijital Arşiv</small></span><button onClick={()=>setMobile(false)}><X size={19}/></button></div><nav><p>ÇALIŞMA ALANI</p>{nav.map(([id,label,Icon])=><button className={view===id?"active":""} onClick={()=>go(id)} key={id}><Icon size={18}/><span>{label}</span>{id==="inbox"&&overview?.documents.total?<b>{overview.documents.total}</b>:null}{id==="review"&&reviewPending?<b>{reviewPending}</b>:null}</button>)}<p>YÖNETİM</p><button><History size={18}/><span>İşlem Geçmişi</span></button><button><UserRound size={18}/><span>Kullanıcılar</span></button><button><Settings size={18}/><span>Ayarlar</span></button></nav><footer><span>Depolanan <b>{overview?formatBytes(overview.storage.bytes):"—"}</b></span><small>{overview?`${overview.storage.objects} nesne kaydı · kapasite kotası tanımlı değil`:"Ölçülüyor"}</small><button><CircleHelp size={18}/>Yardım ve destek</button></footer></aside>{mobile&&<button className="backdrop" onClick={()=>setMobile(false)}/>}<section className="workspace"><header className="appbar"><button className="menu" onClick={()=>setMobile(true)}><Menu size={20}/></button><label className="search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Belge, muhatap, ada / parsel ara..."/><kbd>Ctrl K</kbd>{results.length>0&&<div className="results">{results.slice(0,4).map(d=><button key={d.id} onClick={()=>openDocument(d.id)}><FileSearch size={17}/><span><b>{d.title}</b><small>{d.referenceNo??d.id} · {d.parcel}{d.contentMatch?" · Tam metin eşleşmesi":""}</small></span><ChevronRight size={15}/></button>)}</div>}</label><div className="actions"><button onClick={()=>setDark(!dark)}>{dark?<Sun size={18}/>:<Moon size={18}/>}</button><button className="bell"><Bell size={18}/>{reviewPending?<i/>:null}</button><span className="avatar">{initials}</span><div><b>{user?.displayName??"Oturum bekleniyor"}</b><small>{user?.roleLabel??"Yetki doğrulanıyor"}{user&&user.unit!=="*"?` · ${user.unit}`:""}</small></div><ChevronDown size={15}/></div></header><main id="main-content" className={selectedId?"review-main":"main"}>
+  return <div className={`archive-app ${dark?"dark":""}`}><aside className={`sidebar ${mobile?"open":""}`}><div className="brand"><b>SB</b><span><strong>SİVAS</strong><small>Dijital Arşiv</small></span><button onClick={()=>setMobile(false)}><X size={19}/></button></div><nav><p>ÇALIŞMA ALANI</p>{nav.map(([id,label,Icon])=><button className={view===id?"active":""} onClick={()=>go(id)} key={id}><Icon size={18}/><span>{label}</span>{id==="inbox"&&overview?.documents.total?<b>{overview.documents.total}</b>:null}{id==="review"&&reviewPending?<b>{reviewPending}</b>:null}</button>)}<p>YÖNETİM</p>{upcomingNav.map(([label,Icon,explanation])=><button key={label} className="upcoming" disabled title={explanation}><Icon size={18}/><span>{label}</span><em>Yakında</em></button>)}</nav><footer><span>Depolanan <b>{overview?formatBytes(overview.storage.bytes):"—"}</b></span><small>{overview?`${overview.storage.objects} nesne kaydı · kapasite kotası tanımlı değil`:"Ölçülüyor"}</small><button className="upcoming" disabled title="Yardım ve destek içeriği henüz hazırlanmadı."><CircleHelp size={18}/>Yardım ve destek<em>Yakında</em></button></footer></aside>{mobile&&<button className="backdrop" onClick={()=>setMobile(false)}/>}<section className="workspace"><header className="appbar"><button className="menu" onClick={()=>setMobile(true)}><Menu size={20}/></button><label className="search"><Search size={18}/><input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Belge, muhatap, ada / parsel ara..."/><kbd>Ctrl K</kbd>{results.length>0&&<div className="results">{results.slice(0,4).map(d=><button key={d.id} onClick={()=>openDocument(d.id)}><FileSearch size={17}/><span><b>{d.title}</b><small>{d.referenceNo??d.id} · {d.parcel}{d.contentMatch?" · Tam metin eşleşmesi":""}</small></span><ChevronRight size={15}/></button>)}</div>}</label><div className="actions"><button onClick={()=>setDark(!dark)} aria-label={dark?"Aydınlık temaya geç":"Karanlık temaya geç"}>{dark?<Sun size={18}/>:<Moon size={18}/>}</button>
+    {/* Zil, bekleyen doğrulama kuyruğuna götürür; kuyruk boşken tıklanamaz. */}
+    <button className="bell" onClick={()=>go("review")} disabled={!reviewPending} title={reviewPending?`${reviewPending} belge doğrulama bekliyor`:"Doğrulama bekleyen belge yok"} aria-label={reviewPending?`${reviewPending} belge doğrulama bekliyor; kuyruğu aç`:"Doğrulama bekleyen belge yok"}><Bell size={18}/>{reviewPending?<i/>:null}</button>
+    <span className="avatar">{initials}</span><div><b>{user?.displayName??"Oturum bekleniyor"}</b><small>{user?.roleLabel??"Yetki doğrulanıyor"}{user&&user.unit!=="*"?` · ${user.unit}`:""}</small></div></div></header><main id="main-content" className={selectedId?"review-main":"main"}>
     {selectedId
       ?<DocumentReview documentId={selectedId} onBack={backToList} permissions={user?.permissions??[]}/>
       :view==="dashboard"?<Dashboard rows={rows.slice(0,5)} overview={overview} open={openDocument} onUpload={()=>setUploadOpen(true)} userName={user?.displayName??""} canUpload={canUpload}/>

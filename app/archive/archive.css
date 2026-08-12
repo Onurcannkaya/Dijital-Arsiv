@@ -149,3 +149,8 @@
 .evidence-fields select:focus{border-color:var(--ar-blue);box-shadow:0 0 0 2px color-mix(in srgb,var(--ar-blue) 15%,transparent)}
 .evidence-fields select:disabled{opacity:.82;cursor:not-allowed}
 @media(max-width:540px){.relation-grid{grid-template-columns:1fr}}
+/* Henüz uygulanmamış ekranlar: tıklanabilir görünmezler, "Yakında" taşırlar. */
+.sidebar nav button.upcoming,.sidebar footer button.upcoming{opacity:.5;cursor:not-allowed}
+.sidebar nav button.upcoming:hover,.sidebar footer button.upcoming:hover{background:transparent;color:var(--ar-sidebar-text)}
+.sidebar button.upcoming em{margin-left:auto;font-style:normal;font-size:9px;letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border:1px solid rgba(255,255,255,.22);border-radius:999px;color:#c3ccd6}
+.actions .bell:disabled{opacity:.45;cursor:default}
