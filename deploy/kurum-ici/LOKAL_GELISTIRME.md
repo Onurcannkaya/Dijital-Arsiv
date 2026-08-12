@@ -87,12 +87,22 @@ belge inceleme ekranları boş kalır. Tohum betiği bu boşluğu doldurur:
 node scripts/seed-dev-data.mjs
 ```
 
-Yedi belge yazar: arşivlenmiş (doğrulanmış alanlar ve ilişkilerle), doğrulama
+Sekiz belge yazar: arşivlenmiş (doğrulanmış alanlar ve ilişkilerle), doğrulama
 bekleyen, OCR'ı süren, kuyruktaki ve OCR'ı başarısız olan kayıtlar; OCR
 sayfaları, alan değerleri, ada/parsel varlık ilişkileri ve denetim olaylarıyla
 birlikte. Betik idempotenttir ve yalnız `.wrangler/` ya da `data/` altındaki
 geliştirme veritabanına yazar. Tohum kayıtları SİLİNMEZ — denetim olayları
 değişmezdir; temiz başlangıç için aşağıdaki sıfırlama kullanılır.
+
+> **Tohum belgelerinin fiziksel dosyası yoktur.** Betik yalnız veritabanı
+> satırı yazar; kasaya (R2/MinIO) nesne koymaz. Bu yüzden tohum bir belgesi
+> açıldığında önizleme "Güvenli görüntüleme kopyası henüz hazırlanıyor"
+> (türev nesne yok), **Aslını indir** ise "Belgenin aslı kasada bulunamadı"
+> döner. Bu bir kusur değildir: erişim bileti, kapsam denetimi ve denetim
+> kaydı doğru çalışmış, dosya sunumu kasada nesne olmadığı için durmuştur.
+> Bayt akışının uçtan uca denenmesi terfi etmiş gerçek bir belge ister; o da
+> tarama servisini, yani `docker compose` yığınını gerektirir
+> (`AYAGA_KALDIRMA.md`).
 
 **Yerel durumu sıfırlama.** `.wrangler/state/v3/d1` ve `.../r2` dizinleri
 yerel D1/R2 emülasyon verisidir. Şema hatası alıyorsanız (ör. eski bir
