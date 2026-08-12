@@ -5,6 +5,7 @@
 import { AlertTriangle, ArrowLeft, CheckCircle2, Download, FileClock, FileCog, FileText, Gauge, History, Image as ImageIcon, LoaderCircle, LockKeyhole, Play, Plus, RotateCcw, Save, ScanLine, ShieldCheck, Sparkles, ThumbsDown, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EntityRelation, EntityRelations } from "./entity-relations";
+import { auditLabels } from "./audit-labels";
 
 const MISSING_VALUE = "Belirlenmedi";
 
@@ -36,12 +37,6 @@ type Addition = { key:string; fieldName:string; value:string };
 type ValueOperation = { id:string; action:"confirm"|"correct"|"reject"; value?:string };
 
 const statusLabels: Record<string,string> = { queued:"OCR kuyruğunda", processing:"OCR işleniyor", review:"Doğrulama bekliyor", ready:"Doğrulamaya hazır", archived:"Arşivlendi", ocr_failed:"OCR hatası" };
-const auditLabels: Record<string,string> = {
-  "document.received":"Belge kabul edildi", "ocr.completed":"OCR tamamlandı", "fields.confirmed":"Alanlar doğrulandı",
-  "text.confirmed":"Tam metin onaylandı", "text.corrected":"Tam metin düzeltildi",
-  "relation.verified":"Varlık ilişkisi doğrulandı", "relation.rejected":"Varlık ilişkisi reddedildi",
-  "document.archived":"Belge arşivlendi",
-};
 const riskLabels: Record<string,string> = { LOW:"Düşük risk", MEDIUM:"Orta risk", HIGH:"Yüksek risk", CRITICAL:"Kritik" };
 const profileStatusLabels: Record<string,string> = {
   HYPOTHESIS:"Hipotez", DISCOVERED:"Gözlendi", VALIDATED:"Doğrulandı",
