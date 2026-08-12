@@ -110,6 +110,22 @@ export async function GET(request: Request) {
     const normalizedTokens = normalizeSearch(query).split(/\s+/).filter(Boolean).slice(0, 8);
     const rawTokens = query.split(/\s+/).filter(Boolean).slice(0, 8);
     const contentPattern = normalizedTokens.length ? `%${normalizedTokens.map(escapeLike).join("%")}%` : "";
+
+    /*
+     * Yalnız noktalama içeren bir sorgu (`...`, `%%`, `--`) normalleştirmede
+     * boşalır. O durumda döngü hiç çalışmaz, hiçbir süzgeç eklenmez ve liste
+     * SÜZÜLMEMİŞ haliyle döner; arayüz de bunu "sonuç" diye sunar. Memur
+     * aradığını bulduğunu sanar, oysa hiçbir şey eşleşmemiştir. Aranabilir
+     * karakter yoksa eşleşme de yoktur; sebebi arayüze bildirilir.
+     */
+    if (query.length > 0 && normalizedTokens.length === 0) {
+      return Response.json({
+        documents: [],
+        query,
+        unsearchableQuery: true,
+        page: { limit: page.limit, statuses: page.statuses, hasMore: false, nextCursor: null },
+      });
+    }
     const filters = ["(? = '*' OR d.unit = ?)"];
     const bindingsList: unknown[] = [principal.unit, principal.unit];
 

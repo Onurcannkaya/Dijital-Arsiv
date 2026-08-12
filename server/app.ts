@@ -19,6 +19,7 @@ import { Readable } from "node:stream";
 import { applyArchiveMigrations } from "../lib/archive-schema.ts";
 import { getArchiveBindings } from "../lib/archive-storage.ts";
 import { bootstrapNodeRuntime, type NodeRuntimeOptions } from "../lib/node-runtime.ts";
+import type { NodeSqliteD1 } from "../lib/node-sqlite-d1.ts";
 import { logEvent } from "../lib/observability.ts";
 import {
   CONTENT_SCAN_CRON, INTEGRITY_CRON, MAINTENANCE_CRON, OCR_CRON, runScheduledJob,
@@ -181,6 +182,14 @@ export type NodeServerOptions = {
 export type NodeServer = {
   url: string;
   server: Server;
+  /**
+   * Çalışan sunucunun veritabanı tutamacı.
+   *
+   * Testler arşiv kaydını doğrudan kurabilsin diye açılır: arama ve süzme
+   * davranışı, kabul hattının tamamını (tarama, terfi, OCR servisleri)
+   * koşturmadan gerçek rota üzerinden ölçülebilmelidir.
+   */
+  db: NodeSqliteD1;
   close(): Promise<void>;
 };
 
@@ -220,6 +229,7 @@ export async function startNodeServer(options: NodeServerOptions = {}): Promise<
   return {
     url: `http://${host}:${boundPort}`,
     server,
+    db: runtime.db,
     async close() {
       stopScheduler();
       await new Promise<void>((resolve) => server.close(() => resolve()));

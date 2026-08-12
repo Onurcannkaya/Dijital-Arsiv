@@ -105,8 +105,10 @@ function Dashboard({rows,overview,health,open,onUpload,userName,canUpload}:{rows
   </>;
 }
 
-function List({rows,title,subtitle,open,onUpload,canUpload,query,onQuery,empty,hasMore,loadingMore,onLoadMore}:{rows:DocumentRow[],title:string,subtitle:string,open:(id:string)=>void,onUpload:()=>void,canUpload:boolean,query:string,onQuery:(value:string)=>void,empty:string,hasMore:boolean,loadingMore:boolean,onLoadMore:()=>void}) {
-  return <><section className="heading"><div><p className="eyebrow">BELGE YÖNETİMİ</p><h1>{title}</h1><span>{subtitle}</span></div>{canUpload?<button className="primary" onClick={onUpload}><Upload size={17}/> Belge ekle</button>:null}</section><section className="panel list"><div className="list-tools"><label><Search size={17}/><input value={query} onChange={event=>onQuery(event.target.value)} placeholder="Belge no, üst veri veya metin içinde ara..."/></label></div>{query.length>=2?<p className="search-summary">Onaylı OCR metni, alan değerleri ve doğrulanmış varlık ilişkilerinde {rows.length} sonuç gösteriliyor{hasMore?" (daha fazlası var)":""}.</p>:null}<Table rows={rows} onOpen={open} empty={empty}/>
+function List({rows,title,subtitle,open,onUpload,canUpload,query,onQuery,empty,hasMore,loadingMore,onLoadMore,unsearchable}:{rows:DocumentRow[],title:string,subtitle:string,open:(id:string)=>void,onUpload:()=>void,canUpload:boolean,query:string,onQuery:(value:string)=>void,empty:string,hasMore:boolean,loadingMore:boolean,onLoadMore:()=>void,unsearchable:boolean}) {
+  return <><section className="heading"><div><p className="eyebrow">BELGE YÖNETİMİ</p><h1>{title}</h1><span>{subtitle}</span></div>{canUpload?<button className="primary" onClick={onUpload}><Upload size={17}/> Belge ekle</button>:null}</section><section className="panel list"><div className="list-tools"><label><Search size={17}/><input value={query} onChange={event=>onQuery(event.target.value)} placeholder="Belge no, üst veri veya metin içinde ara..."/></label></div>{query.length>=2?<p className="search-summary">{unsearchable
+      ?"Arama teriminde aranabilir karakter yok; en az bir harf ya da rakam girin."
+      :`Onaylı OCR metni, alan değerleri ve doğrulanmış varlık ilişkilerinde ${rows.length} sonuç gösteriliyor${hasMore?" (daha fazlası var)":""}.`}</p>:null}<Table rows={rows} onOpen={open} empty={empty}/>
     {/* Sonuç kümesi sunucuda sayfalanır; liste sessizce kesilmez. */}
     {hasMore?<div className="list-more"><button className="outline" onClick={onLoadMore} disabled={loadingMore}>{loadingMore?<LoaderCircle className="spin" size={15}/>:<ChevronDown size={15}/>} Daha fazla göster</button></div>:null}
   </section></>;
@@ -145,6 +147,7 @@ export function ArchiveWorkspace(){
   const [overview,setOverview]=useState<Overview|null>(null);
   const [health,setHealth]=useState<HealthChecks|null>(null);
   const [nextCursor,setNextCursor]=useState<string|null>(null);
+  const [unsearchable,setUnsearchable]=useState(false);
   const [loadingMore,setLoadingMore]=useState(false);
   const searchRef=useRef<HTMLInputElement|null>(null);
 
@@ -181,10 +184,11 @@ export function ArchiveWorkspace(){
 
   const loadList=useCallback(async(signal?:AbortSignal)=>{
     const response=await fetch(buildQuery(),{signal});
-    const payload=await response.json() as {documents?:StoredDocument[];page?:{nextCursor:string|null}};
+    const payload=await response.json() as {documents?:StoredDocument[];unsearchableQuery?:boolean;page?:{nextCursor:string|null}};
     if(!response.ok) return;
     setRows((payload.documents??[]).map(toDocumentRow));
     setNextCursor(payload.page?.nextCursor??null);
+    setUnsearchable(Boolean(payload.unsearchableQuery));
   },[buildQuery]);
 
   const loadContext=useCallback(async()=>{
@@ -258,7 +262,7 @@ export function ArchiveWorkspace(){
           :view==="review"?"Doğrulama bekleyen belge yok."
           :"Henüz arşivlenmiş belge yok."}
         open={openDocument} onUpload={()=>setUploadOpen(true)} canUpload={canUpload}
-        query={query} onQuery={setQuery}
+        query={query} onQuery={setQuery} unsearchable={unsearchable}
         hasMore={Boolean(nextCursor)} loadingMore={loadingMore} onLoadMore={loadMore}
       />}
   </main></section><UploadDialog open={uploadOpen} onClose={()=>setUploadOpen(false)} onCreated={created}/>{toast&&<div className="toast" role="status"><CheckCircle2 size={17}/><span>{toast}</span><button onClick={()=>setToast("")} aria-label="Bildirimi kapat"><X size={15}/></button></div>}</div>;
