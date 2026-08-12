@@ -22,6 +22,9 @@ import {
   setArchiveBindingsProvider,
   type NodeRuntimeAdapters,
 } from "./archive-bindings.ts";
+import { join } from "node:path";
+
+import { createLocalFsNamespace } from "./local-fs-object-storage.ts";
 import { createNodeSqliteD1, type NodeSqliteD1 } from "./node-sqlite-d1.ts";
 import {
   NodeS3DispositionStorage,
@@ -78,6 +81,25 @@ function requireEnv(env: Record<string, string | undefined>, name: string): stri
 export function bootstrapNodeRuntime(options: NodeRuntimeOptions = {}): NodeRuntime {
   const env = options.env ?? process.env;
   const db = createNodeSqliteD1({ path: options.dbPath ?? env.ARCHIVE_DB_PATH ?? "data/arsiv.db" });
+
+  // Lokal geliştirme sürücüsü: MinIO/S3 yerine yerel disk. YALNIZ dev/deneme;
+  // kabul kanıtı ve üretim daima S3/MinIO sürücüsünü kullanır.
+  if (env.ARCHIVE_STORAGE_DRIVER === "local") {
+    const root = env.ARCHIVE_LOCAL_STORAGE_DIR?.trim() || "data/storage";
+    const namespaceFor = (bucket: string | undefined) => {
+      const name = bucket?.trim();
+      return name ? createLocalFsNamespace(join(root, name)) : undefined;
+    };
+    const adapters: NodeRuntimeAdapters = {
+      db,
+      archiveFiles: createLocalFsNamespace(join(root, env.ARCHIVE_S3_BUCKET_ARCHIVE?.trim() || "arsiv-asil")),
+      derivativeFiles: namespaceFor(env.ARCHIVE_S3_BUCKET_DERIVATIVE || "arsiv-turev"),
+      temporaryFiles: namespaceFor(env.ARCHIVE_S3_BUCKET_TEMPORARY || "arsiv-gecici"),
+      quarantineFiles: namespaceFor(env.ARCHIVE_S3_BUCKET_QUARANTINE || "arsiv-karantina"),
+    };
+    setArchiveBindingsProvider(createNodeEnvBindingsProvider(adapters, env));
+    return { db, close() { setArchiveBindingsProvider(null); db.close(); } };
+  }
 
   const s3Base = {
     endpoint: requireEnv(env, "ARCHIVE_S3_ENDPOINT"),
