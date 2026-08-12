@@ -63,6 +63,14 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const [activeValueId,setActiveValueId]=useState<string|null>(null);
   const [previewMode,setPreviewMode]=useState<"image"|"text">("image");
   const [fileSrc,setFileSrc]=useState("");
+  /*
+   * Önizleme hatası kendi durumunda tutulur. Ortak `error` kullanıldığında,
+   * belge yeniden yüklendikçe arka planda çalışan önizleme isteği personelin
+   * az önce yaptığı işlemin sonucunu eziyordu: OCR'ı yeniden başlatan memur,
+   * "görüntüleme kopyası hazırlanıyor" mesajını okuyordu. Üstelik bu tam da
+   * OCR bekleyen belgelerde çakışır, çünkü onların türevi henüz yoktur.
+   */
+  const [previewError,setPreviewError]=useState("");
 
   /**
    * Dosya isteği başarısızsa sunucunun verdiği sebebi okur.
@@ -94,6 +102,9 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     let cancelled=false;
     let objectUrl="";
     (async()=>{
+      // Temizlik efekt gövdesinde değil burada: eşzamanlı setState basamaklı
+      // yeniden çizime yol açar.
+      setPreviewError("");
       try {
         const ticket=await requestTicket("VIEW");
         const response=await fetch(detail.document.fileUrl,{
@@ -105,7 +116,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
         objectUrl=URL.createObjectURL(blob);
         setFileSrc(objectUrl);
       } catch(reason) {
-        if(!cancelled) setError(reason instanceof Error?reason.message:"Belge görüntüsü alınamadı.");
+        if(!cancelled) setPreviewError(reason instanceof Error?reason.message:"Belge görüntüsü alınamadı.");
       }
     })();
     return()=>{cancelled=true;if(objectUrl) URL.revokeObjectURL(objectUrl);};
@@ -153,16 +164,36 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
 
   const process=async()=>{
     setProcessing(true);setError("");setNotice("");
+    let failureMessage:string|null=null;
     try {
       const response=await fetch(`/api/jobs/process?documentId=${encodeURIComponent(documentId)}`,{method:"POST"});
-      const payload=await response.json() as {error?:string;suggestedRelations?:number};
+      const payload=await response.json() as {error?:string;processed?:boolean;message?:string;suggestedRelations?:number};
       if(!response.ok) throw new Error(payload.error||"OCR işlemi başlatılamadı.");
-      setNotice(payload.suggestedRelations
+      /*
+       * `processed:false` da 200 döner: iş geri çekilme penceresindedir, zaten
+       * sürmektedir ya da denemeleri tükenmiştir. Bunu başarı saymak personele
+       * "OCR sonucu kaydedildi" dedirtir, oysa hiçbir şey işlenmemiştir; memur
+       * metnin neden gelmediğini arar.
+       */
+      if(payload.processed===false) setNotice(payload.message??"OCR işi bu istekle tetiklenmedi.");
+      else setNotice(payload.suggestedRelations
         ? `OCR sonucu kaydedildi; ${payload.suggestedRelations} parsel ilişkisi önerisi kontrol bekliyor.`
         : "OCR sonucu ve alan kanıtları kaydedildi.");
-      await load();
-    } catch(reason) { setError(reason instanceof Error?reason.message:"OCR işlemi başlatılamadı."); }
-    finally { setProcessing(false); }
+    } catch(reason) {
+      failureMessage=reason instanceof Error?reason.message:"OCR işlemi başlatılamadı.";
+    }
+    /*
+     * Başarısız koşu da sunucu durumunu değiştirir: deneme sayacı, iş durumu,
+     * son hata ve tekrar deneme zamanı yazılır. Yalnız başarıda yenilemek
+     * paneli bayat bırakır — memur eski deneme sayısını ve eski hatayı okur,
+     * hiçbir şey olmamış sanır ve yanlış sebebi bildirir.
+     *
+     * Hata mesajı yenilemeden SONRA yazılır: `load` kendi başlangıcında
+     * hatayı temizler ve önce yazılsaydı sessizce silinirdi.
+     */
+    await load().catch(()=>undefined);
+    if(failureMessage){setNotice("");setError(failureMessage);}
+    setProcessing(false);
   };
 
   /** Değer bazlı doğrulama isteği: onayla / düzelt / reddet ve yeni değer ekle. */
@@ -308,7 +339,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
       <aside className="thumbs">{(detail.pages.length?detail.pages:[{pageNumber:1}]).map((page,index)=><button className={index===0?"active":""} key={page.pageNumber}><span>{page.pageNumber}</span><i/></button>)}</aside>
       <section className="document">
         <div className="document-tools"><span>{detail.document.originalName}</span>{canDownload?<button className="download-original" onClick={()=>{void downloadOriginal()}} type="button"><Download size={14}/> Aslını indir</button>:null}<div className="preview-switch"><button className={previewMode==="image"?"active":""} onClick={()=>setPreviewMode("image")} aria-label="Belge görüntüsü"><ImageIcon size={15}/> Görüntü</button><button className={previewMode==="text"?"active":""} onClick={()=>setPreviewMode("text")} disabled={!detail.pages.length} aria-label="Okunabilir OCR metni"><FileText size={15}/> Okunabilir metin</button></div></div>
-        <div className="real-preview">{previewMode==="text"?<article className="ocr-transcript"><header><div><span><FileText size={17}/><b>Onaylı ve aranabilir belge metni</b><em className={textPending?"pending":"verified"}>{textPending?"Kontrol bekliyor":"Personel onaylı"}</em></span><small>Otomatik metni asıl belgeyle karşılaştırın. Kaydedilen her düzeltme sürüm ve SHA-256 denetim iziyle korunur.</small></div>{canReview&&!archived?<button className="text-confirm" onClick={saveText} disabled={savingText||(!textPending&&!hasTextChanges)}>{savingText?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {hasTextChanges?"Düzeltmeleri kaydet":"Metni onayla"}</button>:null}</header>{detail.pages.map(page=><section key={page.pageNumber}><h3><span>Sayfa {page.pageNumber}</span>{page.confirmedBy?<small>{page.confirmedBy} · {page.confirmedAt?new Date(page.confirmedAt).toLocaleString("tr-TR"):"Onaylandı"}</small>:<small>Henüz personel onayı yok</small>}</h3>{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:isImage?<div className="image-evidence"><img src={fileSrc||undefined} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&selected.box.some(value=>value>0)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}/>:null}</div>:<object data={fileSrc||undefined} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Güvenli görüntüleme kopyası bu tarayıcıda gösterilemiyor.</p></object>}</div>
+        <div className="real-preview">{previewError&&previewMode!=="text"?<p className="preview-error"><AlertTriangle size={15}/>{previewError}</p>:null}{previewMode==="text"?<article className="ocr-transcript"><header><div><span><FileText size={17}/><b>Onaylı ve aranabilir belge metni</b><em className={textPending?"pending":"verified"}>{textPending?"Kontrol bekliyor":"Personel onaylı"}</em></span><small>Otomatik metni asıl belgeyle karşılaştırın. Kaydedilen her düzeltme sürüm ve SHA-256 denetim iziyle korunur.</small></div>{canReview&&!archived?<button className="text-confirm" onClick={saveText} disabled={savingText||(!textPending&&!hasTextChanges)}>{savingText?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {hasTextChanges?"Düzeltmeleri kaydet":"Metni onayla"}</button>:null}</header>{detail.pages.map(page=><section key={page.pageNumber}><h3><span>Sayfa {page.pageNumber}</span>{page.confirmedBy?<small>{page.confirmedBy} · {page.confirmedAt?new Date(page.confirmedAt).toLocaleString("tr-TR"):"Onaylandı"}</small>:<small>Henüz personel onayı yok</small>}</h3>{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:isImage?<div className="image-evidence"><img src={fileSrc||undefined} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&selected.box.some(value=>value>0)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}/>:null}</div>:<object data={fileSrc||undefined} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Güvenli görüntüleme kopyası bu tarayıcıda gösterilemiyor.</p></object>}</div>
       </section>
       <aside className="fields">
         <header><Sparkles size={18}/><span><b>OCR alan kanıtları</b><small>{detail.fields.length?`${detail.fields.length} değer · ${detail.fieldGroups.length} alan`:"Henüz OCR sonucu yok"}</small></span><em>{detail.pages[0]?.model||"PaddleOCR"}</em></header>
