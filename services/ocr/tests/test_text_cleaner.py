@@ -1,6 +1,6 @@
 import unittest
 
-from app.text_cleaner import readable_text, search_text
+from app.text_cleaner import readable_text
 
 
 def line(text, top, bottom, left=100):
@@ -26,11 +26,12 @@ class TextCleanerTests(unittest.TestCase):
         self.assertIn("parselin imar uygulaması", result)
         self.assertNotIn("11. 09. 1996", readable_text([line("11.09.1996", 10, 35)]))
 
-    def test_search_form_is_diacritic_and_common_ocr_error_tolerant(self):
-        result = search_text("Tapu Sici1 Müdürlüğü, 1580 sayılı yasa")
+    def test_service_does_not_build_search_form(self):
+        """Aranabilir biçim uygulama katmanında üretilir; serviste ikinci bir
+        uygulama bulunmamalıdır (bkz. tests/text-search.test.ts)."""
+        from app import text_cleaner
 
-        self.assertIn("tapu sicil mudurlugu", result)
-        self.assertIn("1580 sayili yasa", result)
+        self.assertFalse(hasattr(text_cleaner, "search_text"))
 
 
 if __name__ == "__main__":

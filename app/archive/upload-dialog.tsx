@@ -41,6 +41,12 @@ type UnitOption = { code: string; label: string };
 const DEFAULT_TYPE_NAME = "Tasnif bekliyor";
 const DEFAULT_UNIT_LABEL = "Belirlenmedi";
 
+const PART_BYTES = 16 * 1024 * 1024;
+
+async function sha256Hex(blob: Blob) {
+  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -48,6 +54,7 @@ function formatBytes(bytes: number) {
 
 export function UploadDialog({ open, onClose, onCreated }: UploadDialogProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const idempotencyRef = useRef<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [documentType, setDocumentType] = useState(DEFAULT_TYPE_NAME);
   const [unit, setUnit] = useState(DEFAULT_UNIT_LABEL);
@@ -79,6 +86,7 @@ export function UploadDialog({ open, onClose, onCreated }: UploadDialogProps) {
     setPhase("idle");
     setMessage("");
     setResult(null);
+    idempotencyRef.current = crypto.randomUUID();
   };
 
   const drop = (event: DragEvent<HTMLButtonElement>) => {
@@ -103,25 +111,53 @@ export function UploadDialog({ open, onClose, onCreated }: UploadDialogProps) {
       return;
     }
     setPhase("uploading");
-    setMessage("Asıl dosya doğrulanıyor ve güvenli kasaya aktarılıyor…");
-    const body = new FormData();
-    body.set("file", file);
-    body.set("documentType", documentType);
-    body.set("unit", unit);
     try {
-      const response = await fetch("/api/documents", { method: "POST", body });
-      const payload = await response.json() as { document?: StoredDocument; duplicate?: boolean; error?: string };
-      if (response.status === 409 && payload.document) {
-        setResult(payload.document);
-        setPhase("duplicate");
-        setMessage(`Bu dosya daha önce ${payload.document.referenceNo} numarasıyla kaydedilmiş.`);
-        return;
+      const idempotencyKey = idempotencyRef.current ?? crypto.randomUUID();
+      idempotencyRef.current = idempotencyKey;
+      setMessage("Güvenli yükleme oturumu hazırlanıyor…");
+      const opened = await fetch("/api/uploads", {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
+        body: JSON.stringify({
+          originalName: file.name,
+          documentType,
+          unit,
+          byteSize: file.size,
+          mediaType: file.type || "application/octet-stream",
+        }),
+      });
+      const openedPayload = await opened.json() as { session?: { id: string; missingParts: number[]; expectedPartCount: number }; error?: string };
+      if (!opened.ok || !openedPayload.session) throw new Error(openedPayload.error || "Yükleme oturumu açılamadı.");
+      const session = openedPayload.session;
+      let uploaded = session.expectedPartCount - session.missingParts.length;
+      for (let offset = 0; offset < session.missingParts.length; offset += 4) {
+        const group = session.missingParts.slice(offset, offset + 4);
+        await Promise.all(group.map(async (partNumber) => {
+          const singlePart = session.expectedPartCount === 1;
+          const start = singlePart ? 0 : (partNumber - 1) * PART_BYTES;
+          const end = singlePart ? file.size : Math.min(start + PART_BYTES, file.size);
+          const part = file.slice(start, end);
+          const checksum = await sha256Hex(part);
+          const response = await fetch(`/api/uploads/${session.id}/parts`, {
+            method: "PUT",
+            headers: { "x-part-number": String(partNumber), "x-content-sha256": checksum },
+            body: part,
+          });
+          const payload = await response.json() as { error?: string };
+          if (!response.ok) throw new Error(payload.error || `${partNumber}. parça yüklenemedi.`);
+          uploaded += 1;
+          setMessage(`${uploaded}/${session.expectedPartCount} parça doğrulandı…`);
+        }));
       }
-      if (!response.ok || !payload.document) throw new Error(payload.error || "Belge yüklenemedi.");
-      setResult(payload.document);
+      setMessage("Parçalar tamamlandı; nesne karantina alanına aktarılıyor…");
+      const completed = await fetch(`/api/uploads/${session.id}/complete`, { method: "POST" });
+      const completedPayload = await completed.json() as { session?: { status: string }; error?: string };
+      if (!completed.ok || !completedPayload.session) throw new Error(completedPayload.error || "Yükleme tamamlanamadı.");
       setPhase("done");
-      setMessage("Asıl dosya korundu ve yerel OCR kuyruğuna alındı.");
-      onCreated(payload.document);
+      setMessage("Belge karantinaya alındı; tür ve zararlı içerik taraması bekleniyor.");
+      // Belge kaydı F1.5 terfisinde oluşur; karantina aşamasında listeye sahte bir
+      // archive_documents kaydı eklenmez.
+      void onCreated;
     } catch (error) {
       setPhase("error");
       setMessage(error instanceof Error ? error.message : "Belge yüklenemedi.");
@@ -135,7 +171,7 @@ export function UploadDialog({ open, onClose, onCreated }: UploadDialogProps) {
       <form onSubmit={submit}>
         <input ref={inputRef} className="sr-only" type="file" accept={accepted} onChange={(event) => choose(event.target.files?.item(0) ?? null)} />
         <button className={`drop-zone ${file ? "has-file" : ""}`} type="button" onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={drop}>
-          {file ? <><span className="file-symbol"><FileText size={24}/></span><span><strong>{file.name}</strong><small>{formatBytes(file.size)} · {file.type || "Dosya"}</small></span><em>Değiştir</em></> : <><span className="upload-symbol"><Upload size={24}/></span><strong>Belgeyi buraya bırakın veya seçin</strong><small>PDF, JPEG, PNG, TIFF · En fazla 25 MB</small></>}
+          {file ? <><span className="file-symbol"><FileText size={24}/></span><span><strong>{file.name}</strong><small>{formatBytes(file.size)} · {file.type || "Dosya"}</small></span><em>Değiştir</em></> : <><span className="upload-symbol"><Upload size={24}/></span><strong>Belgeyi buraya bırakın veya seçin</strong><small>PDF, JPEG, PNG, TIFF · En fazla 2 GiB</small></>}
         </button>
         <div className="upload-fields">
           <label><span>Belge türü</span><select value={documentType} onChange={(event) => setDocumentType(event.target.value)}>

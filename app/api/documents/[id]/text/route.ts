@@ -1,6 +1,6 @@
 import { prepareAuditEvent } from "../../../../../lib/audit";
 import { authorizeRequest, canAccessUnit } from "../../../../../lib/authorization";
-import { ensureArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
+import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
 import { normalizeSearch } from "../../../../../lib/text-search";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +22,8 @@ async function sha256(value: string) {
 export async function PATCH(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const bindings = getArchiveBindings();
-  await ensureArchiveSchema(bindings.DB);
+  const schemaError = await requireArchiveSchema(request, bindings.DB);
+  if (schemaError) return schemaError;
   const principal = await authorizeRequest(request, bindings.DB, "document.review", bindings.ARCHIVE_ADMIN_EMAILS);
   if (principal instanceof Response) return principal;
   const DB = bindings.DB;

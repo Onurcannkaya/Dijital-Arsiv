@@ -42,6 +42,10 @@ yarn-error.log*
 .env*
 !.env.example
 
+# Cloudflare yerel gizli değişkenleri (OCR ve göç anahtarları) — asla commit edilmez
+.dev.vars
+.dev.vars.*
+
 # vercel
 .vercel
 
@@ -52,3 +56,6 @@ next-env.d.ts
 /outputs/
 /work/
 *.tsbuildinfo
+
+# kurum içi yığın sırları
+deploy/kurum-ici/.env

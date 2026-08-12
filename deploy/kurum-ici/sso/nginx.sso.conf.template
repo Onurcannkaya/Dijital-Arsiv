@@ -1,0 +1,86 @@
+# Kurum içi port P5 — SSO'lu kimlik sınırı (nginx şablonu).
+#
+# nginx imajı bu şablonu envsubst ile /etc/nginx/conf.d/default.conf yapar;
+# tek ortam değişkeni ${ACCEPTANCE_PROXY_TOKEN} yerine konur.
+#
+# GÜVENLİK SÖZLEŞMESİ:
+#   1) Kimlik başlığını yalnız bu vekil verir; istemciden gelen oai-* ve
+#      geçit jetonu başlıkları upstream'e HİÇBİR durumda aynen geçmez.
+#   2) Normal trafik oauth2-proxy (Keycloak OIDC) doğrulamasından geçer;
+#      doğrulanmış e-posta X-Auth-Request-Email'den alınıp enjekte edilir.
+#   3) Kabul koşusu (F1.11) sentetik kimliğini yalnız X-Acceptance-Proxy-Token
+#      eşleşirse taşıyabilir. Jeton boşsa aşağıdaki map çift anahtar hatası
+#      üretir ve vekil AÇILMAZ (fail-closed); jeton yalnız staging'e dağıtılır.
+
+map $http_x_acceptance_proxy_token $kabul_gecidi {
+    default "";
+    "" "";
+    "${ACCEPTANCE_PROXY_TOKEN}" "gecerli";
+}
+
+server {
+    listen 8080;
+    server_name _;
+
+    # 2 GiB'a kadar belge kabulü: gövde diske tamponlanmadan akar.
+    client_max_body_size 2g;
+    proxy_request_buffering off;
+    proxy_http_version 1.1;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+
+    # oauth2-proxy uçları: giriş, geri dönüş, çıkış, oturum.
+    location /oauth2/ {
+        proxy_pass http://oauth2-proxy:4180;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Uri $request_uri;
+    }
+
+    location = /oauth2/auth {
+        internal;
+        proxy_pass http://oauth2-proxy:4180/oauth2/auth;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Uri $request_uri;
+        proxy_set_header Content-Length "";
+        proxy_pass_request_body off;
+    }
+
+    location / {
+        # Kabul geçidi: geçerli koşu jetonu SSO'yu atlayıp iç yola sapar.
+        if ($kabul_gecidi = "gecerli") {
+            rewrite ^ /_kabul$uri last;
+        }
+
+        auth_request /oauth2/auth;
+        auth_request_set $sso_email $upstream_http_x_auth_request_email;
+        error_page 401 = @girise_yonlendir;
+
+        # Kimlik yalnız SSO doğrulamasından; istemci başlıkları ezilir.
+        proxy_set_header oai-authenticated-user-email $sso_email;
+        proxy_set_header oai-authenticated-user-full-name "";
+        proxy_set_header oai-authenticated-user-full-name-encoding "";
+        proxy_set_header x-acceptance-proxy-token "";
+        proxy_set_header Host $host;
+        proxy_pass http://api:8788;
+    }
+
+    location @girise_yonlendir {
+        return 302 /oauth2/start?rd=$scheme://$host$request_uri;
+    }
+
+    # Kabul koşusunun iç yolu: sentetik oai-authenticated-user-email başlığı
+    # DEĞİŞTİRİLMEDEN geçer (yürütücü sözleşmesi); geçit jetonu upstream'e
+    # taşınmaz. `internal` dışarıdan doğrudan erişimi kapatır.
+    location ~ ^/_kabul(/.*)$ {
+        internal;
+        proxy_set_header oai-authenticated-user-full-name "";
+        proxy_set_header oai-authenticated-user-full-name-encoding "";
+        proxy_set_header x-acceptance-proxy-token "";
+        proxy_set_header Host $host;
+        proxy_pass http://api:8788$1$is_args$args;
+    }
+}

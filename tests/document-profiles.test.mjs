@@ -63,7 +63,7 @@ test("sözlükler OCR isteğiyle taşınır ve sürümü sonuçla saklanır", as
     read("app/api/jobs/process/route.ts"), read("lib/ocr-contract.ts"), read("services/ocr/app/main.py"),
   ]);
   assert.match(processor, /buildOcrProfile/);
-  assert.match(processor, /form\.set\("profile", JSON\.stringify\(ocrProfile\)\)/);
+  assert.match(processor, /body: JSON\.stringify\(\{[\s\S]*profile: ocrProfile/);
   assert.match(processor, /loadVocabularyTerms\(db, UNIT_VOCABULARY_CODE\)/);
   assert.match(contract, /OcrProfilePayload/);
   assert.match(contract, /vocabularyVersion/);
@@ -78,13 +78,13 @@ test("sözlükler OCR isteğiyle taşınır ve sürümü sonuçla saklanır", as
 
 test("belge türü ve müdürlük kontrollü listeye bağlı", async () => {
   const [upload, fields] = await Promise.all([
-    read("app/api/documents/route.ts"), read("app/api/documents/[id]/fields/route.ts"),
+    read("app/api/uploads/route.ts"), read("app/api/documents/[id]/fields/route.ts"),
   ]);
   // Yükleme serbest metin tür kabul etmez.
   assert.match(upload, /loadProfileByName/);
   assert.match(upload, /Belge türü yürürlükteki profiller arasında bulunamadı/);
   assert.match(upload, /Müdürlük değeri kontrollü listede bulunmuyor/);
-  assert.match(upload, /document_type_id, document_profile_version/);
+  assert.match(upload, /requestedDocumentType: profile\.name/);
   // Doğrulama sırasında tür değişikliği profil bağını da taşır.
   assert.match(fields, /yürürlükteki bir belge türü profili değil/);
   assert.match(fields, /document_type_id = \?/);

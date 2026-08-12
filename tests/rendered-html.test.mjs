@@ -6,9 +6,26 @@ test("archive workspace includes the core municipal workflow", async () => {
   const source = await readFile(new URL("../app/archive/workspace.tsx", import.meta.url), "utf8");
   assert.match(source, /Genel Bakış/);
   assert.match(source, /Gelen Evrak/);
+  assert.match(source, /Doğrulama/);
   assert.match(source, /Dijital Arşiv/);
-  assert.match(source, /Yapay zekâ çıkarımı/);
-  assert.match(source, /12-A/);
+});
+
+test("arayüz uydurma belge ve sabit gösterge değeri içermez", async () => {
+  const source = await readFile(new URL("../app/archive/workspace.tsx", import.meta.url), "utf8");
+  // Kurgusal belgeler ve kişi adları kayıt yönetim ekranında bulunmamalıdır.
+  assert.doesNotMatch(source, /seedDocs/);
+  assert.doesNotMatch(source, /YILMAZ/);
+  assert.doesNotMatch(source, /Ahmet/);
+  // Sabit metrikler, depolama kotası ve yedekleme zamanı kaldırıldı.
+  assert.doesNotMatch(source, /128\.430/);
+  assert.doesNotMatch(source, /2,8 TB/);
+  assert.doesNotMatch(source, /03:15/);
+  assert.doesNotMatch(source, /Tümü çalışıyor/);
+  assert.doesNotMatch(source, /16 Temmuz 2026/);
+  // Sayımlar gerçek uçtan gelir ve ölçülmeyenler açıkça bildirilir.
+  assert.match(source, /\/api\/overview/);
+  assert.match(source, /Henüz ölçülmüyor/);
+  assert.match(source, /kapasite kotası tanımlı değil/);
 });
 
 test("PWA shell and design tokens are present", async () => {
@@ -20,24 +37,39 @@ test("PWA shell and design tokens are present", async () => {
   assert.match(manifest, /Sivas Arşiv/);
   assert.match(css, /--ar-sidebar/);
   assert.match(css, /@media\(max-width:800px\)/);
-  assert.match(serviceWorker, /sivas-arsiv-shell-v1/);
+  assert.match(serviceWorker, /sivas-arsiv-shell-v2/);
 });
-test("durable upload pipeline protects originals and queues OCR", async () => {
-  const [route, storage, schema, hosting] = await Promise.all([
-    readFile(new URL("../app/api/documents/route.ts", import.meta.url), "utf8"),
+
+test("service worker belge içeriğini önbelleğe almaz", async () => {
+  const serviceWorker = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
+  // Önceki sürüm her GET yanıtını saklıyordu; belge baytları diskte kalıyordu.
+  assert.match(serviceWorker, /isCacheableShellRequest/);
+  assert.match(serviceWorker, /url\.pathname\.startsWith\("\/api\/"\)/);
+  assert.match(serviceWorker, /response\.type === "basic"/);
+  // Önbellek adı yükseltildi: eski önbellekte kalmış belge yanıtları silinir.
+  assert.doesNotMatch(serviceWorker, /shell-v1/);
+});
+test("resumable upload pipeline isolates untrusted bytes in quarantine", async () => {
+  const [route, parts, complete, ingest, storage, schema, config] = await Promise.all([
+    readFile(new URL("../app/api/uploads/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/uploads/[id]/parts/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/uploads/[id]/complete/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/ingest-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/archive-storage.ts", import.meta.url), "utf8"),
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
-    readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
+    readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
   ]);
-  assert.match(route, /SHA-256/);
-  assert.match(route, /ARCHIVE_FILES\.put/);
-  assert.match(route, /status:\s*409/);
-  assert.match(route, /paddleocr-local/);
-  // DDL kaynağı `lib/archive-schema.ts` dosyasına taşındı; depolama modülü onu yeniden yayar.
-  assert.match(storage, /export \{ ensureArchiveSchema/);
-  assert.match(schema, /processingJobs/);
-  assert.match(hosting, /"d1": "DB"/);
-  assert.match(hosting, /"r2": "ARCHIVE_FILES"/);
+  assert.match(route, /createUploadSession/);
+  assert.match(parts, /x-content-sha256/);
+  assert.match(complete, /completeUploadSession/);
+  assert.match(ingest, /MULTIPART_THRESHOLD_BYTES/);
+  assert.match(ingest, /quarantineKey/);
+  assert.match(ingest, /dependencies\.hasher\.sha256/);
+  assert.doesNotMatch(route + parts + complete, /ARCHIVE_FILES\.(?:put|get|delete)/);
+  assert.match(storage, /getIngestStorages/);
+  assert.match(schema, /uploadSessions/);
+  assert.match(config, /TEMPORARY_FILES/);
+  assert.match(config, /QUARANTINE_FILES/);
 });
 test("OCR evidence pipeline persists coordinates and opens the real document", async () => {
   const [processor, detailRoute, contract, review, migration] = await Promise.all([
@@ -82,9 +114,9 @@ test("personnel confirmation archives through a tamper-evident audit chain", asy
   assert.match(migration, /audit_events_no_delete/);
 });
 test("server-side roles and unit scopes protect every archive operation", async () => {
-  const [authorization, documents, detail, fileRoute, fields, approve, process, me, workspace, migration, storage] = await Promise.all([
+  const [authorization, uploads, detail, fileRoute, fields, approve, process, me, workspace, migration, storage] = await Promise.all([
     readFile(new URL("../lib/authorization.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/documents/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/uploads/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/documents/[id]/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/documents/[id]/file/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/documents/[id]/fields/route.ts", import.meta.url), "utf8"),
@@ -98,7 +130,7 @@ test("server-side roles and unit scopes protect every archive operation", async 
   assert.match(authorization, /oai-authenticated-user-email/);
   assert.match(authorization, /archive_manager/);
   assert.match(authorization, /canAccessUnit/);
-  assert.match(documents, /document\.upload/);
+  assert.match(uploads, /document\.upload/);
   assert.match(detail, /document\.read/);
   assert.match(fileRoute, /document\.read/);
   assert.match(fields, /document\.review/);
@@ -120,10 +152,11 @@ test("cleaned OCR text is searchable and reviewable", async () => {
     readFile(new URL("../drizzle/0004_fair_gravity.sql", import.meta.url), "utf8"),
   ]);
   assert.match(cleaner, /readable_text/);
-  assert.match(cleaner, /search_text/);
+  // Aranabilir biçim artık yalnız `lib/text-search.ts` içinde üretilir.
+  assert.doesNotMatch(cleaner, /^def search_text/m);
   assert.match(processor, /page\.rawText/);
-  assert.match(processor, /page\.searchText/);
-  assert.match(documents, /searchParams\.get\("q"\)/);
+  assert.match(processor, /normalizeSearch\(page\.fullText\)/);
+  assert.match(documents, /parameters\.get\("q"\)/);
   assert.match(documents, /p\.search_text LIKE/);
   assert.match(detail, /searchText:page\.search_text/);
   assert.match(review, /Okunabilir metin/);

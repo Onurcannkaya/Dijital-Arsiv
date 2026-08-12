@@ -9,7 +9,7 @@
  * değerlendirme mantığı `lib/field-policy.ts` içindedir.
  */
 
-import { DEFAULT_DOCUMENT_TYPE_CODE } from "./archive-seed";
+import { DEFAULT_DOCUMENT_TYPE_CODE } from "./archive-seed.ts";
 
 export type Cardinality = "one" | "zero_or_one" | "one_or_more" | "many";
 export type Requirement = "OPTIONAL" | "REQUIRED" | "REQUIRED_FOR_ARCHIVE";

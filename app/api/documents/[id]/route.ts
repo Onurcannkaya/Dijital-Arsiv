@@ -1,5 +1,5 @@
 import { authorizeRequest, canAccessUnit } from "../../../../lib/authorization";
-import { ensureArchiveSchema, getArchiveBindings, jsonError } from "../../../../lib/archive-storage";
+import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../lib/archive-storage";
 import { loadVocabularyTerms, resolveDocumentProfile } from "../../../../lib/document-profile";
 import { listDocumentRelations } from "../../../../lib/entities";
 import { isMultiValueField } from "../../../../lib/field-policy";
@@ -11,12 +11,13 @@ type DocumentRow = { id:string; reference_no:string; original_name:string; media
 type FieldRow = { id:string; field_name:string; value_index:number; field_value:string; normalized_value:string|null; confidence:number; risk_level:string; page_number:number; bbox_json:string; evidence_text:string; model:string; verification_status:string; origin:string; verified_by:string|null; verified_at:string|null; corrected_value:string|null; corrected_by:string|null; corrected_at:string|null };
 type PageRow = { page_number:number; width:number; height:number; raw_text:string; full_text:string; search_text:string; confirmed_text:string|null; confirmed_by:string|null; confirmed_at:string|null; words_json:string; average_confidence:number; model:string };
 type AuditRow = { event_number:number; actor:string; action:string; details_json:string; previous_hash:string|null; event_hash:string; created_at:string };
-type ObjectRow = { id:string; object_class:string; object_key:string; media_type:string; byte_size:number; sha256:string; storage_provider:string; retention_status:string; legal_hold_status:string; generator:string|null; derived_from_id:string|null; created_at:string };
+type ObjectRow = { id:string; object_class:string; media_type:string; byte_size:number; sha256:string; retention_status:string; legal_hold_status:string; generator:string|null; derived_from_id:string|null; created_at:string };
 
 export async function GET(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const bindings = getArchiveBindings();
-  await ensureArchiveSchema(bindings.DB);
+  const schemaError = await requireArchiveSchema(request, bindings.DB);
+  if (schemaError) return schemaError;
   const principal = await authorizeRequest(request, bindings.DB, "document.read", bindings.ARCHIVE_ADMIN_EMAILS);
   if (principal instanceof Response) return principal;
   const row = await bindings.DB.prepare(`SELECT id, reference_no, original_name, media_type, byte_size, sha256,
@@ -31,7 +32,7 @@ export async function GET(request: Request, context: RouteContext) {
       corrected_value, corrected_by, corrected_at FROM extracted_fields WHERE document_id = ?
       ORDER BY field_name, value_index`).bind(id).all<FieldRow>(),
     bindings.DB.prepare(`SELECT event_number, actor, action, details_json, previous_hash, event_hash, created_at FROM audit_events WHERE document_id = ? ORDER BY event_number DESC LIMIT 25`).bind(id).all<AuditRow>(),
-    bindings.DB.prepare(`SELECT id, object_class, object_key, media_type, byte_size, sha256, storage_provider,
+    bindings.DB.prepare(`SELECT id, object_class, media_type, byte_size, sha256,
       retention_status, legal_hold_status, generator, derived_from_id, created_at FROM binary_objects
       WHERE document_id = ? ORDER BY CASE object_class WHEN 'original' THEN 0 ELSE 1 END, created_at`).bind(id).all<ObjectRow>(),
     listDocumentRelations(bindings.DB, id),
@@ -118,8 +119,8 @@ export async function GET(request: Request, context: RouteContext) {
     fieldGroups,
     relations,
     objects: objects.results.map((object) => ({
-      id:object.id, objectClass:object.object_class, objectKey:object.object_key, mediaType:object.media_type,
-      byteSize:object.byte_size, sha256:object.sha256, storageProvider:object.storage_provider,
+      id:object.id, objectClass:object.object_class, mediaType:object.media_type,
+      byteSize:object.byte_size, sha256:object.sha256,
       retentionStatus:object.retention_status, legalHoldStatus:object.legal_hold_status,
       generator:object.generator, derivedFromId:object.derived_from_id, createdAt:object.created_at,
     })),

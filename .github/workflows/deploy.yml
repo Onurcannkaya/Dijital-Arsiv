@@ -1,0 +1,87 @@
+name: Faz 0 dağıtım
+
+# Faz 0 çıkış kapısı: kalite → dağıtım → deploy:verify → başarısızlıkta rollback.
+# staging main'e push'ta otomatik; production yalnız elle tetikleme ve korumalı
+# ortam onayıyla. Gerçek kaynak kimlikleri ve dağıtım kimliği korumalı ortam
+# sırlarından gelir (FAZ_0_ISLETIM_REHBERI.md).
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Dağıtım ortamı
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Aynı ortama eşzamanlı dağıtım yapılmaz; koşan dağıtım iptal edilmez.
+  group: deploy-${{ github.event.inputs.environment || 'staging' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Ortam kapısı: sırlar ve (production için) zorunlu onaylayanlar buradan gelir.
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    env:
+      DEPLOY_ENV: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 22.18.0
+          cache: npm
+      - run: npm ci
+
+      # Dağıtımdan önce tam kalite kapısı: typecheck + lint + build + test.
+      - name: Kalite kapısı
+        run: npm run verify
+
+      # Worker'ı seçili ortama yayımla. Kaynak kimlikleri Cloudflare/Sites
+      # kontrol düzleminden; repoya yazılmaz.
+      - name: Dağıt
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm run "deploy:${DEPLOY_ENV}"
+
+      # Dağıtım sonrası: şema göçünü uygula, sürümü tekrar oku, D1/nesne deposu/
+      # OCR/tarama readiness denetimlerini doğrula. Sıfır dışı dönerse iş kırmızı olur.
+      - name: Dağıtım doğrulaması
+        id: verify_deploy
+        env:
+          DEPLOY_BASE_URL: ${{ secrets.DEPLOY_BASE_URL }}
+          ARCHIVE_MIGRATION_TOKEN: ${{ secrets.ARCHIVE_MIGRATION_TOKEN }}
+        run: npm run deploy:verify
+
+      # Yalnız dağıtım başarılı olduysa ve sonraki bir adım (doğrulama) düştüyse
+      # geri al. Kalite kapısı düşerse dağıtım hiç çalışmaz ve rollback tetiklenmez.
+      # Uygulama geri alma; şema genişlet–taşı–daralt olduğu için yıkıcı değildir.
+      - name: Başarısızlıkta geri al
+        if: failure() && steps.deploy.outcome == 'success'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ROLLBACK_MESSAGE: "deploy gate failed for ${{ github.sha }}"
+        run: npm run deploy:rollback
+
+      - name: Dağıtım özeti
+        if: always()
+        env:
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          VERIFY_OUTCOME: ${{ steps.verify_deploy.outcome }}
+        run: |
+          {
+            echo "## Faz 0 dağıtım — ${DEPLOY_ENV}"
+            echo "- Dağıtım: ${DEPLOY_OUTCOME:-skipped}"
+            echo "- Doğrulama: ${VERIFY_OUTCOME:-skipped}"
+            echo "- Commit: ${GITHUB_SHA}"
+          } >> "$GITHUB_STEP_SUMMARY"

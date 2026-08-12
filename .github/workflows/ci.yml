@@ -1,0 +1,70 @@
+name: Faz 0 doğrulama
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase-zero-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover services/content-scan/tests
+      - name: Yerel sır dosyası sızıntısını reddet
+        shell: bash
+        run: |
+          if test -n "$(git ls-files '.dev.vars*' '.env*' ':(exclude).env.example')"; then
+            echo "Yerel ortam/sır dosyaları sürüm kontrolünde olmamalı" >&2
+            git ls-files '.dev.vars*' '.env*' ':(exclude).env.example'
+            exit 1
+          fi
+
+  # Kurum içi API imajı (P6): derlenebilirlik + konteyner içi açılış smoke'u.
+  # Yerel geliştirme makinesinde Docker olmayabilir; bu iş tek doğrulama kapısıdır.
+  node-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: API imajını derle
+        run: docker build -f server/Dockerfile -t sivas-arsiv-api:ci .
+      - name: Konteyner açılış smoke testi
+        shell: bash
+        run: |
+          docker run -d --name arsiv-api -p 18788:8788 \
+            -e ARCHIVE_S3_ENDPOINT=https://minio.ci.invalid \
+            -e ARCHIVE_S3_ACCESS_KEY_ID=ci \
+            -e ARCHIVE_S3_SECRET_ACCESS_KEY=ci-secret-0123456789 \
+            -e ARCHIVE_S3_BUCKET_ARCHIVE=arsiv-asil \
+            sivas-arsiv-api:ci
+          code=000
+          for _ in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18788/api/health || echo 000)
+            case "$code" in 200|503) break ;; esac
+            sleep 1
+          done
+          docker logs arsiv-api
+          echo "health: $code"
+          # 503 beklenen durumdur: dış servisler smoke ortamında yoktur.
+          case "$code" in 200|503) exit 0 ;; *) exit 1 ;; esac

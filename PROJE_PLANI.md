@@ -26,8 +26,11 @@
 
 ## Hedef mimari
 
-- **PWA:** Next.js 16, React 19, Tailwind CSS 4 tasarım tokenları.
-- **Uygulama API'si:** TypeScript tabanlı uygulama servisi; kurumsal kimlik, yetki, arama ve iş akışı.
+- **Pilot web kabuğu:** React 19 tabanlı PWA. Mevcut Vinext/Next uyumluluk katmanı
+  yalnız dikey pilot teslim aracıdır; kurumsal çekirdek mimari kararı değildir.
+- **Uygulama API'si:** Kurumsal kimlik, yetki, arama ve iş akışını taşıyan bağımsız
+  servis sınırı. Production teknoloji seçimi belediyenin işletim standartları ve
+  mimari kurul kararıyla (.NET/Java veya eşdeğer kurumsal platform) kesinleşir.
 - **OCR/AI servisi:** Python + FastAPI; PaddleOCR ana motor, gerektiğinde yerel görsel-dil modeli yedek motor.
 - **Veri:** PostgreSQL (üst veri ve iş akışı), S3 uyumlu nesne depolama (asıl ve türev dosyalar), OpenSearch/PostgreSQL full-text (arama).
 - **Kuyruk:** Redis/RabbitMQ tabanlı kalıcı görev kuyruğu.
@@ -53,13 +56,57 @@
 
 ## Yol haritası
 
+### Faz 0 — Teslim hattı ve çalışabilir omurga
+
+Geliştirme omurgasının büyük bölümü kodlandı: ADR-012 depolama soyutlaması,
+Cron Trigger tabanlı OCR/bakım/bütünlük işleri, exponential backoff ve
+dead-letter görünürlüğü, yapılandırılmış log, korelasyon kimliği, `/api/health`,
+kuyruk metrikleri, model gömülü OCR imajı, dev/staging/production ortam
+sözleşmesi ve CI kalite kapıları eklendi. Ancak canlı teslim ve kanıt kapısı
+tamamlanmadı: CI bugün yalnız doğrulama yapıyor; dağıtım, `deploy:verify` ve
+rollback adımlarının workflow'a bağlanması, OCR servisinin barındırılması,
+canlı staging dağıtımı ve uçtan uca kanıt paketi kalan çıkış işleridir.
+
+Çıkış kapısı kodun derlenmesi değildir. Staging'de bir belge yükleme → otomatik OCR
+→ doğrulama → arşivleme zinciri elle yönetim uç noktası çağrılmadan tamamlanmalı;
+dağıtım sonrası şema göçü ve readiness denetimi geçmelidir. İşletim adımları ve dış
+bağımlılıklar `FAZ_0_ISLETIM_REHBERI.md` içinde tutulur.
+
+Bu faz D1/R2/Vinext pilotunu üretim hedefi ilan etmez. Müdürlük yönetiminin
+“Next.js tabanlı kurumsal çekirdek olmayacak” kısıtı korunur; Faz 0'da kurulan
+depolama, iş kuyruğu, OCR sözleşmesi, gözlemlenebilirlik ve göç kapıları sonraki
+kurumsal servis uygulamasına taşınabilir sınırlar olarak ele alınır.
+
+### Faz 1 — Kabul hattı sağlamlaştırma
+
+Planlandı: yeniden başlatılabilir multipart kabul, izole karantina, magic-byte
+ve zararlı içerik kontrolü, koşullu asıl yazma, yazma sonrası tam SHA-256
+doğrulaması, kalıcı bütünlük/uzlaştırma bulguları, PDF erişim türevi, eski nesne
+anahtarlarının yetkili taşınması, görüntüleme bileti, görev ayrılığı, yedek geri
+yükleme ve sağlayıcı taşınabilirlik tatbikatı.
+
+F1.0 karar kapısı ADR-013–017 ve `FAZ_1_KANIT_REHBERI.md` ile
+belgelendi. Pilot sayısal profilleri teknik kabul hedefidir; kurumsal saklama
+süreleri, üretim sağlayıcısı ve KMS sahipliği yetkili birim onayı olmadan
+kesinleşmiş sayılmaz.
+
+Çıkış kapısı ve dosya/test/kanıt ayrıntıları `YOL_HARITASI_FAZLAR.md` içinde
+tutulur. Faz; S3 politikasının 12 kabul testi ve kabul hattının yedi güvenlik
+testi kanıtla geçmeden tamamlanmış sayılmaz.
+
 ### Aşama 1 — Çalışan ürün kabuğu
 
 Tamamlandı: responsive PWA kabuğu, genel bakış, gelen evrak, arşiv listesi, arama ve belge doğrulama prototipi.
 
 ### Aşama 2 — Dikey pilot
 
-Tamamlandı: gerçek dosya yükleme, SHA-256 tekrar/bütünlük kontrolü, D1 üst verisi, R2 asıl dosya kasası, kalıcı `paddleocr-local` kuyruğu, PaddleOCR/FastAPI işleyicisi, alan kanıtlarının koordinat ve güvenle saklanması, personel düzeltme/onayı, kontrollü arşivleme ve SHA-256 zincirli değiştirilemez denetim izi. Sırada kurumsal kimlik/rol yetkileri ve gerçek pilot belge setiyle doğruluk-hız ölçümü var.
+Tamamlandı: gerçek dosya yükleme, yükleme anında SHA-256 tekrar kontrolü, D1 üst
+verisi, R2 asıl dosya kasası, metadata tabanlı bütünlük taraması iskeleti,
+kalıcı `paddleocr-local` kuyruğu, PaddleOCR/FastAPI işleyicisi, alan kanıtlarının
+koordinat ve güvenle saklanması, personel düzeltme/onayı, kontrollü arşivleme ve
+SHA-256 zincirli değiştirilemez denetim izi. Uygulama rolleri ve müdürlük
+kapsamı eklendi; sırada gerçek pilot belge setiyle doğruluk-hız ölçümü ve Faz 1
+tam dosya bütünlüğü kontrolleri var.
 
 ### Aşama 3 — Kurumsal güvenlik
 

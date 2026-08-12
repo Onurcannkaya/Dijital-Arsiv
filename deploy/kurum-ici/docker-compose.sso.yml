@@ -1,0 +1,66 @@
+# Kurum içi port P5 — SSO kaplaması (oauth2-proxy + Keycloak).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.sso.yml up -d --build
+#
+# Gerektirir: docker compose >= 2.24 (`!override` birleştirme etiketi).
+#
+# - `proxy` servisi SSO'lu nginx şablonuyla değiştirilir: kimlik başlığını
+#   yalnız oauth2-proxy doğrulaması verir; kabul koşusu jetonlu geçitten geçer.
+# - `oauth2-proxy` kurumun Keycloak'ına (ya da OIDC sunan başka kimlik
+#   sağlayıcısına) bağlanır; SSO_ISSUER_URL .env'de tanımlanır.
+# - `keycloak` YALNIZ pilot/deneme içindir ve `--profile kimlik-yerel` ile
+#   açılır; kurumda mevcut Keycloak/AD varsa bu profil hiç başlatılmaz.
+
+name: sivas-arsiv
+
+services:
+  proxy:
+    depends_on:
+      - api
+      - oauth2-proxy
+    volumes: !override
+      - ./sso/nginx.sso.conf.template:/etc/nginx/templates/default.conf.template:ro
+    environment:
+      # >= 32 karakter zorunlu; boş değer nginx yapılandırma üretimini bozar
+      # (bilinçli fail-closed) ve vekil hiç açılmaz.
+      ACCEPTANCE_PROXY_TOKEN: ${ACCEPTANCE_PROXY_TOKEN:?}
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    environment:
+      OAUTH2_PROXY_PROVIDER: keycloak-oidc
+      OAUTH2_PROXY_OIDC_ISSUER_URL: ${SSO_ISSUER_URL:?}      # ör. https://kimlik.sivas.bel.tr/realms/sivas-arsiv
+      OAUTH2_PROXY_CLIENT_ID: ${SSO_CLIENT_ID:-arsiv-vekil}
+      OAUTH2_PROXY_CLIENT_SECRET: ${SSO_CLIENT_SECRET:?}
+      OAUTH2_PROXY_COOKIE_SECRET: ${SSO_COOKIE_SECRET:?}     # openssl rand -base64 32 | tr -- '+/' '-_'
+      OAUTH2_PROXY_REDIRECT_URL: ${SSO_REDIRECT_URL:?}       # https://arsiv.sivas.bel.tr/oauth2/callback
+      OAUTH2_PROXY_EMAIL_DOMAINS: ${SSO_EMAIL_DOMAINS:-sivas.bel.tr}
+      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+      OAUTH2_PROXY_REVERSE_PROXY: "true"
+      OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
+      OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
+      OAUTH2_PROXY_COOKIE_SAMESITE: lax
+      # TLS'siz pilot denemesinde "false" yapılabilir; üretimde true kalır.
+      OAUTH2_PROXY_COOKIE_SECURE: ${SSO_COOKIE_SECURE:-true}
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+    networks: [arsiv-ic]
+
+  # Pilot Keycloak — yalnız `--profile kimlik-yerel` ile açılır. Kurumsal
+  # kurulum: mevcut Keycloak'a sso/keycloak/sivas-arsiv-realm.json içe
+  # aktarılır ve AD/LDAP federasyonu bağlanır (sso/README.md).
+  keycloak:
+    profiles: [kimlik-yerel]
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm", "--http-port=8081"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:?}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?}
+    volumes:
+      - ./sso/keycloak:/opt/keycloak/data/import:ro
+      - keycloak-veri:/opt/keycloak/data/h2
+    ports:
+      - "${KEYCLOAK_PORT:-8081}:8081"
+    networks: [arsiv-ic]
+
+volumes:
+  keycloak-veri:

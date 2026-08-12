@@ -22,6 +22,29 @@ async function sha256(value: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * Denetim olayını tek başına yazar.
+ *
+ * Zincir belge başına sıralıdır (`event_number = max + 1`), bu yüzden aynı belge
+ * üzerinde eşzamanlı iki görüntüleme aynı sıra numarasını almaya çalışabilir ve
+ * tekil indeks bunu reddeder. Sınırlı sayıda yeniden denenir; zincirin sıralı
+ * yapısı korunur. Toplu işlem içinde yazılacak olaylar için `prepareAuditEvent`
+ * kullanılır.
+ */
+export async function writeAuditEvent(db: D1Database, input: AuditInput, attempts = 4) {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const event = await prepareAuditEvent(db, input);
+    try {
+      await event.statement.run();
+      return event;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Denetim olayı yazılamadı.");
+}
+
 export async function prepareAuditEvent(db: D1Database, input: AuditInput) {
   const head = await db.prepare(`SELECT event_number, event_hash FROM audit_events
     WHERE document_id = ? ORDER BY event_number DESC LIMIT 1`).bind(input.documentId).first<AuditHead>();

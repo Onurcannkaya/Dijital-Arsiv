@@ -15,6 +15,15 @@ def grouped(fields):
     return pairs
 
 
+# Müdürlük ve belge türü sözlükleri uygulamadan gelir; servis kendi listesini tutmaz.
+PROFILE = {
+    "profileVersion": "1.0",
+    "vocabularyVersion": "1.0",
+    "units": ["İmar ve Şehircilik Müdürlüğü", "İtfaiye Müdürlüğü"],
+    "documentTypes": [{"name": "Encümen karar sureti", "markers": ["ENCÜMEN KARAR"]}],
+}
+
+
 class ExtractorTests(unittest.TestCase):
     def test_extracts_parcel_suffix_and_evidence_box(self):
         pages = [{"pageNumber": 1, "words": [
@@ -22,12 +31,32 @@ class ExtractorTests(unittest.TestCase):
             {"text": "İlgilisi: AHMET YILMAZ", "confidence": 0.88, "box": [10, 70, 250, 95]},
             {"text": "İmar ve Şehircilik Müdürlüğü", "confidence": 0.97, "box": [10, 110, 330, 140]},
         ]}]
-        fields = extract_fields(pages)
+        fields = extract_fields(pages, PROFILE)
         by_name = {field["name"]: field for field in fields}
         self.assertEqual(values(fields, "ada"), ["1847"])
         self.assertEqual(values(fields, "parcel"), ["12/A"])
         self.assertEqual(by_name["parcel"]["box"], [10, 20, 410, 55])
         self.assertEqual(by_name["unit"]["value"], "İmar ve Şehircilik Müdürlüğü")
+
+    def test_without_profile_no_vocabulary_is_invented(self):
+        """Sözlük gönderilmezse müdürlük ve belge türü çıkarılmaz.
+
+        PROJE_PLANI.md 8. maddesi: sözlük koda gömülmez. Servis eksik sözlüğü
+        kendi listesiyle tamamlamaz; alan boş kalır ve personel girişine düşer.
+        """
+        pages = [{"pageNumber": 1, "words": [
+            {"text": "İmar ve Şehircilik Müdürlüğü ENCÜMEN KARARI", "confidence": 0.96, "box": [0, 0, 400, 30]},
+        ]}]
+        fields = extract_fields(pages)
+        self.assertEqual(values(fields, "unit"), [])
+        self.assertEqual(values(fields, "document_type"), [])
+
+    def test_document_type_comes_from_supplied_markers(self):
+        pages = [{"pageNumber": 1, "words": [
+            {"text": "ENCÜMEN KARARI SURETİ", "confidence": 0.94, "box": [0, 0, 300, 30]},
+        ]}]
+        fields = extract_fields(pages, PROFILE)
+        self.assertEqual(values(fields, "document_type"), ["Encümen karar sureti"])
 
     def test_service_does_not_decide_review_policy(self):
         """Risk ve doğrulama zorunluluğu uygulama katmanının alan politikasına aittir."""

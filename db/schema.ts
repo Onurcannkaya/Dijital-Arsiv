@@ -4,9 +4,11 @@ import { check, index, integer, real, sqliteTable, text, uniqueIndex } from "dri
 /**
  * Drizzle şema aynası.
  *
- * Çalışma zamanı DDL kaynağı `lib/archive-schema.ts` dosyasıdır; bu dosya tip
- * üretimi ve `drizzle/` göç dosyaları içindir. İki tanımın aynı tabloları
- * içermesi `tests/schema-contract.test.mjs` ile denetlenir.
+ * Yetkili DDL kaynağı `lib/archive-schema.ts` dosyasıdır. Bu dosya yalnız tip
+ * tanımı ve kısıt niyetinin okunabilir kaydıdır; hiçbir sorgu buradan üretilmez
+ * (`db/index.ts` içindeki Drizzle istemcisi kullanılmıyor). İki tanımın kolon
+ * düzeyinde ayrışması `tests/schema-contract.test.ts` ile engellenir: bir tabloya
+ * kolon eklerken **her iki dosya** güncellenmelidir.
  */
 
 export const archiveDocuments = sqliteTable("archive_documents", {
@@ -26,10 +28,11 @@ export const archiveDocuments = sqliteTable("archive_documents", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
-  uniqueIndex("archive_documents_sha256_unique").on(table.sha256),
   index("archive_documents_status_idx").on(table.status),
   index("archive_documents_created_at_idx").on(table.createdAt),
   index("archive_documents_profile_idx").on(table.documentTypeId),
+  index("archive_documents_created_id_idx").on(table.createdAt, table.id),
+  index("archive_documents_status_created_id_idx").on(table.status, table.createdAt, table.id),
 ]);
 
 /** VERI_SOZLUGU.md §13: kontrollü sözlükler. */
@@ -128,10 +131,14 @@ export const binaryObjects = sqliteTable("binary_objects", {
   generator: text("generator"),
   retentionStatus: text("retention_status").notNull().default("ACTIVE"),
   legalHoldStatus: text("legal_hold_status").notNull().default("NONE"),
+  pageStart: integer("page_start"),
+  pageEnd: integer("page_end"),
+  derivativeGenerationId: text("derivative_generation_id"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   index("binary_objects_document_class_idx").on(table.documentId, table.objectClass),
   index("binary_objects_sha256_idx").on(table.sha256),
+  index("binary_objects_generation_idx").on(table.derivativeGenerationId, table.pageStart),
   uniqueIndex("binary_objects_single_original_unique").on(table.documentId).where(sql`object_class = 'original'`),
   check("binary_objects_class_check", sql`${table.objectClass} IN ('original', 'access', 'ocr', 'preservation', 'thumbnail', 'quarantine', 'temporary')`),
   check("binary_objects_retention_check", sql`${table.retentionStatus} IN ('ACTIVE', 'RETENTION_REVIEW', 'DISPOSED')`),
@@ -149,10 +156,14 @@ export const processingJobs = sqliteTable("processing_jobs", {
   maxAttempts: integer("max_attempts").notNull().default(3),
   model: text("model").notNull().default("paddleocr-local"),
   errorMessage: text("error_message"),
+  nextAttemptAt: text("next_attempt_at"),
+  lastAttemptAt: text("last_attempt_at"),
+  deadLetteredAt: text("dead_lettered_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   index("processing_jobs_status_created_idx").on(table.status, table.createdAt),
+  index("processing_jobs_schedule_idx").on(table.status, table.nextAttemptAt, table.createdAt),
   index("processing_jobs_document_idx").on(table.documentId),
 ]);
 
@@ -378,9 +389,433 @@ export const archiveUsers = sqliteTable("archive_users", {
   index("archive_users_unit_idx").on(table.unit),
 ]);
 
+/**
+ * Uzun süren bakım işleri (arama dizini yenilemesi gibi). Bütün arşivi dolaşan
+ * iş göç adımının içinde çalıştırılmaz; kilitli ve imleçli olarak dilimlenir.
+ */
+export const maintenanceTasks = sqliteTable("maintenance_tasks", {
+  id: text("id").primaryKey(),
+  status: text("status").notNull().default("PENDING"),
+  cursor: text("cursor"),
+  processed: integer("processed").notNull().default(0),
+  total: integer("total"),
+  lockedUntil: text("locked_until"),
+  leaseToken: text("lease_token"),
+  lastError: text("last_error"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("maintenance_tasks_status_idx").on(table.status),
+  check("maintenance_tasks_status_check", sql`${table.status} IN ('PENDING', 'RUNNING', 'DONE', 'FAILED')`),
+  check("maintenance_tasks_processed_check", sql`${table.processed} >= 0`),
+]);
+
 /** `lib/archive-schema.ts` sürüm kapısı tablosu. */
 export const schemaState = sqliteTable("schema_state", {
   id: text("id").primaryKey(),
   version: integer("version").notNull(),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+/** Faz 1 kabul hattı — `lib/ingest-schema.ts` DDL tanımının Drizzle tip aynası. */
+export const uploadSessions = sqliteTable("upload_sessions", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default("default"),
+  userId: text("user_id").notNull(),
+  unit: text("unit").notNull(),
+  originalName: text("original_name").notNull(),
+  requestedDocumentType: text("requested_document_type").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  status: text("status").notNull().default("CREATED"),
+  stateVersion: integer("state_version").notNull().default(0),
+  inFlightParts: integer("in_flight_parts").notNull().default(0),
+  partsLeaseExpiresAt: text("parts_lease_expires_at"),
+  expectedByteSize: integer("expected_byte_size").notNull(),
+  uploadedByteSize: integer("uploaded_byte_size").notNull().default(0),
+  declaredMediaType: text("declared_media_type").notNull(),
+  detectedMediaType: text("detected_media_type"),
+  providerUploadToken: text("provider_upload_token"),
+  duplicateOfDocumentId: text("duplicate_of_document_id").references(() => archiveDocuments.id),
+  failureCode: text("failure_code"),
+  operatorRetryReason: text("operator_retry_reason"),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("upload_sessions_idempotency_unique").on(table.tenantId, table.userId, table.idempotencyKey),
+  index("upload_sessions_status_expiry_idx").on(table.status, table.expiresAt),
+  check("upload_sessions_status_check", sql`${table.status} IN ('CREATED', 'UPLOADING', 'QUARANTINED', 'SCANNING', 'VERIFIED', 'PROMOTING', 'ACCEPTED', 'REJECTED', 'DUPLICATE', 'EXPIRED', 'FAILED')`),
+  check("upload_sessions_state_version_check", sql`${table.stateVersion} >= 0`),
+  check("upload_sessions_in_flight_check", sql`${table.inFlightParts} BETWEEN 0 AND 4`),
+  check("upload_sessions_expected_size_check", sql`${table.expectedByteSize} BETWEEN 1 AND 2147483648`),
+  check("upload_sessions_uploaded_size_check", sql`${table.uploadedByteSize} BETWEEN 0 AND ${table.expectedByteSize}`),
+  check("upload_sessions_duplicate_check", sql`(${table.status} = 'DUPLICATE' AND ${table.duplicateOfDocumentId} IS NOT NULL) OR ${table.status} <> 'DUPLICATE'`),
+]);
+
+export const uploadParts = sqliteTable("upload_parts", {
+  id: text("id").primaryKey(),
+  uploadSessionId: text("upload_session_id").notNull().references(() => uploadSessions.id, { onDelete: "cascade" }),
+  partNumber: integer("part_number").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  checksumSha256: text("checksum_sha256").notNull(),
+  providerPartToken: text("provider_part_token").notNull(),
+  status: text("status").notNull().default("UPLOADED"),
+  attemptCount: integer("attempt_count").notNull().default(1),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("upload_parts_session_number_unique").on(table.uploadSessionId, table.partNumber),
+  index("upload_parts_session_status_idx").on(table.uploadSessionId, table.status),
+  check("upload_parts_number_check", sql`${table.partNumber} BETWEEN 1 AND 10000`),
+  check("upload_parts_size_check", sql`${table.byteSize} > 0`),
+  check("upload_parts_checksum_check", sql`length(${table.checksumSha256}) = 64`),
+  check("upload_parts_status_check", sql`${table.status} IN ('UPLOADED', 'VERIFIED', 'REPLACED', 'FAILED')`),
+  check("upload_parts_attempt_check", sql`${table.attemptCount} >= 1`),
+]);
+
+export const uploadPartLeases = sqliteTable("upload_part_leases", {
+  id: text("id").primaryKey(),
+  uploadSessionId: text("upload_session_id").notNull().references(() => uploadSessions.id, { onDelete: "cascade" }),
+  partNumber: integer("part_number").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("upload_part_leases_session_part_unique").on(table.uploadSessionId, table.partNumber),
+  index("upload_part_leases_session_expiry_idx").on(table.uploadSessionId, table.expiresAt),
+  check("upload_part_leases_number_check", sql`${table.partNumber} BETWEEN 1 AND 10000`),
+]);
+
+export const ingestObjects = sqliteTable("ingest_objects", {
+  id: text("id").primaryKey(),
+  uploadSessionId: text("upload_session_id").notNull().references(() => uploadSessions.id, { onDelete: "cascade" }),
+  objectClass: text("object_class").notNull(),
+  objectKey: text("object_key").notNull().unique(),
+  storageProvider: text("storage_provider").notNull(),
+  bucketOrNamespace: text("bucket_or_namespace").notNull(),
+  storageVersionId: text("storage_version_id"),
+  providerEtag: text("provider_etag"),
+  mediaType: text("media_type").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  sha256: text("sha256"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  deletedAt: text("deleted_at"),
+}, (table) => [
+  uniqueIndex("ingest_objects_session_class_unique").on(table.uploadSessionId, table.objectClass).where(sql`deleted_at IS NULL`),
+  index("ingest_objects_class_created_idx").on(table.objectClass, table.createdAt),
+  check("ingest_objects_class_check", sql`${table.objectClass} IN ('temporary', 'quarantine')`),
+  check("ingest_objects_size_check", sql`${table.byteSize} >= 0`),
+  check("ingest_objects_hash_check", sql`${table.sha256} IS NULL OR length(${table.sha256}) = 64`),
+]);
+
+export const ingestReceipts = sqliteTable("ingest_receipts", {
+  id: text("id").primaryKey(),
+  uploadSessionId: text("upload_session_id").notNull().references(() => uploadSessions.id, { onDelete: "cascade" }),
+  result: text("result").notNull(),
+  sha256: text("sha256").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  declaredMediaType: text("declared_media_type").notNull(),
+  detectedMediaType: text("detected_media_type").notNull(),
+  typeValidationResult: text("type_validation_result").notNull(),
+  parserName: text("parser_name").notNull(),
+  parserVersion: text("parser_version").notNull(),
+  parserResult: text("parser_result").notNull(),
+  scannerEngine: text("scanner_engine").notNull(),
+  scannerVersion: text("scanner_version").notNull(),
+  scannerSignatureVersion: text("scanner_signature_version").notNull(),
+  scannerResult: text("scanner_result").notNull(),
+  vaultStorageVersionId: text("vault_storage_version_id"),
+  vaultSha256: text("vault_sha256"),
+  verifiedAt: text("verified_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("ingest_receipts_session_verified_unique").on(table.uploadSessionId).where(sql`result = 'VERIFIED'`),
+  index("ingest_receipts_result_created_idx").on(table.result, table.createdAt),
+  check("ingest_receipts_result_check", sql`${table.result} IN ('VERIFIED', 'REJECTED', 'FAILED')`),
+  check("ingest_receipts_hash_check", sql`length(${table.sha256}) = 64`),
+  check("ingest_receipts_size_check", sql`${table.byteSize} > 0`),
+  check("ingest_receipts_type_check", sql`${table.typeValidationResult} IN ('MATCH', 'MISMATCH', 'UNSUPPORTED')`),
+  check("ingest_receipts_parser_check", sql`${table.parserResult} IN ('VALID', 'INVALID', 'ERROR')`),
+  check("ingest_receipts_scanner_check", sql`${table.scannerResult} IN ('CLEAN', 'MALICIOUS', 'ERROR')`),
+  check("ingest_receipts_vault_hash_check", sql`${table.vaultSha256} IS NULL OR length(${table.vaultSha256}) = 64`),
+]);
+
+export const contentScanJobs = sqliteTable("content_scan_jobs", {
+  id: text("id").primaryKey(),
+  uploadSessionId: text("upload_session_id").notNull().unique().references(() => uploadSessions.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("QUEUED"),
+  attempt: integer("attempt").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  nextAttemptAt: text("next_attempt_at"),
+  leaseToken: text("lease_token"),
+  leaseExpiresAt: text("lease_expires_at"),
+  lastError: text("last_error"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("content_scan_jobs_claim_idx").on(table.status, table.nextAttemptAt, table.leaseExpiresAt, table.createdAt),
+  check("content_scan_jobs_status_check", sql`${table.status} IN ('QUEUED', 'SCANNING', 'RETRY', 'COMPLETED', 'FAILED')`),
+  check("content_scan_jobs_attempt_check", sql`${table.attempt} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 20`),
+]);
+
+
+export const promotionJobs = sqliteTable("promotion_jobs", {
+  id: text("id").primaryKey(),
+  uploadSessionId: text("upload_session_id").notNull().unique().references(() => uploadSessions.id, { onDelete: "cascade" }),
+  ingestReceiptId: text("ingest_receipt_id").notNull().references(() => ingestReceipts.id),
+  documentId: text("document_id").notNull().unique(),
+  binaryObjectId: text("binary_object_id").notNull().unique(),
+  targetObjectKey: text("target_object_key").notNull().unique(),
+  sha256: text("sha256").notNull(),
+  status: text("status").notNull().default("QUEUED"),
+  attempt: integer("attempt").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  nextAttemptAt: text("next_attempt_at"),
+  leaseToken: text("lease_token"),
+  leaseExpiresAt: text("lease_expires_at"),
+  lastError: text("last_error"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("promotion_jobs_claim_idx").on(table.status, table.nextAttemptAt, table.leaseExpiresAt, table.createdAt),
+  uniqueIndex("promotion_jobs_active_sha_unique").on(table.sha256).where(sql`status <> 'FAILED'`),
+  check("promotion_jobs_hash_check", sql`length(${table.sha256}) = 64`),
+  check("promotion_jobs_status_check", sql`${table.status} IN ('QUEUED', 'PROMOTING', 'RETRY', 'COMPLETED', 'FAILED')`),
+  check("promotion_jobs_attempt_check", sql`${table.attempt} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 20`),
+]);
+
+/** F1.7 — `lib/ingest-schema.ts` PDF erişim türevi işi tanımının tip aynası. */
+export const derivativeJobs = sqliteTable("derivative_jobs", {
+  id: text("id").primaryKey(),
+  documentId: text("document_id").notNull().references(() => archiveDocuments.id, { onDelete: "cascade" }),
+  sourceBinaryObjectId: text("source_binary_object_id").notNull().references(() => binaryObjects.id),
+  profileVersion: text("profile_version").notNull().default("access-pdf-v1"),
+  status: text("status").notNull().default("QUEUED"),
+  attempt: integer("attempt").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  nextAttemptAt: text("next_attempt_at"),
+  leaseToken: text("lease_token"),
+  leaseExpiresAt: text("lease_expires_at"),
+  failureCode: text("failure_code"),
+  lastError: text("last_error"),
+  renderer: text("renderer"),
+  rendererVersion: text("renderer_version"),
+  rendererImageDigest: text("renderer_image_digest"),
+  pageCount: integer("page_count"),
+  segmentCount: integer("segment_count"),
+  completedAt: text("completed_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("derivative_jobs_claim_idx").on(table.status, table.nextAttemptAt, table.leaseExpiresAt, table.createdAt),
+  uniqueIndex("derivative_jobs_document_profile_unique").on(table.documentId, table.profileVersion),
+  check("derivative_jobs_status_check", sql`${table.status} IN ('QUEUED', 'RENDERING', 'RETRY', 'COMPLETED', 'REVIEW_REQUIRED', 'FAILED')`),
+  check("derivative_jobs_attempt_check", sql`${table.attempt} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 20`),
+]);
+
+/** F1.8 — `lib/ingest-schema.ts` eski anahtar taşıma envanterinin tip aynası. */
+export const legacyKeyMigrations = sqliteTable("legacy_key_migrations", {
+  id: text("id").primaryKey(),
+  binaryObjectId: text("binary_object_id").notNull().unique().references(() => binaryObjects.id),
+  documentId: text("document_id").notNull().references(() => archiveDocuments.id, { onDelete: "cascade" }),
+  objectClass: text("object_class").notNull(),
+  bucketOrNamespace: text("bucket_or_namespace").notNull(),
+  sourceObjectKey: text("source_object_key").notNull().unique(),
+  targetObjectKey: text("target_object_key").notNull().unique(),
+  maskedKeyPattern: text("masked_key_pattern").notNull(),
+  classificationJson: text("classification_json").notNull(),
+  metadataFindingsJson: text("metadata_findings_json"),
+  sourceSha256: text("source_sha256").notNull(),
+  targetSha256: text("target_sha256"),
+  status: text("status").notNull().default("QUEUED"),
+  attempt: integer("attempt").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(5),
+  nextAttemptAt: text("next_attempt_at"),
+  leaseToken: text("lease_token"),
+  leaseExpiresAt: text("lease_expires_at"),
+  failureCode: text("failure_code"),
+  lastError: text("last_error"),
+  verifiedAt: text("verified_at"),
+  completedAt: text("completed_at"),
+  sourceRetireAfter: text("source_retire_after"),
+  sourceDisposedAt: text("source_disposed_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("legacy_key_migrations_claim_idx").on(table.status, table.nextAttemptAt, table.leaseExpiresAt, table.createdAt),
+  check("legacy_key_migrations_status_check", sql`${table.status} IN ('QUEUED', 'COPYING', 'RETRY', 'COMPLETED', 'FAILED')`),
+  check("legacy_key_migrations_source_sha_check", sql`length(${table.sourceSha256}) = 64`),
+  check("legacy_key_migrations_target_sha_check", sql`${table.targetSha256} IS NULL OR length(${table.targetSha256}) = 64`),
+  check("legacy_key_migrations_attempt_check", sql`${table.attempt} >= 0 AND ${table.maxAttempts} BETWEEN 1 AND 20`),
+]);
+
+export const promotionReceipts = sqliteTable("promotion_receipts", {
+  id: text("id").primaryKey(),
+  promotionJobId: text("promotion_job_id").notNull().references(() => promotionJobs.id),
+  leaseToken: text("lease_token").notNull(),
+  uploadSessionId: text("upload_session_id").notNull().references(() => uploadSessions.id, { onDelete: "cascade" }),
+  ingestReceiptId: text("ingest_receipt_id").notNull().references(() => ingestReceipts.id),
+  result: text("result").notNull(),
+  documentId: text("document_id").references(() => archiveDocuments.id),
+  binaryObjectId: text("binary_object_id").references(() => binaryObjects.id),
+  sourceObjectKey: text("source_object_key").notNull(),
+  targetObjectKey: text("target_object_key").notNull(),
+  quarantineSha256: text("quarantine_sha256").notNull(),
+  vaultSha256: text("vault_sha256"),
+  expectedByteSize: integer("expected_byte_size").notNull(),
+  vaultByteSize: integer("vault_byte_size"),
+  vaultStorageVersionId: text("vault_storage_version_id"),
+  providerEtag: text("provider_etag"),
+  providerChecksumSha256: text("provider_checksum_sha256"),
+  encryptionStatus: text("encryption_status").notNull().default("provider-managed"),
+  failureCode: text("failure_code"),
+  failureMessage: text("failure_message"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("promotion_receipts_job_verified_unique").on(table.promotionJobId).where(sql`result = 'VERIFIED'`),
+  index("promotion_receipts_session_created_idx").on(table.uploadSessionId, table.createdAt),
+  check("promotion_receipts_result_check", sql`${table.result} IN ('VERIFIED', 'FAILED')`),
+  check("promotion_receipts_lease_check", sql`length(${table.leaseToken}) > 0`),
+  check("promotion_receipts_quarantine_hash_check", sql`length(${table.quarantineSha256}) = 64`),
+  check("promotion_receipts_vault_hash_check", sql`${table.vaultSha256} IS NULL OR length(${table.vaultSha256}) = 64`),
+  check("promotion_receipts_expected_size_check", sql`${table.expectedByteSize} > 0`),
+  check("promotion_receipts_vault_size_check", sql`${table.vaultByteSize} IS NULL OR ${table.vaultByteSize} >= 0`),
+]);
+export const integrityRuns = sqliteTable("integrity_runs", {
+  id: text("id").primaryKey(),
+  status: text("status").notNull().default("RUNNING"),
+  profile: text("profile").notNull().default("quick"),
+  snapshotMaxRowid: integer("snapshot_max_rowid"),
+  cursor: text("cursor"),
+  checkedCount: integer("checked_count").notNull().default(0),
+  findingCount: integer("finding_count").notNull().default(0),
+  startedAt: text("started_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  completedAt: text("completed_at"),
+}, (table) => [
+  index("integrity_runs_status_started_idx").on(table.status, table.startedAt),
+  check("integrity_runs_status_check", sql`${table.status} IN ('RUNNING', 'COMPLETED', 'FAILED')`),
+  check("integrity_runs_profile_check", sql`${table.profile} IN ('quick', 'full')`),
+  check("integrity_runs_checked_check", sql`${table.checkedCount} >= 0`),
+  check("integrity_runs_finding_check", sql`${table.findingCount} >= 0`),
+]);
+
+export const integrityFindings = sqliteTable("integrity_findings", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull().references(() => integrityRuns.id, { onDelete: "cascade" }),
+  binaryObjectId: text("binary_object_id").references(() => binaryObjects.id, { onDelete: "set null" }),
+  objectKey: text("object_key").notNull(),
+  findingType: text("finding_type").notNull(),
+  expectedSha256: text("expected_sha256"),
+  actualSha256: text("actual_sha256"),
+  severity: text("severity").notNull(),
+  status: text("status").notNull().default("OPEN"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  resolvedAt: text("resolved_at"),
+}, (table) => [
+  index("integrity_findings_run_status_idx").on(table.runId, table.status),
+  index("integrity_findings_object_idx").on(table.binaryObjectId),
+  check("integrity_findings_type_check", sql`${table.findingType} IN ('MISSING', 'SIZE_MISMATCH', 'HASH_MISMATCH', 'UNREADABLE')`),
+  check("integrity_findings_severity_check", sql`${table.severity} IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')`),
+  check("integrity_findings_status_check", sql`${table.status} IN ('OPEN', 'ACKNOWLEDGED', 'RESOLVED')`),
+]);
+
+export const reconciliationRuns = sqliteTable("reconciliation_runs", {
+  id: text("id").primaryKey(),
+  status: text("status").notNull().default("RUNNING"),
+  cursor: text("cursor"),
+  binarySnapshotMaxRowid: integer("binary_snapshot_max_rowid"),
+  documentSnapshotMaxRowid: integer("document_snapshot_max_rowid"),
+  checkedCount: integer("checked_count").notNull().default(0),
+  findingCount: integer("finding_count").notNull().default(0),
+  startedAt: text("started_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  completedAt: text("completed_at"),
+}, (table) => [
+  index("reconciliation_runs_status_started_idx").on(table.status, table.startedAt),
+  check("reconciliation_runs_status_check", sql`${table.status} IN ('RUNNING', 'COMPLETED', 'FAILED')`),
+  check("reconciliation_runs_checked_check", sql`${table.checkedCount} >= 0`),
+  check("reconciliation_runs_finding_check", sql`${table.findingCount} >= 0`),
+]);
+
+export const reconciliationFindings = sqliteTable("reconciliation_findings", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull().references(() => reconciliationRuns.id, { onDelete: "cascade" }),
+  recordKind: text("record_kind").notNull(),
+  recordId: text("record_id"),
+  objectKey: text("object_key"),
+  findingType: text("finding_type").notNull(),
+  severity: text("severity").notNull(),
+  status: text("status").notNull().default("OPEN"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  resolvedAt: text("resolved_at"),
+}, (table) => [
+  index("reconciliation_findings_run_status_idx").on(table.runId, table.status),
+  check("reconciliation_findings_kind_check", sql`${table.recordKind} IN ('INGEST_OBJECT', 'BINARY_OBJECT', 'ARCHIVE_DOCUMENT', 'STORAGE_OBJECT')`),
+  check("reconciliation_findings_type_check", sql`${table.findingType} IN ('ORPHAN_OBJECT', 'MISSING_OBJECT', 'MISSING_RECORD', 'METADATA_MISMATCH')`),
+  check("reconciliation_findings_severity_check", sql`${table.severity} IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')`),
+  check("reconciliation_findings_status_check", sql`${table.status} IN ('OPEN', 'ACKNOWLEDGED', 'RESOLVED')`),
+  check("reconciliation_findings_reference_check", sql`${table.recordId} IS NOT NULL OR ${table.objectKey} IS NOT NULL`),
+]);
+
+export const accessTickets = sqliteTable("access_tickets", {
+  id: text("id").primaryKey(),
+  ticketHash: text("ticket_hash").notNull().unique(),
+  userId: text("user_id").notNull(),
+  documentId: text("document_id").notNull().references(() => archiveDocuments.id, { onDelete: "cascade" }),
+  binaryObjectId: text("binary_object_id").notNull().references(() => binaryObjects.id, { onDelete: "cascade" }),
+  objectClass: text("object_class").notNull(),
+  scope: text("scope").notNull(),
+  purpose: text("purpose").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  consumedAt: text("consumed_at"),
+  revokedAt: text("revoked_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("access_tickets_user_expiry_idx").on(table.userId, table.expiresAt),
+  index("access_tickets_object_idx").on(table.binaryObjectId),
+  check("access_tickets_scope_check", sql`${table.scope} IN ('VIEW', 'DOWNLOAD')`),
+  check("access_tickets_class_check", sql`${table.objectClass} IN ('original', 'access')`),
+  check("access_tickets_hash_check", sql`length(${table.ticketHash}) = 64`),
+  check("access_tickets_purpose_check", sql`(${table.scope} = 'VIEW' AND ${table.objectClass} = 'access' AND ${table.purpose} = 'DOCUMENT_REVIEW') OR (${table.scope} = 'DOWNLOAD' AND ${table.objectClass} = 'original' AND ${table.purpose} = 'ORIGINAL_DOWNLOAD')`),
+]);
+
+/** F1.9 — `lib/ingest-schema.ts` görüntüleme oturumu tanımının tip aynası. */
+export const accessSessions = sqliteTable("access_sessions", {
+  id: text("id").primaryKey(),
+  sessionHash: text("session_hash").notNull().unique(),
+  accessTicketId: text("access_ticket_id").notNull().unique().references(() => accessTickets.id),
+  userId: text("user_id").notNull(),
+  documentId: text("document_id").notNull().references(() => archiveDocuments.id, { onDelete: "cascade" }),
+  binaryObjectId: text("binary_object_id").notNull().references(() => binaryObjects.id, { onDelete: "cascade" }),
+  objectClass: text("object_class").notNull(),
+  purpose: text("purpose").notNull(),
+  idleExpiresAt: text("idle_expires_at").notNull(),
+  absoluteExpiresAt: text("absolute_expires_at").notNull(),
+  lastUsedAt: text("last_used_at").notNull(),
+  revokedAt: text("revoked_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("access_sessions_user_absolute_idx").on(table.userId, table.absoluteExpiresAt),
+  check("access_sessions_hash_check", sql`length(${table.sessionHash}) = 64`),
+  check("access_sessions_class_check", sql`${table.objectClass} = 'access'`),
+  check("access_sessions_purpose_check", sql`${table.purpose} = 'DOCUMENT_REVIEW'`),
+]);
+export const uploadSessionEvents = sqliteTable("upload_session_events", {
+  id: text("id").primaryKey(),
+  uploadSessionId: text("upload_session_id").notNull().references(() => uploadSessions.id, { onDelete: "cascade" }),
+  eventNumber: integer("event_number").notNull(),
+  fromStatus: text("from_status").notNull(),
+  toStatus: text("to_status").notNull(),
+  actorKind: text("actor_kind").notNull(),
+  actorId: text("actor_id").notNull(),
+  reason: text("reason"),
+  ingestReceiptId: text("ingest_receipt_id").references(() => ingestReceipts.id),
+  eventHash: text("event_hash").notNull().unique(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("upload_session_events_number_unique").on(table.uploadSessionId, table.eventNumber),
+  index("upload_session_events_transition_idx").on(table.fromStatus, table.toStatus, table.createdAt),
+  check("upload_session_events_number_check", sql`${table.eventNumber} >= 1`),
+  check("upload_session_events_actor_check", sql`${table.actorKind} IN ('user', 'operator', 'service')`),
+  check("upload_session_events_actor_id_check", sql`length(trim(${table.actorId})) > 0`),
+  check("upload_session_events_hash_check", sql`length(${table.eventHash}) = 64`),
+  check("upload_session_events_retry_check", sql`${table.fromStatus} <> 'FAILED' OR ${table.toStatus} <> 'PROMOTING' OR (${table.actorKind} = 'operator' AND length(trim(${table.reason})) > 0 AND ${table.ingestReceiptId} IS NOT NULL)`),
+]);

@@ -1,0 +1,146 @@
+name: Faz 1 kabul kanıtı
+
+# Gerçek staging kaynaklarına erişen kontrollü ve onaylı koşu. PR üzerinde
+# çalışmaz; üretim verisi kullanımı sentetik-veri ve ortam korumalarıyla kapanır.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Kabul ortamı
+        required: true
+        default: staging
+        type: choice
+        options: [staging]
+  push:
+    tags: ["acceptance-*"]
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+concurrency:
+  group: phase-one-acceptance
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: phase-one-acceptance
+    steps:
+      # Üçüncü taraf iş akışı bağımlılıkları değişmez commit SHA'larına sabitlidir.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 22.18.0
+          cache: npm
+      - run: npm ci
+      - name: Tam kalite kapısı
+        run: npm run verify
+
+      - name: Kanıt dizinini hazırla
+        env:
+          ACCEPTANCE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: mkdir -p "outputs/acceptance/${ACCEPTANCE_RUN_ID}"
+
+      - name: Staging dağıtım ön kontrolü
+        id: preflight
+        env:
+          ACCEPTANCE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          DEPLOY_BASE_URL: ${{ secrets.ACCEPTANCE_BASE_URL }}
+          ARCHIVE_MIGRATION_TOKEN: ${{ secrets.ARCHIVE_MIGRATION_TOKEN }}
+        run: |
+          node scripts/verify-deployment.mjs > "outputs/acceptance/${ACCEPTANCE_RUN_ID}/preflight.json"
+          echo "digest=$(sha256sum "outputs/acceptance/${ACCEPTANCE_RUN_ID}/preflight.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Kabul koşusu
+        env:
+          ACCEPTANCE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+          ACCEPTANCE_GIT_COMMIT: ${{ github.sha }}
+          ACCEPTANCE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          ACCEPTANCE_SYNTHETIC_ONLY: enabled
+          ACCEPTANCE_PRODUCTION_GUARD: confirmed-non-production
+          ACCEPTANCE_INITIATED_BY: ${{ github.actor }}
+          ACCEPTANCE_ADAPTER_PROFILE: ${{ vars.ACCEPTANCE_ADAPTER_PROFILE }}
+          ACCEPTANCE_APP_VERSION: ${{ github.ref_name }}
+          ACCEPTANCE_SCHEMA_VERSION: ${{ vars.ACCEPTANCE_SCHEMA_VERSION }}
+          # Repoda sürümlenen kanıt yürütücüleri; boş bırakılırsa tüm testler BLOCKED.
+          ACCEPTANCE_EXECUTOR_MODULE: ${{ vars.ACCEPTANCE_EXECUTOR_MODULE || 'scripts/acceptance-executors/pipeline.mjs' }}
+          ACCEPTANCE_UPLOADER_IDENTITY: ${{ secrets.ACCEPTANCE_UPLOADER_IDENTITY }}
+          ACCEPTANCE_UPLOADER_UNIT: ${{ vars.ACCEPTANCE_UPLOADER_UNIT }}
+          ACCEPTANCE_PREFLIGHT_RESULT: PASS
+          ACCEPTANCE_PREFLIGHT_EVIDENCE_DIGEST: ${{ steps.preflight.outputs.digest }}
+          ACCEPTANCE_PHASE_ZERO_RESULT: ${{ vars.ACCEPTANCE_PHASE_ZERO_RESULT }}
+          ACCEPTANCE_PHASE_ZERO_EVIDENCE_DIGEST: ${{ vars.ACCEPTANCE_PHASE_ZERO_EVIDENCE_DIGEST }}
+          ACCEPTANCE_OPEN_CRITICAL_FINDINGS: ${{ vars.ACCEPTANCE_OPEN_CRITICAL_FINDINGS }}
+          ACCEPTANCE_OPEN_HIGH_FINDINGS: ${{ vars.ACCEPTANCE_OPEN_HIGH_FINDINGS }}
+          ACCEPTANCE_BASE_URL: ${{ secrets.ACCEPTANCE_BASE_URL }}
+          ARCHIVE_MIGRATION_TOKEN: ${{ secrets.ARCHIVE_MIGRATION_TOKEN }}
+          ARCHIVE_ACCEPTANCE_TOKEN: ${{ secrets.ARCHIVE_ACCEPTANCE_TOKEN }}
+          ACCEPTANCE_PROXY_TOKEN: ${{ secrets.ACCEPTANCE_PROXY_TOKEN }}
+          ACCEPTANCE_S3_ENDPOINT: ${{ secrets.ACCEPTANCE_S3_ENDPOINT }}
+          ACCEPTANCE_S3_REGION: ${{ vars.ACCEPTANCE_S3_REGION || 'auto' }}
+          ACCEPTANCE_S3_ACCESS_KEY_ID: ${{ secrets.ACCEPTANCE_S3_ACCESS_KEY_ID }}
+          ACCEPTANCE_S3_SECRET_ACCESS_KEY: ${{ secrets.ACCEPTANCE_S3_SECRET_ACCESS_KEY }}
+          ACCEPTANCE_S3_SESSION_TOKEN: ${{ secrets.ACCEPTANCE_S3_SESSION_TOKEN }}
+          ACCEPTANCE_ORIGINAL_BUCKET: ${{ secrets.ACCEPTANCE_ORIGINAL_BUCKET }}
+          ACCEPTANCE_QUARANTINE_BUCKET: ${{ secrets.ACCEPTANCE_QUARANTINE_BUCKET }}
+          ACCEPTANCE_RESTORE_BUCKET: ${{ secrets.ACCEPTANCE_RESTORE_BUCKET }}
+          ACCEPTANCE_RESTORE_RTO_SECONDS: ${{ vars.ACCEPTANCE_RESTORE_RTO_SECONDS }}
+          ACCEPTANCE_DERIVATIVE_BUCKET: ${{ secrets.ACCEPTANCE_DERIVATIVE_BUCKET }}
+          ACCEPTANCE_SECOND_S3_ENDPOINT: ${{ secrets.ACCEPTANCE_SECOND_S3_ENDPOINT }}
+          ACCEPTANCE_SECOND_BUCKET: ${{ secrets.ACCEPTANCE_SECOND_BUCKET }}
+          ACCEPTANCE_SECOND_S3_REGION: ${{ vars.ACCEPTANCE_SECOND_S3_REGION || 'auto' }}
+          ACCEPTANCE_SECOND_S3_ACCESS_KEY_ID: ${{ secrets.ACCEPTANCE_SECOND_S3_ACCESS_KEY_ID }}
+          ACCEPTANCE_SECOND_S3_SECRET_ACCESS_KEY: ${{ secrets.ACCEPTANCE_SECOND_S3_SECRET_ACCESS_KEY }}
+          ACCEPTANCE_SECOND_S3_SESSION_TOKEN: ${{ secrets.ACCEPTANCE_SECOND_S3_SESSION_TOKEN }}
+          ACCEPTANCE_VIEWER_IDENTITY: ${{ secrets.ACCEPTANCE_VIEWER_IDENTITY }}
+          ACCEPTANCE_UNAUTHORIZED_IDENTITY: ${{ secrets.ACCEPTANCE_UNAUTHORIZED_IDENTITY }}
+          ACCEPTANCE_VIEWER_S3_ACCESS_KEY_ID: ${{ secrets.ACCEPTANCE_VIEWER_S3_ACCESS_KEY_ID }}
+          ACCEPTANCE_VIEWER_S3_SECRET_ACCESS_KEY: ${{ secrets.ACCEPTANCE_VIEWER_S3_SECRET_ACCESS_KEY }}
+          ACCEPTANCE_VIEWER_S3_SESSION_TOKEN: ${{ secrets.ACCEPTANCE_VIEWER_S3_SESSION_TOKEN }}
+          ACCEPTANCE_APPLICATION_S3_ACCESS_KEY_ID: ${{ secrets.ACCEPTANCE_APPLICATION_S3_ACCESS_KEY_ID }}
+          ACCEPTANCE_APPLICATION_S3_SECRET_ACCESS_KEY: ${{ secrets.ACCEPTANCE_APPLICATION_S3_SECRET_ACCESS_KEY }}
+          ACCEPTANCE_APPLICATION_S3_SESSION_TOKEN: ${{ secrets.ACCEPTANCE_APPLICATION_S3_SESSION_TOKEN }}
+          ACCEPTANCE_SCANNER_S3_ACCESS_KEY_ID: ${{ secrets.ACCEPTANCE_SCANNER_S3_ACCESS_KEY_ID }}
+          ACCEPTANCE_SCANNER_S3_SECRET_ACCESS_KEY: ${{ secrets.ACCEPTANCE_SCANNER_S3_SECRET_ACCESS_KEY }}
+          ACCEPTANCE_SCANNER_S3_SESSION_TOKEN: ${{ secrets.ACCEPTANCE_SCANNER_S3_SESSION_TOKEN }}
+          ACCEPTANCE_OCR_S3_ACCESS_KEY_ID: ${{ secrets.ACCEPTANCE_OCR_S3_ACCESS_KEY_ID }}
+          ACCEPTANCE_OCR_S3_SECRET_ACCESS_KEY: ${{ secrets.ACCEPTANCE_OCR_S3_SECRET_ACCESS_KEY }}
+          ACCEPTANCE_OCR_S3_SESSION_TOKEN: ${{ secrets.ACCEPTANCE_OCR_S3_SESSION_TOKEN }}
+          ACCEPTANCE_LOCK_PROFILE: ${{ vars.ACCEPTANCE_LOCK_PROFILE }}
+          ACCEPTANCE_LOCK_BUCKET: ${{ secrets.ACCEPTANCE_LOCK_BUCKET }}
+          ACCEPTANCE_LOCKED_PREFIX: ${{ secrets.ACCEPTANCE_LOCKED_PREFIX }}
+          ACCEPTANCE_UNLOCKED_PREFIX: ${{ secrets.ACCEPTANCE_UNLOCKED_PREFIX }}
+          ACCEPTANCE_LOCK_PROBE_S3_ACCESS_KEY_ID: ${{ secrets.ACCEPTANCE_LOCK_PROBE_S3_ACCESS_KEY_ID }}
+          ACCEPTANCE_LOCK_PROBE_S3_SECRET_ACCESS_KEY: ${{ secrets.ACCEPTANCE_LOCK_PROBE_S3_SECRET_ACCESS_KEY }}
+          ACCEPTANCE_LOCK_PROBE_S3_SESSION_TOKEN: ${{ secrets.ACCEPTANCE_LOCK_PROBE_S3_SESSION_TOKEN }}
+          ACCEPTANCE_RETENTION_ADMIN_S3_ACCESS_KEY_ID: ${{ secrets.ACCEPTANCE_RETENTION_ADMIN_S3_ACCESS_KEY_ID }}
+          ACCEPTANCE_RETENTION_ADMIN_S3_SECRET_ACCESS_KEY: ${{ secrets.ACCEPTANCE_RETENTION_ADMIN_S3_SECRET_ACCESS_KEY }}
+          ACCEPTANCE_RETENTION_ADMIN_S3_SESSION_TOKEN: ${{ secrets.ACCEPTANCE_RETENTION_ADMIN_S3_SESSION_TOKEN }}
+          ACCEPTANCE_LOG_ENDPOINT: ${{ secrets.ACCEPTANCE_LOG_ENDPOINT }}
+          ACCEPTANCE_LOG_TOKEN: ${{ secrets.ACCEPTANCE_LOG_TOKEN }}
+          ACCEPTANCE_FAULT_INJECTION: ${{ vars.ACCEPTANCE_FAULT_INJECTION }}
+          ACCEPTANCE_LARGE_FIXTURES: ${{ vars.ACCEPTANCE_LARGE_FIXTURES }}
+          ACCEPTANCE_RESOURCE_METRICS_ENDPOINT: ${{ secrets.ACCEPTANCE_RESOURCE_METRICS_ENDPOINT }}
+          ACCEPTANCE_RESOURCE_METRICS_TOKEN: ${{ secrets.ACCEPTANCE_RESOURCE_METRICS_TOKEN }}
+        run: node scripts/run-phase-one-acceptance.mjs --out "outputs/acceptance/${ACCEPTANCE_RUN_ID}/manifest.json"
+
+      # Attestation, manifest özetini aynı artifact içine yazmaktan farklı olarak
+      # GitHub OIDC/Sigstore güven köküne commit ve workflow kimliğiyle bağlar.
+      - name: Kanıt paketini imzalı provenance ile bağla
+        if: always() && hashFiles('outputs/acceptance/**') != ''
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: outputs/acceptance/${{ github.run_id }}-${{ github.run_attempt }}/**
+
+      - name: Kanıt paketini yükle
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: acceptance-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: outputs/acceptance/${{ github.run_id }}-${{ github.run_attempt }}/
+          retention-days: 90
+          if-no-files-found: error

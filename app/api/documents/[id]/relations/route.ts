@@ -1,6 +1,7 @@
 import { prepareAuditEvent } from "../../../../../lib/audit";
 import { authorizeRequest, canAccessUnit } from "../../../../../lib/authorization";
-import { ensureArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
+import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
+import { failure } from "../../../../../lib/errors";
 import {
   isRelationType, listDocumentRelations, relationStatement,
   resolveAddressEntity, resolveParcelEntity, type RelationType,
@@ -22,7 +23,8 @@ function text(value: unknown, limit = 160) {
 export async function GET(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const bindings = getArchiveBindings();
-  await ensureArchiveSchema(bindings.DB);
+  const schemaError = await requireArchiveSchema(request, bindings.DB);
+  if (schemaError) return schemaError;
   const principal = await authorizeRequest(request, bindings.DB, "document.read", bindings.ARCHIVE_ADMIN_EMAILS);
   if (principal instanceof Response) return principal;
   const document = await loadDocument(bindings.DB, id);
@@ -41,7 +43,8 @@ export async function GET(request: Request, context: RouteContext) {
 export async function POST(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const bindings = getArchiveBindings();
-  await ensureArchiveSchema(bindings.DB);
+  const schemaError = await requireArchiveSchema(request, bindings.DB);
+  if (schemaError) return schemaError;
   const principal = await authorizeRequest(request, bindings.DB, "document.review", bindings.ARCHIVE_ADMIN_EMAILS);
   if (principal instanceof Response) return principal;
   const DB = bindings.DB;
@@ -116,7 +119,7 @@ export async function POST(request: Request, context: RouteContext) {
       relations: await listDocumentRelations(DB, id),
     }, { status: 201 });
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "İlişki kaydedilemedi.");
+    return failure(error, "relations.create", "İlişki kaydedilemedi.", request);
   }
 }
 
@@ -127,7 +130,8 @@ type RelationRow = { id: string; entity_id: string; relation_type: string; relat
 export async function PATCH(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const bindings = getArchiveBindings();
-  await ensureArchiveSchema(bindings.DB);
+  const schemaError = await requireArchiveSchema(request, bindings.DB);
+  if (schemaError) return schemaError;
   const principal = await authorizeRequest(request, bindings.DB, "document.review", bindings.ARCHIVE_ADMIN_EMAILS);
   if (principal instanceof Response) return principal;
   const DB = bindings.DB;

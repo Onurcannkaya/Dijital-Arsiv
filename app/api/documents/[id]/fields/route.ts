@@ -1,6 +1,6 @@
 import { prepareAuditEvent } from "../../../../../lib/audit";
 import { authorizeRequest, canAccessUnit } from "../../../../../lib/authorization";
-import { ensureArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
+import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
 import { loadProfileByName, loadVocabularyTerms, resolveDocumentProfile, type FieldDefinition } from "../../../../../lib/document-profile";
 import {
   MISSING_VALUE, assessRisk, formatViolation, isMultiValueField, vocabularyViolation,
@@ -39,7 +39,8 @@ function readValue(value: unknown) {
 export async function PATCH(request: Request, context: RouteContext) {
   const { id } = await context.params;
   const bindings = getArchiveBindings();
-  await ensureArchiveSchema(bindings.DB);
+  const schemaError = await requireArchiveSchema(request, bindings.DB);
+  if (schemaError) return schemaError;
   const principal = await authorizeRequest(request, bindings.DB, "document.review", bindings.ARCHIVE_ADMIN_EMAILS);
   if (principal instanceof Response) return principal;
   const DB = bindings.DB;

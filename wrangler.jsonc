@@ -1,0 +1,102 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "sivas-dijital-arsiv",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  },
+  "triggers": {
+    "crons": ["* * * * *", "*/2 * * * *", "*/5 * * * *", "17 */6 * * *"]
+  },
+  "vars": {
+    "APP_ENV": "development"
+  },
+  "secrets": {
+    "required": [
+      "CONTENT_SCAN_SERVICE_URL",
+      "CONTENT_SCAN_SERVICE_TOKEN",
+      "DOCUMENT_RENDER_SERVICE_URL",
+      "DOCUMENT_RENDER_SERVICE_TOKEN",
+      "DOCUMENT_RENDER_IMAGE_DIGEST",
+      "OCR_SERVICE_URL",
+      "OCR_SERVICE_TOKEN",
+      "ARCHIVE_MIGRATION_TOKEN",
+      "ARCHIVE_ADMIN_EMAILS"
+    ]
+  },
+
+  // DB, ARCHIVE_FILES, DERIVATIVE_FILES, TEMPORARY_FILES ve QUARANTINE_FILES .openai/hosting.json
+  // içindeki mantıksal bağlardır; son üçü ayrı ve en-dar yetki rollerine bağlanır.
+  // Gerçek D1/R2 kaynak kimlikleri Sites tarafÄ±ndan yönetilir; bu dosyaya sahte
+  // ya da başka ortama ait kimlik yazÄ±lmaz.
+  "env": {
+    "dev": {
+      "name": "sivas-dijital-arsiv-dev",
+      "vars": { "APP_ENV": "development" },
+      "secrets": {
+        "required": [
+          "CONTENT_SCAN_SERVICE_URL",
+          "CONTENT_SCAN_SERVICE_TOKEN",
+          "DOCUMENT_RENDER_SERVICE_URL",
+          "DOCUMENT_RENDER_SERVICE_TOKEN",
+      "DOCUMENT_RENDER_IMAGE_DIGEST",
+          "OCR_SERVICE_URL",
+          "OCR_SERVICE_TOKEN",
+          "ARCHIVE_MIGRATION_TOKEN",
+          "ARCHIVE_ADMIN_EMAILS"
+        ]
+      },
+      "triggers": {
+        "crons": ["* * * * *", "*/2 * * * *", "*/5 * * * *", "17 */6 * * *"]
+      }
+    },
+    "staging": {
+      "name": "sivas-dijital-arsiv-staging",
+      "vars": { "APP_ENV": "staging" },
+      "secrets": {
+        "required": [
+          "CONTENT_SCAN_SERVICE_URL",
+          "CONTENT_SCAN_SERVICE_TOKEN",
+          "DOCUMENT_RENDER_SERVICE_URL",
+          "DOCUMENT_RENDER_SERVICE_TOKEN",
+      "DOCUMENT_RENDER_IMAGE_DIGEST",
+          "OCR_SERVICE_URL",
+          "OCR_SERVICE_TOKEN",
+          "ARCHIVE_MIGRATION_TOKEN",
+          "ARCHIVE_ACCEPTANCE_TOKEN",
+          "ARCHIVE_ADMIN_EMAILS"
+        ]
+      },
+      "triggers": {
+        "crons": ["* * * * *", "*/2 * * * *", "*/5 * * * *", "17 */6 * * *"]
+      }
+    },
+    "production": {
+      "name": "sivas-dijital-arsiv-production",
+      "vars": { "APP_ENV": "production" },
+      "secrets": {
+        "required": [
+          "CONTENT_SCAN_SERVICE_URL",
+          "CONTENT_SCAN_SERVICE_TOKEN",
+          "DOCUMENT_RENDER_SERVICE_URL",
+          "DOCUMENT_RENDER_SERVICE_TOKEN",
+      "DOCUMENT_RENDER_IMAGE_DIGEST",
+          "OCR_SERVICE_URL",
+          "OCR_SERVICE_TOKEN",
+          "ARCHIVE_MIGRATION_TOKEN",
+          "ARCHIVE_ADMIN_EMAILS"
+        ]
+      },
+      "triggers": {
+        "crons": ["* * * * *", "*/2 * * * *", "*/5 * * * *", "17 */6 * * *"]
+      }
+    }
+  }
+}

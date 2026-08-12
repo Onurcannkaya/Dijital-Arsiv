@@ -9,7 +9,35 @@ docker build -t sivas-arsiv-ocr .
 docker run --rm -p 8090:8090 -e OCR_SERVICE_TOKEN=guclu-bir-servis-anahtari sivas-arsiv-ocr
 ```
 
-CPU pilotunda `PADDLEOCR_DEVICE=cpu`, GPU sunucusunda uygun PaddlePaddle/CUDA imajı ve `PADDLEOCR_DEVICE=gpu:0` kullanılmalıdır. Model dosyaları üretimde önceden indirilip kurum içi model deposundan sunulmalıdır.
+`OCR_SERVICE_TOKEN` **zorunludur**. Tanımlı değilse `/v1/ocr` 503 döner; servis
+anahtarsız çalışmaz. Aynı değer uygulama tarafında da `OCR_SERVICE_TOKEN` olarak
+tanımlanmalıdır.
+OCR isteği belge baytlarını taşımaz; yalnız `objectKey`, boyut, tür ve yetkili
+SHA-256 kaydını taşır. Servis aslı S3 uyumlu depodan 8 MiB parçalarla geçici diske
+indirir ve SHA-256 değerini yeniden doğrular. Aşağıdaki yapılandırma zorunludur:
+
+- `OCR_ORIGINAL_BUCKET`: yalnız asılları içeren sabit kova;
+- `OCR_S3_ENDPOINT_URL`: R2/S3 uyumlu uç (AWS S3 kullanılıyorsa boş bırakılabilir);
+- `AWS_ACCESS_KEY_ID` ve `AWS_SECRET_ACCESS_KEY`: yalnız `GetObject` yetkili OCR
+  servis kimliği. Yazma, silme, listeleme ve karantina yetkisi verilmez.
+
+İstekten kova veya uç adresi kabul edilmez; böylece OCR ucu başka depolara vekil
+olarak kullanılamaz. Geçici disk kapasitesi ADR-014'e göre eşzamanlı tarama sayısı
+× 2 GiB ve güvenli baş boşluğu üzerinden boyutlandırılır.
+
+## Sözlükler istekle taşınır
+
+Müdürlük listesi ve belge türü tanıma işaretleri serviste gömülü değildir;
+uygulama her istekte `profile` alanında gönderir (kontrollü sözlük ve yürürlükteki
+belge türü profillerinden). Profil gönderilmezse bu alanlar çıkarılmaz — servis
+kendi listesini uydurmaz. Kullanılan profil ve sözlük sürümü yanıtta döner ve
+alan kaydıyla birlikte saklanır.
+
+CPU pilotunda `PADDLEOCR_DEVICE=cpu` kullanılır. Docker derlemesi model dosyalarını
+`download_models.py` ile imaja gömer; çalışma zamanı model indirmek için internete
+çıkmaz. GPU kararı kuyruk derinliği ve P95 OCR süresi ölçüldükten sonra verilir;
+uygun PaddlePaddle/CUDA tabanlı ayrı bir imaj profili doğrulanmadan yalnızca
+`PADDLEOCR_DEVICE=gpu:0` değiştirerek production'a geçilmez.
 
 Servis sözleşmesi `POST /v1/ocr`; sağlık kontrolü `GET /health` adresindedir.
 

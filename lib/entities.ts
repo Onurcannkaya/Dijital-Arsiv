@@ -1,3 +1,5 @@
+import { PublicError } from "./errors.ts";
+
 /**
  * Ortak varlık ve belge-varlık ilişki servisi.
  *
@@ -93,7 +95,8 @@ function addressLabel(parts: { neighborhood: string; street: string; doorNo: str
 export async function resolveParcelEntity(db: D1Database, input: ParcelInput, actor: string): Promise<ResolvedEntity> {
   const blockNo = normalizeParcelToken(input.blockNo);
   const parcelNo = normalizeParcelToken(input.parcelNo);
-  if (!blockNo || !parcelNo) throw new Error("Ada ve parsel değeri zorunludur.");
+  // Kullanıcıya gösterilmesi istenen doğrulama mesajı.
+  if (!blockNo || !parcelNo) throw new PublicError("Ada ve parsel değeri zorunludur.");
   const districtCode = unknownOr(input.districtCode);
   const cadastralNeighborhood = unknownOr(input.cadastralNeighborhood);
   const externalId = input.externalId?.trim() || null;
@@ -143,7 +146,7 @@ export async function resolveAddressEntity(db: D1Database, input: AddressInput, 
   const doorNo = unknownOr(input.doorNo);
   const unitNo = input.unitNo?.trim().replace(/\s+/g, " ") ?? "";
   if (neighborhood === UNKNOWN_IDENTITY && street === UNKNOWN_IDENTITY && doorNo === UNKNOWN_IDENTITY) {
-    throw new Error("Adres için en az mahalle, yol veya kapı numarası gereklidir.");
+    throw new PublicError("Adres için en az mahalle, yol veya kapı numarası gereklidir.");
   }
   const externalId = input.externalId?.trim() || null;
   const authoritySource = externalId ? (input.sourceSystem?.trim() || "KENT_REHBERI") : "ARCHIVE";

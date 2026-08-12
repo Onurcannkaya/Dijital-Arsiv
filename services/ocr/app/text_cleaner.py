@@ -139,14 +139,7 @@ def readable_text(words: list[dict[str, Any]]) -> str:
     return cleaned.strip()
 
 
-def search_text(value: str) -> str:
-    """Create a forgiving Turkish search form while keeping readable text separate."""
-    lowered = unicodedata.normalize("NFKD", value.casefold())
-    lowered = "".join(character for character in lowered if not unicodedata.combining(character))
-    lowered = lowered.replace("ı", "i").replace("ş", "s").replace("ğ", "g").replace("ç", "c").replace("ö", "o").replace("ü", "u")
-    lowered = re.sub(r"(?<=[a-z])i11\b", "ili", lowered)
-    lowered = re.sub(r"(?<=[a-z])1\b", "l", lowered)
-    lowered = re.sub(r"(?<=[a-z])[1|](?=[a-z])", "i", lowered)
-    lowered = re.sub(r"(?<=[a-z])0(?=[a-z])", "o", lowered)
-    lowered = re.sub(r"[^\w]+", " ", lowered, flags=re.UNICODE)
-    return re.sub(r"\s+", " ", lowered).strip()
+# NOT: Aranabilir metin biçimi bilinçli olarak burada üretilmez.
+# Aynı kural iki dilde iki kez yazıldığında dizin ile sorgu farklı biçimler
+# üretiyor ve eşleşmeler sessizce kayboluyordu. Tek uygulama
+# `lib/text-search.ts` içindeki `normalizeSearch` fonksiyonudur.
