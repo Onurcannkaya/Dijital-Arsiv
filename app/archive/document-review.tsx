@@ -31,7 +31,9 @@ type DetailPage = { pageNumber:number; width:number; height:number; rawText:stri
 type DetailDocument = { id:string; referenceNo:string; originalName:string; mediaType:string; byteSize:number; sha256:string; documentType:string; unit:string; status:string; uploadedBy:string; createdAt:string; updatedAt:string; fileUrl:string };
 type BinaryObject = { id:string; objectClass:string; mediaType:string; byteSize:number; sha256:string; retentionStatus:string; legalHoldStatus:string; generator:string|null; createdAt:string };
 type AuditEvent = { eventNumber:number; actor:string; action:string; details:unknown; previousHash:string|null; eventHash:string; createdAt:string };
-type DetailPayload = { document:DetailDocument; profile:ProfileInfo; vocabularies:VocabularyMap; pages:DetailPage[]; fields:DetailValue[]; fieldGroups:FieldGroup[]; relations:EntityRelation[]; objects:BinaryObject[]; audit:AuditEvent[] };
+type OcrJobState = { status:string; attempt:number; maxAttempts:number; deadLettered:boolean;
+  nextAttemptAt:string|null; lastAttemptAt:string|null; errorMessage:string|null };
+type DetailPayload = { document:DetailDocument; ocrJob?:OcrJobState|null; profile:ProfileInfo; vocabularies:VocabularyMap; pages:DetailPage[]; fields:DetailValue[]; fieldGroups:FieldGroup[]; relations:EntityRelation[]; objects:BinaryObject[]; audit:AuditEvent[] };
 
 type Addition = { key:string; fieldName:string; value:string };
 type ValueOperation = { id:string; action:"confirm"|"correct"|"reject"; value?:string };
@@ -217,6 +219,18 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const evidencePage=selected?pageByNumber.get(selected.pageNumber)??null:null;
   const isImage=detail?.document.mediaType.startsWith("image/")??false;
   const needsOcr=detail?.document.status==="queued"||detail?.document.status==="ocr_failed";
+  /**
+   * OCR işinin son durumu: personel yeniden çalıştırmadan önce nedenini ve
+   * kaçıncı denemede olduğunu görür. Dead-letter, azami denemenin aşıldığını
+   * ve işletim incelemesi gerektiğini söyler.
+   */
+  const ocrJob=detail?.ocrJob??null;
+  const ocrJobNote=ocrJob?[
+    ocrJob.deadLettered?`Azami deneme sayısı aşıldı (${ocrJob.attempt}/${ocrJob.maxAttempts})`
+      :`Deneme ${ocrJob.attempt}/${ocrJob.maxAttempts}`,
+    ocrJob.nextAttemptAt&&ocrJob.status==="queued"
+      ?`sıradaki deneme ${new Date(ocrJob.nextAttemptAt.replace(" ","T")+"Z").toLocaleString("tr-TR")}`:null,
+  ].filter(Boolean).join(" · "):null;
   const canProcess=Boolean(needsOcr&&permissions.includes("ocr.run"));
   const canReview=permissions.includes("document.review");
   const canArchive=permissions.includes("document.archive");
@@ -258,6 +272,12 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
         archived?<span className="archived-lock"><LockKeyhole size={15}/> Salt okunur</span>:
         <>{canReview?<button className="outline save-fields" onClick={saveFields} disabled={saving||(!pendingValues&&!hasFieldChanges&&!hasAdditions)}>{saving?<LoaderCircle className="spin" size={15}/>:<Save size={15}/>} {pendingValues?"Alanları onayla":"Düzeltmeleri kaydet"}</button>:null}{canArchive?<button className="approve" onClick={approve} disabled={saving||savingText||archiveBlocked} title={archiveBlockers.length?`Arşivlemeden önce tamamlanmalı: ${archiveBlockers.join(", ")}.`:undefined}><CheckCircle2 size={17}/> Doğrula ve arşivle</button>:null}{!canReview&&!canArchive?<span className="archived-lock restricted"><LockKeyhole size={15}/> Görüntüleme yetkisi</span>:null}</>}
       </div>
+      {ocrJob&&(needsOcr||ocrJob.status==="failed")
+        ?<p className={`ocr-job-note ${ocrJob.deadLettered?"blocked":""}`}>
+          <FileClock size={14}/>
+          <span><b>{ocrJobNote}</b>{ocrJob.errorMessage?<small>Son hata: {ocrJob.errorMessage}</small>:null}</span>
+        </p>
+        :null}
       {canArchive&&!archived&&!needsOcr&&archiveBlockers.length
         ?<p className="archive-blockers"><AlertTriangle size={14}/> Arşivlemeden önce: {archiveBlockers.join(" · ")}</p>
         :null}

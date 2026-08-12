@@ -11,6 +11,8 @@ type DocumentRow = { id:string; reference_no:string; original_name:string; media
 type FieldRow = { id:string; field_name:string; value_index:number; field_value:string; normalized_value:string|null; confidence:number; risk_level:string; page_number:number; bbox_json:string; evidence_text:string; model:string; verification_status:string; origin:string; verified_by:string|null; verified_at:string|null; corrected_value:string|null; corrected_by:string|null; corrected_at:string|null };
 type PageRow = { page_number:number; width:number; height:number; raw_text:string; full_text:string; search_text:string; confirmed_text:string|null; confirmed_by:string|null; confirmed_at:string|null; words_json:string; average_confidence:number; model:string };
 type AuditRow = { event_number:number; actor:string; action:string; details_json:string; previous_hash:string|null; event_hash:string; created_at:string };
+type OcrJobRow = { status:string; attempt:number; max_attempts:number; error_message:string|null;
+  next_attempt_at:string|null; dead_lettered_at:string|null; last_attempt_at:string|null };
 type ObjectRow = { id:string; object_class:string; media_type:string; byte_size:number; sha256:string; retention_status:string; legal_hold_status:string; generator:string|null; derived_from_id:string|null; created_at:string };
 
 export async function GET(request: Request, context: RouteContext) {
@@ -25,7 +27,7 @@ export async function GET(request: Request, context: RouteContext) {
     FROM archive_documents WHERE id = ?`).bind(id).first<DocumentRow>();
   if (!row) return jsonError("Belge bulunamadı.", 404);
   if (!canAccessUnit(principal, row.unit)) return jsonError("Bu belge müdürlük kapsamınızın dışında.", 403);
-  const [pages, fields, audit, objects, relations] = await Promise.all([
+  const [pages, fields, audit, objects, relations, ocrJob] = await Promise.all([
     bindings.DB.prepare(`SELECT page_number, width, height, raw_text, full_text, search_text, confirmed_text, confirmed_by, confirmed_at, words_json, average_confidence, model FROM ocr_pages WHERE document_id = ? ORDER BY page_number`).bind(id).all<PageRow>(),
     bindings.DB.prepare(`SELECT id, field_name, value_index, field_value, normalized_value, confidence, risk_level,
       page_number, bbox_json, evidence_text, model, verification_status, origin, verified_by, verified_at,
@@ -36,6 +38,15 @@ export async function GET(request: Request, context: RouteContext) {
       retention_status, legal_hold_status, generator, derived_from_id, created_at FROM binary_objects
       WHERE document_id = ? ORDER BY CASE object_class WHEN 'original' THEN 0 ELSE 1 END, created_at`).bind(id).all<ObjectRow>(),
     listDocumentRelations(bindings.DB, id),
+    /*
+     * OCR işinin son durumu. Belge `ocr_failed`/`queued` iken personelin
+     * "neden başarısız oldu, tekrar denemeli miyim" sorusunu yanıtlar; bu
+     * bilgi olmadan yeniden çalıştırma körlemesine yapılır.
+     */
+    bindings.DB.prepare(`SELECT status, attempt, max_attempts, error_message,
+        next_attempt_at, dead_lettered_at, last_attempt_at FROM processing_jobs
+      WHERE document_id = ? AND kind = 'ocr' ORDER BY updated_at DESC LIMIT 1`)
+      .bind(id).first<OcrJobRow>(),
   ]);
 
   // Alan kuralları belge türü profilinden okunur (ADR-008).
@@ -124,6 +135,18 @@ export async function GET(request: Request, context: RouteContext) {
       retentionStatus:object.retention_status, legalHoldStatus:object.legal_hold_status,
       generator:object.generator, derivedFromId:object.derived_from_id, createdAt:object.created_at,
     })),
+    ocrJob: ocrJob ? {
+      status: ocrJob.status,
+      attempt: Number(ocrJob.attempt),
+      maxAttempts: Number(ocrJob.max_attempts),
+      deadLettered: Boolean(ocrJob.dead_lettered_at),
+      nextAttemptAt: ocrJob.next_attempt_at,
+      lastAttemptAt: ocrJob.last_attempt_at,
+      // Hata metni işletim bilgisidir; yalnız işi yeniden çalıştırabilen role
+      // gösterilir ve makul bir uzunlukla sınırlanır.
+      errorMessage: principal.permissions.includes("ocr.run")
+        ? ocrJob.error_message?.slice(0, 300) ?? null : null,
+    } : null,
     audit: audit.results.map((event) => ({ eventNumber:event.event_number, actor:event.actor, action:event.action, details:JSON.parse(event.details_json), previousHash:event.previous_hash, eventHash:event.event_hash, createdAt:event.created_at })),
   });
 }
