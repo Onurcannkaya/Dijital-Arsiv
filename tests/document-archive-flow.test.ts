@@ -161,6 +161,90 @@ test("hazır olmayan durumlar birbirinden ayrılır", async () => {
   });
 });
 
+test("biçim kuralını çiğneyen değer arşivlenemez", async () => {
+  await withServer(async (server) => {
+    const id = await seedDocument(server, { id: "doc-bicim" });
+    const adaId = `${id}-f4`;
+    const correct = (value: string) => call(server, `/api/documents/${id}/fields`, {
+      method: "PATCH", headers: JSON_IDENTITY,
+      body: JSON.stringify({ values: [{ id: adaId, action: "correct", value }] }),
+    });
+
+    // Kayıt sırasında yol kapatılmaz: personel belgede ne yazıyorsa onu
+    // girebilmelidir, ama ihlal uyarı olarak bildirilir.
+    const written = await correct("abc!!");
+    assert.equal(written.status, 200);
+    assert.deepEqual((written.body.warnings as Array<{ fieldName: string }>).map((w) => w.fieldName), ["ada"]);
+
+    // Değer geçersizliğini kendi de bilir: risk kritiğe çıkar ve detay yanıtı
+    // ihlali bildirir — arayüz kuralın desenini görmediğinden bunu türetemez.
+    const detail = await call(server, `/api/documents/${id}`, { headers: IDENTITY });
+    const ada = (detail.body.fields as Array<{ name: string; riskLevel: string; formatViolation: string | null }>)
+      .find((field) => field.name === "ada");
+    assert.equal(ada?.riskLevel, "CRITICAL");
+    assert.match(ada?.formatViolation ?? "", /sayı veya `12-A` biçiminde/);
+
+    await call(server, `/api/documents/${id}/fields`, {
+      method: "PATCH", headers: JSON_IDENTITY,
+      body: JSON.stringify({ values: FIELDS.map((_, index) => ({ id: `${id}-f${index}`, action: "confirm" }))
+        .filter((value) => value.id !== adaId) }),
+    });
+    await confirmText(server, id);
+
+    /*
+     * Arşivleme geri alınamaz (ADR-016): buradan sonra hiçbir yazma yolu
+     * kaydı düzeltemez. Ada/parsel belediye arşivinde belgeye ulaşmanın
+     * birincil yolu olduğundan bozuk bir ada, belgenin parselden bir daha
+     * bulunamaması demektir. Uyarının karara bağlanacağı yer burasıdır.
+     */
+    const blocked = await archive(server, id);
+    assert.equal(blocked.status, 409);
+    assert.match(blocked.body.error ?? "", /Biçim kuralına uymayan değerler arşivlenemez/);
+    assert.match(blocked.body.error ?? "", /sayı veya `12-A` biçiminde/);
+
+    // Değer düzeltilince engel kalkar ve risk de geri iner.
+    assert.equal((await correct("905")).status, 200);
+    assert.equal((await archive(server, id)).status, 200);
+    const after = await call(server, `/api/documents/${id}`, { headers: IDENTITY });
+    const fixed = (after.body.fields as Array<{ name: string; value: string; riskLevel: string }>)
+      .find((field) => field.name === "ada");
+    assert.equal(fixed?.value, "905");
+    assert.notEqual(fixed?.riskLevel, "CRITICAL");
+  });
+});
+
+test("reddedilen değerin biçimi arşivlemeyi engellemez", async () => {
+  await withServer(async (server) => {
+    // Reddedilen değer arşive girmez; kuralını çiğnemesi de sonucu bağlamaz.
+    // Aksi halde personel, atacağı bir değeri düzeltmeye zorlanırdı.
+    const id = await seedDocument(server, { id: "doc-red-bicim" });
+    const written = await call(server, `/api/documents/${id}/fields`, {
+      method: "PATCH", headers: JSON_IDENTITY,
+      body: JSON.stringify({ values: [{ id: `${id}-f4`, action: "correct", value: "abc!!" }] }),
+    });
+    assert.equal(written.status, 200);
+    const rejected = await call(server, `/api/documents/${id}/fields`, {
+      method: "PATCH", headers: JSON_IDENTITY,
+      body: JSON.stringify({ values: [{ id: `${id}-f4`, action: "reject", reason: "Kanıt okunamıyor" }] }),
+    });
+    assert.equal(rejected.status, 200);
+
+    // Kalan alanlar ve metin tamamlanır ki engel yalnız reddedilen Ada'dan gelsin.
+    await call(server, `/api/documents/${id}/fields`, {
+      method: "PATCH", headers: JSON_IDENTITY,
+      body: JSON.stringify({ values: FIELDS.map((_, index) => ({ id: `${id}-f${index}`, action: "confirm" }))
+        .filter((value) => value.id !== `${id}-f4`) }),
+    });
+    await confirmText(server, id);
+
+    const blocked = await archive(server, id);
+    assert.equal(blocked.status, 409);
+    // Engel biçimden değil, zorunlu alanın değersiz kalmasından gelmelidir.
+    assert.doesNotMatch(blocked.body.error ?? "", /Biçim kuralına uymayan/);
+    assert.match(blocked.body.error ?? "", /doğrulanmış bir değer olmadan arşivlenemez/);
+  });
+});
+
 test("reddedilen zorunlu alan arşivlemeyi durdurur", async () => {
   await withServer(async (server) => {
     const id = await seedDocument(server, { id: "doc-reddedilen" });

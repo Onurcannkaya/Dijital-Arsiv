@@ -2,7 +2,7 @@ import { prepareAuditEvent } from "../../../../../lib/audit";
 import { authorizeRequest, canAccessUnit } from "../../../../../lib/authorization";
 import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
 import { resolveDocumentProfile } from "../../../../../lib/document-profile";
-import { MISSING_VALUE, requiredFields, verificationRequiredFields } from "../../../../../lib/field-policy";
+import { MISSING_VALUE, formatViolation, requiredFields, verificationRequiredFields } from "../../../../../lib/field-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +73,24 @@ export async function POST(request: Request, context: RouteContext) {
   const missing = requiredFields(profile).filter((field) => !usable.has(field.fieldCode));
   if (missing.length) {
     return jsonError(`Şu alanlar doğrulanmış bir değer olmadan arşivlenemez: ${missing.map((field) => field.label).join(", ")}.`, 409);
+  }
+
+  /*
+   * Biçim ihlali düzeltme anında yalnız uyarıdır: personel belgede ne yazıyorsa
+   * onu girebilmelidir, kayıt sırasında yolu kapatmak tutanağı çarpıtır. Ama
+   * arşivleme geri alınamaz — ADR-016 gereği arşivlenmiş kayıt hiçbir yazma
+   * yolundan değiştirilemez. Biçim kuralını çiğneyen bir değer arşive girerse
+   * kalıcı olarak yanlış kalır ve ada/parsel gibi alanlarda belge parselden bir
+   * daha bulunamaz. Uyarının karara bağlanacağı yer burasıdır: ya değer
+   * düzeltilir ya da profildeki kural kurumca genişletilir.
+   */
+  const malformed = values.results
+    .filter((row) => ["CONFIRMED", "CORRECTED"].includes(row.verification_status) && row.value !== MISSING_VALUE)
+    .map((row) => ({ row, violation: formatViolation(profile.byCode.get(row.field_name), row.value) }))
+    .filter((entry) => entry.violation);
+  if (malformed.length) {
+    const reasons = [...new Set(malformed.map((entry) => entry.violation))];
+    return jsonError(`Biçim kuralına uymayan değerler arşivlenemez: ${reasons.join(" ")}`, 409);
   }
 
   const textSummary = await DB.prepare(`SELECT COUNT(*) AS total,

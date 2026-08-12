@@ -2,7 +2,7 @@ import { authorizeRequest, canAccessUnit } from "../../../../lib/authorization";
 import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../lib/archive-storage";
 import { loadVocabularyTerms, resolveDocumentProfile } from "../../../../lib/document-profile";
 import { listDocumentRelations } from "../../../../lib/entities";
-import { isMultiValueField } from "../../../../lib/field-policy";
+import { formatViolation, isMultiValueField } from "../../../../lib/field-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +79,14 @@ export async function GET(request: Request, context: RouteContext) {
     corrected: Boolean(field.corrected_value),
     correctedBy: field.corrected_by,
     correctedAt: field.corrected_at,
+    /*
+     * Biçim kuralı `field_definitions` içindeki desendir ve istemciye
+     * gönderilmez; ihlali yalnız sunucu bilebilir. Bildirilmezse inceleme
+     * ekranı arşivlemeyi engelleyemez ve personel düğmeye basınca gerekçeyi
+     * ancak 409 olarak görür.
+     */
+    formatViolation: formatViolation(profile.byCode.get(field.field_name),
+      field.corrected_value ?? field.field_value),
   }));
 
   /**
