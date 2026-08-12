@@ -7,8 +7,8 @@ import {
   requireArchiveSchema,
 } from "../../../../../lib/archive-storage";
 import {
-  IngestOperationError,
   getUploadSession,
+  ingestErrorResponse,
   uploadPart,
 } from "../../../../../lib/ingest-service";
 import { failure } from "../../../../../lib/errors";
@@ -17,9 +17,8 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ id: string }> };
 
 function ingestFailure(error: unknown, request: Request) {
-  return error instanceof IngestOperationError
-    ? Response.json({ error: error.message, code: error.code }, { status: error.status })
-    : failure(error, "uploads.parts", "Yükleme parçası işlenemedi.", request);
+  return ingestErrorResponse(error)
+    ?? failure(error, "uploads.parts", "Yükleme parçası işlenemedi.", request);
 }
 
 async function contextFor(request: Request, context: RouteContext) {

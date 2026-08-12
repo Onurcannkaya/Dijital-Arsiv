@@ -9,18 +9,17 @@ import {
   requireArchiveSchema,
 } from "../../../lib/archive-storage";
 import {
-  IngestOperationError,
   createUploadSession,
   getUploadSession,
+  ingestErrorResponse,
 } from "../../../lib/ingest-service";
 import { failure } from "../../../lib/errors";
 
 export const dynamic = "force-dynamic";
 
 function ingestFailure(error: unknown, request: Request) {
-  return error instanceof IngestOperationError
-    ? Response.json({ error: error.message, code: error.code }, { status: error.status })
-    : failure(error, "uploads", "Yükleme oturumu işlenemedi.", request);
+  return ingestErrorResponse(error)
+    ?? failure(error, "uploads", "Yükleme oturumu işlenemedi.", request);
 }
 
 export async function POST(request: Request) {
