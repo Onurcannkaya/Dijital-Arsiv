@@ -223,3 +223,6 @@
 .settings-locked div{display:flex;flex-direction:column;gap:3px}
 .settings-locked b{font-size:12.5px;color:var(--ar-text)}
 .settings-locked small{font-size:11.5px}
+
+/* Arşivlemeyi engelleyen eksikler; devre dışı düğmenin nedenini söyler. */
+.archive-blockers{display:flex;align-items:center;gap:8px;margin:10px 0 0;padding:9px 13px;border:1px solid color-mix(in srgb,var(--ar-amber,#c2810a) 32%,transparent);background:color-mix(in srgb,var(--ar-amber,#c2810a) 9%,var(--ar-surface));border-radius:9px;color:var(--ar-amber,#c2810a);font-size:12.5px;font-weight:600}

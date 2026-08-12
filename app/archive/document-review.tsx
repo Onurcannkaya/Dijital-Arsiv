@@ -231,6 +231,18 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const hasTextChanges=detail?.pages.some(page=>(textDrafts[page.pageNumber]??page.confirmedText??page.fullText)!==(page.confirmedText??page.fullText))??false;
   const pendingRelations=detail?.relations.filter(relation=>relation.verificationStatus==="SUGGESTED").length??0;
   const archiveBlocked=pendingValues>0||hasFieldChanges||hasAdditions||textPending||hasTextChanges||pendingRelations>0;
+  /**
+   * Devre dışı arşivleme düğmesi neyin eksik olduğunu söyler. Sessizce
+   * tıklanamayan bir düğme, kullanıcıya işlemin neden ilerlemediğini
+   * anlatmaz; eksikler burada sayılıp başlıkta gösterilir.
+   */
+  const archiveBlockers=[
+    pendingValues>0?`${pendingValues} alan değeri kontrol bekliyor`:null,
+    pendingRelations>0?`${pendingRelations} varlık ilişkisi onay bekliyor`:null,
+    textPending?"OCR metni onaylanmadı":null,
+    hasFieldChanges||hasAdditions?"kaydedilmemiş alan düzenlemesi var":null,
+    hasTextChanges?"kaydedilmemiş metin düzenlemesi var":null,
+  ].filter(Boolean) as string[];
 
   const addValue=(fieldName:string)=>setAdditions(current=>[...current,{key:crypto.randomUUID(),fieldName,value:""}]);
 
@@ -244,8 +256,11 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
       <div>{needsOcr?
         canProcess?<button className="approve" onClick={process} disabled={processing}>{processing?<LoaderCircle className="spin" size={16}/>:<Play size={16}/>} OCR işlemini çalıştır</button>:<span className="archived-lock restricted"><LockKeyhole size={15}/> OCR yetkisi gerekli</span>:
         archived?<span className="archived-lock"><LockKeyhole size={15}/> Salt okunur</span>:
-        <>{canReview?<button className="outline save-fields" onClick={saveFields} disabled={saving||(!pendingValues&&!hasFieldChanges&&!hasAdditions)}>{saving?<LoaderCircle className="spin" size={15}/>:<Save size={15}/>} {pendingValues?"Alanları onayla":"Düzeltmeleri kaydet"}</button>:null}{canArchive?<button className="approve" onClick={approve} disabled={saving||savingText||archiveBlocked}><CheckCircle2 size={17}/> Doğrula ve arşivle</button>:null}{!canReview&&!canArchive?<span className="archived-lock restricted"><LockKeyhole size={15}/> Görüntüleme yetkisi</span>:null}</>}
+        <>{canReview?<button className="outline save-fields" onClick={saveFields} disabled={saving||(!pendingValues&&!hasFieldChanges&&!hasAdditions)}>{saving?<LoaderCircle className="spin" size={15}/>:<Save size={15}/>} {pendingValues?"Alanları onayla":"Düzeltmeleri kaydet"}</button>:null}{canArchive?<button className="approve" onClick={approve} disabled={saving||savingText||archiveBlocked} title={archiveBlockers.length?`Arşivlemeden önce tamamlanmalı: ${archiveBlockers.join(", ")}.`:undefined}><CheckCircle2 size={17}/> Doğrula ve arşivle</button>:null}{!canReview&&!canArchive?<span className="archived-lock restricted"><LockKeyhole size={15}/> Görüntüleme yetkisi</span>:null}</>}
       </div>
+      {canArchive&&!archived&&!needsOcr&&archiveBlockers.length
+        ?<p className="archive-blockers"><AlertTriangle size={14}/> Arşivlemeden önce: {archiveBlockers.join(" · ")}</p>
+        :null}
     </div>
     {error?<div className="inline-error"><AlertTriangle size={16}/>{error}</div>:null}
     {notice?<div className="inline-notice"><CheckCircle2 size={16}/>{notice}</div>:null}
