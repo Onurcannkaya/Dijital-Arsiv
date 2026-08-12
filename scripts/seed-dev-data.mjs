@@ -30,6 +30,7 @@ import { join, resolve, sep } from "node:path";
 
 import { createNodeSqliteD1 } from "../lib/node-sqlite-d1.ts";
 import { writeAuditEvent } from "../lib/audit.ts";
+import { normalizeSearch } from "../lib/text-search.ts";
 
 const SEED_MARK = "seed-dev";
 const UPLOADER = "yerel-pilot@sivas.bel.tr";
@@ -192,7 +193,7 @@ async function seed(db) {
             (id, document_id, page_number, width, height, raw_text, full_text, search_text,
              confirmed_text, confirmed_by, confirmed_at, words_json, average_confidence, model, created_at)
           VALUES (?, ?, ?, 1240, 1754, ?, ?, ?, ?, ?, ?, '[]', ?, 'paddleocr-local', ?)`)
-          .bind(randomUUID(), documentId, page, text, text, text.toLocaleLowerCase("tr"),
+          .bind(randomUUID(), documentId, page, text, text, normalizeSearch(text),
             document.verified ? text : null, document.verified ? REVIEWER : null,
             document.verified ? createdAt : null, document.confidence, createdAt).run();
       }
@@ -208,7 +209,7 @@ async function seed(db) {
              verified_by, verified_at, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, '[]', ?, 'paddleocr-local', ?, 'OCR', ?, ?, ?, ?)`)
           .bind(field.id, documentId, field.name, field.index, field.value,
-            String(field.value).toLocaleLowerCase("tr"), field.confidence, field.risk,
+            normalizeSearch(String(field.value)), field.confidence, field.risk,
             field.value, field.status,
             field.status === "CONFIRMED" ? REVIEWER : null,
             field.status === "CONFIRMED" ? createdAt : null, createdAt, createdAt).run();
