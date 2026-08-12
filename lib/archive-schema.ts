@@ -41,7 +41,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 22;
+export const ARCHIVE_SCHEMA_VERSION = 23;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -446,6 +446,32 @@ const tableStatements: string[] = [
   "CREATE INDEX IF NOT EXISTS archive_users_role_idx ON archive_users (role)",
   "CREATE INDEX IF NOT EXISTS archive_users_unit_idx ON archive_users (unit)",
 
+  /*
+   * Kullanıcı ve rol yönetimi denetim kaydı.
+   *
+   * `audit_events` belgeye bağlıdır (document_id NOT NULL + FK), bu yüzden
+   * yetki değişiklikleri oraya yazılamaz. Yetkilendirme kararları kurumsal
+   * denetimin konusudur: kim, kimin rolünü/birimini/erişimini, ne zaman
+   * değiştirdi. Kayıt yalnız eklenebilir; güncelleme ve silme tetikleyiciyle
+   * reddedilir.
+   */
+  `CREATE TABLE IF NOT EXISTS user_admin_events (
+    id TEXT PRIMARY KEY NOT NULL,
+    actor TEXT NOT NULL,
+    target_email TEXT NOT NULL,
+    action TEXT NOT NULL,
+    previous_state TEXT,
+    new_state TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (action IN ('user.created', 'user.updated'))
+  )`,
+  "CREATE INDEX IF NOT EXISTS user_admin_events_target_idx ON user_admin_events (target_email, created_at)",
+  "CREATE INDEX IF NOT EXISTS user_admin_events_created_idx ON user_admin_events (created_at)",
+  `CREATE TRIGGER IF NOT EXISTS user_admin_events_no_update
+    BEFORE UPDATE ON user_admin_events BEGIN SELECT RAISE(ABORT, 'Kullanıcı denetim kaydı değiştirilemez'); END`,
+  `CREATE TRIGGER IF NOT EXISTS user_admin_events_no_delete
+    BEFORE DELETE ON user_admin_events BEGIN SELECT RAISE(ABORT, 'Kullanıcı denetim kaydı silinemez'); END`,
+
   `CREATE TABLE IF NOT EXISTS audit_events (
     id TEXT PRIMARY KEY NOT NULL,
     document_id TEXT NOT NULL REFERENCES archive_documents(id) ON DELETE CASCADE,
@@ -730,6 +756,13 @@ async function createLegacyKeyMigrationTable(db: D1Database) {
 /** F1.9: görüntüleme oturumu tablosu mevcut kurulumlara eklenir. */
 async function createAccessSessionTable(db: D1Database) {
   for (const statement of ingestTableStatements.filter((sql) => sql.includes("access_sessions"))) {
+    await db.prepare(statement).run();
+  }
+}
+
+/** Kullanıcı/rol yönetimi denetim kaydı mevcut kurulumlara eklenir. */
+async function createUserAdminEventTable(db: D1Database) {
+  for (const statement of tableStatements.filter((sql) => sql.includes("user_admin_events"))) {
     await db.prepare(statement).run();
   }
 }
@@ -1202,6 +1235,8 @@ const structuralMigrations: MigrationStep[] = [
   { version: 21, run: createAccessSessionTable },
   // 21 → 22: belge+sınıf bağı, kapalı amaç kodu ve değişmez bağlama tetikleyicileri.
   { version: 22, run: hardenAccessTicketBindings },
+  // 22 → 23: kullanıcı/rol yönetimi değişmez denetim kaydı.
+  { version: 23, run: createUserAdminEventTable },
 ];
 
 /**
