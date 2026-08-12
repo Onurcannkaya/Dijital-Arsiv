@@ -2,6 +2,7 @@
 
 import { CheckCircle2, Database, FileText, Fingerprint, LoaderCircle, Upload, X } from "lucide-react";
 import { DragEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { ACCEPTED_FILE_EXTENSIONS } from "../../lib/ingest-contract";
 
 export type StoredDocument = {
   id: string;
@@ -33,7 +34,8 @@ type UploadDialogProps = {
   onCreated: (document: StoredDocument) => void;
 };
 
-const accepted = ".pdf,.jpg,.jpeg,.png,.tif,.tiff";
+// Liste yükleme sözleşmesinden gelir; arayüz ile sunucu ayrışmasın.
+const accepted = ACCEPTED_FILE_EXTENSIONS.join(",");
 
 /** Yükleme seçenekleri kontrollü listelerden gelir; arayüzde sabit liste tutulmaz. */
 type ProfileOption = { code: string; name: string; status: string };

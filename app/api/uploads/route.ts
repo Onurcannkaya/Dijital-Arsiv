@@ -13,6 +13,7 @@ import {
   getUploadSession,
   ingestErrorResponse,
 } from "../../../lib/ingest-service";
+import { ACCEPTED_FILE_EXTENSIONS, isAcceptedMediaType } from "../../../lib/ingest-contract";
 import { failure } from "../../../lib/errors";
 
 export const dynamic = "force-dynamic";
@@ -44,6 +45,16 @@ export async function POST(request: Request) {
     if (!unit || (!canAccessUnit(principal, requestedUnit) && !canAccessUnit(principal, unit))) {
       return jsonError("Bu müdürlük adına yükleme yetkiniz bulunmuyor.", 403);
     }
+    /*
+     * Bildirilen tür hiç desteklenmiyorsa oturumu açmanın anlamı yok: memur
+     * 2 GiB'a kadar dosyayı boşuna yükler ve ret ancak taramada gelir.
+     * İçeriğe bakan asıl denetim yine tarama servisindedir (K-1); bu yalnız
+     * baştan bilinebileni baştan söyler.
+     */
+    const declaredMediaType = String(body.mediaType ?? "").trim().toLowerCase();
+    if (!isAcceptedMediaType(declaredMediaType)) {
+      return jsonError(`Desteklenmeyen belge biçimi. Kabul edilenler: ${ACCEPTED_FILE_EXTENSIONS.join(", ")}.`);
+    }
     const idempotencyKey = request.headers.get("idempotency-key") ?? String(body.idempotencyKey ?? "");
     const storages = getIngestStorages(bindings);
     const session = await createUploadSession({
@@ -55,7 +66,7 @@ export async function POST(request: Request) {
       unit,
       idempotencyKey,
       expectedByteSize: Number(body.byteSize),
-      declaredMediaType: String(body.mediaType ?? ""),
+      declaredMediaType,
       originalName: String(body.originalName ?? ""),
       requestedDocumentType: profile.name,
     });
