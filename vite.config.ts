@@ -32,13 +32,19 @@ const localBindingConfig = {
         },
       ]
     : [],
+  /*
+   * Kabul hattı ADR-014 gereği dört ayrı yetki alanı kullanır: geçici yükleme,
+   * karantina, asıl kasa ve türev. Yerel emülasyonda yalnız asıl kasa
+   * tanımlıyken `/api/uploads` "TEMPORARY_FILES ve QUARANTINE_FILES ...
+   * yapılandırılmalıdır" hatasıyla düşüyordu; belge yükleme akışı yerelde hiç
+   * denenemiyordu. Her bağ ayrı bir yerel kovaya işaret eder ki alanların
+   * ayrımı geliştirmede de korunsun.
+   */
   r2_buckets: r2
-    ? [
-        {
-          binding: r2,
-          bucket_name: "site-creator-r2",
-        },
-      ]
+    ? [r2, "DERIVATIVE_FILES", "TEMPORARY_FILES", "QUARANTINE_FILES"].map((binding) => ({
+        binding,
+        bucket_name: `site-creator-r2-${binding.toLowerCase().replace(/_/g, "-")}`,
+      }))
     : [],
 };
 
