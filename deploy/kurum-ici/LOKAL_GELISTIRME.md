@@ -79,6 +79,21 @@ Beklenen: `{"applied":true,"fromVersion":0,"toVersion":22}`. Ardından
 `http://localhost:3000/archive` çalışma alanını açar; yerel pilot kimliği
 otomatik yönetici olarak tanınır.
 
+**Örnek belge verisi.** Lokalde OCR ve içerik tarama servisleri çalışmadığı
+için kabul hattı belgeleri karantinada bırakır; liste, arama, doğrulama ve
+belge inceleme ekranları boş kalır. Tohum betiği bu boşluğu doldurur:
+
+```bash
+node scripts/seed-dev-data.mjs
+```
+
+Yedi belge yazar: arşivlenmiş (doğrulanmış alanlar ve ilişkilerle), doğrulama
+bekleyen, OCR'ı süren, kuyruktaki ve OCR'ı başarısız olan kayıtlar; OCR
+sayfaları, alan değerleri, ada/parsel varlık ilişkileri ve denetim olaylarıyla
+birlikte. Betik idempotenttir ve yalnız `.wrangler/` ya da `data/` altındaki
+geliştirme veritabanına yazar. Tohum kayıtları SİLİNMEZ — denetim olayları
+değişmezdir; temiz başlangıç için aşağıdaki sıfırlama kullanılır.
+
 **Yerel durumu sıfırlama.** `.wrangler/state/v3/d1` ve `.../r2` dizinleri
 yerel D1/R2 emülasyon verisidir. Şema hatası alıyorsanız (ör. eski bir
 sürümde kalmış veritabanı `duplicate column` üretir) bu iki dizini silip
