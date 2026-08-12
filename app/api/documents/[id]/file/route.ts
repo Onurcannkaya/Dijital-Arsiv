@@ -134,7 +134,7 @@ export async function GET(request: Request, context: RouteContext) {
     : servable.object_class === "access" && servable.bucket_or_namespace === "DERIVATIVE_FILES";
   if (!correctBinding) {
     await revokeUnreturnedSession();
-    return jsonError("Erişim kapsamı nesne sınıfıyla uyuşmuyor.", 503);
+    return jsonError("Erişim kapsamı nesne sınıfıyla uyuşmuyor; belge sunulmadı. Durumu işletim ekibine bildirin.", 503);
   }
 
   let object;
@@ -145,11 +145,11 @@ export async function GET(request: Request, context: RouteContext) {
     object = await reader.get(servable.object_key, range ? { range } : undefined);
   } catch {
     await revokeUnreturnedSession();
-    return jsonError("Belge depolama okuma rolü kullanılamıyor.", 503);
+    return jsonError("Belge deposuna şu an erişilemiyor. Birkaç dakika sonra yeniden deneyin; sürerse işletim ekibine bildirin.", 503);
   }
   if (!object) {
     await revokeUnreturnedSession();
-    return jsonError("Dosya kasada bulunamadı.", 404);
+    return jsonError("Belgenin aslı kasada bulunamadı. Tekrar denemek sonucu değiştirmez; kayıt numarasıyla işletim ekibine bildirin.", 404);
   }
   const rangeMismatch = range && (object.range?.offset !== range.offset
     || object.range?.length !== range.length || object.bodySize !== range.length);
@@ -158,7 +158,7 @@ export async function GET(request: Request, context: RouteContext) {
     || (!range && object.range !== null)
     || rangeMismatch) {
     await revokeUnreturnedSession();
-    return jsonError("Dosya kasası kanıtı yetkili nesne kaydıyla uyuşmuyor.", 503);
+    return jsonError("Kasadaki dosya, yetkili nesne kaydıyla uyuşmadığı için sunulmadı. Kayıt numarasıyla işletim ekibine bildirin.", 503);
   }
 
   try {

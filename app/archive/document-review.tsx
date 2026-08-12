@@ -62,6 +62,19 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const [previewMode,setPreviewMode]=useState<"image"|"text">("image");
   const [fileSrc,setFileSrc]=useState("");
 
+  /**
+   * Dosya isteği başarısızsa sunucunun verdiği sebebi okur.
+   *
+   * Yetki reddi, kasada bulunamayan nesne ve geçici depolama arızası
+   * kullanıcı için farklı eylemler gerektirir ("yöneticinize başvurun",
+   * "işletime bildirin", "tekrar deneyin"); hepsini tek genel cümleye
+   * indirmek bu ayrımı yok eder.
+   */
+  const fileErrorMessage=async(response:Response,fallback:string)=>{
+    const payload=await response.json().catch(()=>null) as {error?:string}|null;
+    return payload?.error??fallback;
+  };
+
   /** Açık bilet URL'ye yazılmaz; Authorization başlığı log/geçmiş sızıntısını önler. */
   const requestTicket=useCallback(async(scope:"VIEW"|"DOWNLOAD")=>{
     const purpose=scope==="VIEW"?"DOCUMENT_REVIEW":"ORIGINAL_DOWNLOAD";
@@ -84,7 +97,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
         const response=await fetch(detail.document.fileUrl,{
           headers:{authorization:`ArchiveTicket ${ticket}`,"x-archive-access-scope":"VIEW"},
         });
-        if(!response.ok) throw new Error("Belge görüntüsü alınamadı.");
+        if(!response.ok) throw new Error(await fileErrorMessage(response,"Belge görüntüsü alınamadı."));
         const blob=await response.blob();
         if(cancelled) return;
         objectUrl=URL.createObjectURL(blob);
@@ -103,7 +116,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
       const response=await fetch(detail.document.fileUrl,{
         headers:{authorization:`ArchiveTicket ${ticket}`,"x-archive-access-scope":"DOWNLOAD"},
       });
-      if(!response.ok) throw new Error("Asıl belge indirilemedi.");
+      if(!response.ok) throw new Error(await fileErrorMessage(response,"Asıl belge indirilemedi."));
       const url=URL.createObjectURL(await response.blob());
       const link=document.createElement("a");
       link.href=url;link.download=detail.document.originalName;
