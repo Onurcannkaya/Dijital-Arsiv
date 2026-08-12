@@ -200,3 +200,26 @@
 .activity-open:hover{border-color:var(--ar-blue);color:var(--ar-blue)}
 .activity-tag{display:inline-flex;align-items:center;gap:6px;color:var(--ar-muted);font-size:11.5px;font-weight:600;flex:none}
 @media(max-width:640px){.activity-list li{flex-wrap:wrap}.activity-open{margin-left:45px}}
+
+/* Ayarlar ekranı */
+.settings-status{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;padding:18px}
+.status-card{display:flex;gap:11px;align-items:flex-start;border:1px solid var(--ar-border);border-radius:10px;padding:13px}
+.status-card>span{width:32px;height:32px;flex:none;display:grid;place-items:center;border-radius:8px;background:var(--ar-surface-2);color:var(--ar-muted)}
+.status-card.ok>span{background:color-mix(in srgb,var(--ar-green) 12%,var(--ar-surface));color:var(--ar-green)}
+.status-card.down>span{background:color-mix(in srgb,var(--ar-red) 12%,var(--ar-surface));color:var(--ar-red)}
+.status-card div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.status-card small{color:var(--ar-muted);font-size:11.5px;font-weight:600}
+.status-card b{font-size:13.5px}
+.status-card.down b{color:var(--ar-red)}
+.status-card p{margin:0;color:var(--ar-muted);font-size:11.5px}
+.settings-maintenance{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:0 18px 18px;padding:13px 15px;border:1px solid var(--ar-border);border-radius:10px;background:var(--ar-surface-2)}
+.settings-maintenance div{display:flex;flex-direction:column;gap:3px}
+.settings-maintenance b{font-size:13px}
+.settings-maintenance small{color:var(--ar-muted);font-size:11.5px}
+.settings-maintenance button,.panel header .outline{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;padding:7px 12px}
+.settings-locked{list-style:none;margin:0;padding:6px 18px 18px;display:flex;flex-direction:column;gap:2px}
+.settings-locked li{display:flex;gap:11px;align-items:flex-start;padding:11px 0;border-bottom:1px solid var(--ar-border);color:var(--ar-muted)}
+.settings-locked li:last-child{border-bottom:0}
+.settings-locked div{display:flex;flex-direction:column;gap:3px}
+.settings-locked b{font-size:12.5px;color:var(--ar-text)}
+.settings-locked small{font-size:11.5px}

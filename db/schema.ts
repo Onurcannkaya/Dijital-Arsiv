@@ -397,11 +397,13 @@ export const archiveUsers = sqliteTable("archive_users", {
 export const userAdminEvents = sqliteTable("user_admin_events", {
   id: text("id").primaryKey(),
   actor: text("actor").notNull(),
+  /** Hedef kimliği: kullanıcı olaylarında e-posta, müdürlük olaylarında kod. */
   targetEmail: text("target_email").notNull(),
   action: text("action").notNull(),
   previousState: text("previous_state"),
   newState: text("new_state").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  targetKind: text("target_kind").notNull().default("user"),
 }, (table) => [
   index("user_admin_events_target_idx").on(table.targetEmail, table.createdAt),
   index("user_admin_events_created_idx").on(table.createdAt),
