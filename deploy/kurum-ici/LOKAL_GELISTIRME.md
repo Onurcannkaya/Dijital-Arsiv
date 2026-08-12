@@ -103,6 +103,17 @@ sunucuyu yeniden başlatın ve göçü tekrar çalıştırın.
 > binary'sinin desteklediği en yeni tarihtir ve YALNIZ yerel emülasyon
 > içindir; dağıtım tarihi `wrangler.jsonc`'ta kalır.
 
+## Belge yükleme
+
+Arayüzden belge yüklemek yerelde çalışır: oturum açılır, parçalar SHA-256 ile
+doğrulanır ve nesne karantinaya alınır. Yükleme dört ayrı R2 bağı kullanır
+(geçici, karantina, asıl kasa, türev) ve bunlar `vite.config.ts` içinde yerel
+emülasyon için tanımlıdır.
+
+Belge yükleme sonrası listede GÖRÜNMEZ; bu doğru davranıştır. `archive_documents`
+kaydı ancak tarama ve terfi tamamlandığında oluşur (F1.5). Lokalde tarama
+servisi olmadığından oturum `QUARANTINED` durumunda bekler.
+
 ## Tarama/terfi de dahil tam hat isteniyorsa
 
 QUARANTINED sonrası ACCEPTED'a giden zincir üç Python servisini ister
