@@ -97,6 +97,15 @@ const documents = [
     text: "",
   },
   {
+    // İlişki doğrulama/reddetme akışı için: OCR önerisi yanlış parseli işaret
+    // ediyor; personel ilişkiyi reddedip doğrusunu elle ekler.
+    key: "numarataj-iliski-review", type: "NUMARATAJ_TUTANAGI", typeName: "Numarataj tespit tutanağı",
+    unit: "İmar ve Şehircilik Müdürlüğü", status: "review", name: "numarataj-tutanagi-2022-kilavuz.pdf",
+    neighborhood: "Kılavuz", ada: "1284", parcel: "17", date: "08.03.2022",
+    addressee: "", confidence: 0.68, pages: 1, pending: ["ada", "parcel"],
+    text: "NUMARATAJ TESPİT TUTANAĞI Kılavuz Mahallesi 1284 ada 17 parselde bulunan yapıya numarataj verilmiştir.",
+  },
+  {
     key: "encumen-yazi-arsiv", type: "ENCUMEN_KARARI", typeName: "Encümen karar sureti",
     unit: "Yazı İşleri Müdürlüğü", status: "archived", name: "encumen-karari-2022-tahsis.pdf",
     neighborhood: "Halilağa", ada: "56", parcel: "104", date: "19.07.2022",
@@ -206,16 +215,26 @@ async function seed(db) {
       }
 
       // Ada/parsel varlığı ve belge ilişkisi: arama ve ilişki ekranı için.
-      const entityId = randomUUID();
+      //
+      // Parsel varlığı kimliğiyle tekildir (parcel_entities_identity_unique):
+      // aynı parsele ait ikinci belge YENİ varlık üretmez, mevcut olana
+      // bağlanır. Gerçek arşivde de bir parselin birden çok belgesi olur.
+      const neighbourhoodCode = document.neighborhood.toLocaleUpperCase("tr");
+      const existingParcel = await db.prepare(`SELECT entity_id FROM parcel_entities
+        WHERE district_code = '5801' AND cadastral_neighborhood = ? AND block_no = ? AND parcel_no = ?`)
+        .bind(neighbourhoodCode, document.ada, document.parcel).first();
+      const entityId = existingParcel?.entity_id ?? randomUUID();
       const label = `${document.ada} ada ${document.parcel} parsel`;
-      await db.prepare(`INSERT INTO entities
-          (id, entity_type, display_label, authority_source, entity_status, created_by, created_at, updated_at)
-        VALUES (?, 'PARCEL', ?, 'ARCHIVE', 'PROVISIONAL', ?, ?, ?)`)
-        .bind(entityId, label, UPLOADER, createdAt, createdAt).run();
-      await db.prepare(`INSERT INTO parcel_entities
-          (entity_id, district_code, cadastral_neighborhood, block_no, parcel_no, parcel_status)
-        VALUES (?, '5801', ?, ?, ?, 'ACTIVE')`)
-        .bind(entityId, document.neighborhood.toLocaleUpperCase("tr"), document.ada, document.parcel).run();
+      if (!existingParcel) {
+        await db.prepare(`INSERT INTO entities
+            (id, entity_type, display_label, authority_source, entity_status, created_by, created_at, updated_at)
+          VALUES (?, 'PARCEL', ?, 'ARCHIVE', 'PROVISIONAL', ?, ?, ?)`)
+          .bind(entityId, label, UPLOADER, createdAt, createdAt).run();
+        await db.prepare(`INSERT INTO parcel_entities
+            (entity_id, district_code, cadastral_neighborhood, block_no, parcel_no, parcel_status)
+          VALUES (?, '5801', ?, ?, ?, 'ACTIVE')`)
+          .bind(entityId, neighbourhoodCode, document.ada, document.parcel).run();
+      }
       await db.prepare(`INSERT INTO document_entity_relations
           (id, document_id, entity_id, relation_type, relation_source, relation_confidence,
            verification_status, verified_by, verified_at, created_by, created_at, updated_at)
