@@ -390,6 +390,24 @@ export const archiveUsers = sqliteTable("archive_users", {
 ]);
 
 /**
+ * Kullanıcı ve rol yönetimi denetim kaydı. `audit_events` belgeye bağlı
+ * olduğundan yetki değişiklikleri oraya yazılamaz; bu tablo yalnız eklenir,
+ * güncelleme ve silme tetikleyiciyle reddedilir (lib/archive-schema.ts).
+ */
+export const userAdminEvents = sqliteTable("user_admin_events", {
+  id: text("id").primaryKey(),
+  actor: text("actor").notNull(),
+  targetEmail: text("target_email").notNull(),
+  action: text("action").notNull(),
+  previousState: text("previous_state"),
+  newState: text("new_state").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("user_admin_events_target_idx").on(table.targetEmail, table.createdAt),
+  index("user_admin_events_created_idx").on(table.createdAt),
+]);
+
+/**
  * Uzun süren bakım işleri (arama dizini yenilemesi gibi). Bütün arşivi dolaşan
  * iş göç adımının içinde çalıştırılmaz; kilitli ve imleçli olarak dilimlenir.
  */
