@@ -65,10 +65,14 @@ export function EntityRelations({ documentId, relations, canReview, archived, on
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ relations: [{ id: relationId, action }] }),
       });
-      const payload = await response.json() as { error?: string; relations?: EntityRelation[] };
+      const payload = await response.json() as { error?: string; unchanged?: boolean; message?: string; relations?: EntityRelation[] };
       if (!response.ok) throw new Error(payload.error || "İlişki güncellenemedi.");
       onChanged(payload.relations ?? []);
-      onNotice(action === "verify" ? "Varlık ilişkisi personel onayıyla doğrulandı." : "Varlık ilişkisi reddedildi; kayıt denetim izinde korunuyor.");
+      // Durum zaten istenen durumdaysa karar kaydedilmez; bunu "doğrulandı"
+      // diye bildirmek personele olmamış bir işlemi rapor eder.
+      onNotice(payload.unchanged
+        ? payload.message ?? "İlişki zaten bu durumdaydı."
+        : action === "verify" ? "Varlık ilişkisi personel onayıyla doğrulandı." : "Varlık ilişkisi reddedildi; kayıt denetim izinde korunuyor.");
     } catch (reason) {
       onError(reason instanceof Error ? reason.message : "İlişki güncellenemedi.");
     } finally {
@@ -87,10 +91,13 @@ export function EntityRelations({ documentId, relations, canReview, archived, on
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      const payload = await response.json() as { error?: string; relations?: EntityRelation[]; entity?: { displayLabel: string } };
+      const payload = await response.json() as { error?: string; unchanged?: boolean; message?: string;
+        relations?: EntityRelation[]; entity?: { displayLabel: string; created?: boolean } };
       if (!response.ok) throw new Error(payload.error || "İlişki eklenemedi.");
       onChanged(payload.relations ?? []);
-      onNotice(`${payload.entity?.displayLabel ?? "Varlık"} belgeyle ilişkilendirildi.`);
+      onNotice(payload.unchanged
+        ? payload.message ?? "Bu ilişki zaten kurulmuştu."
+        : `${payload.entity?.displayLabel ?? "Varlık"} belgeyle ilişkilendirildi${payload.entity?.created ? "" : " (var olan kayıt kullanıldı)"}.`);
       setParcel(emptyParcel); setAddress(emptyAddress); setMode("none");
     } catch (reason) {
       onError(reason instanceof Error ? reason.message : "İlişki eklenemedi.");
