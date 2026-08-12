@@ -30,8 +30,9 @@ iniyordur; `docker compose ps` sağlık sütununu izleyin.
 - **Ağ**: API, MinIO ve servisler yalnız `arsiv-ic` ağındadır; dışarıya tek
   kapı vekilin portudur.
 - **Değişmezlik**: `arsiv-asil` kovası sürümleme + Object Lock ile açılır
-  (gerçek WORM, ADR-016). Kilit/bekletme politikaları kurum kararıyla
-  `mc retention` üzerinden tanımlanır.
+  (gerçek WORM, ADR-016). ADR-018 Karar 5 gereği ilk üretim döneminde tasfiye
+  KAPALIDIR: varsayılan bekletme tanımlanmaz, tasfiye kimliği açılmaz; sınıf
+  bazlı bekletme dosya planı eşlemesi sonrası yeni ADR ile gelir.
 - **SQLite verisi** `api-veri` birimindedir; yedeği dosya kopyasıyla değil
   önce `checkpoint` (kapanış) sonra birim anlık görüntüsüyle alın.
 

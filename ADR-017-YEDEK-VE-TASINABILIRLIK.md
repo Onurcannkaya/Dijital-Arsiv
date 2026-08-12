@@ -1,6 +1,6 @@
 # ADR-017 — Yedek, RPO/RTO ve Sağlayıcı Taşınabilirliği
 
-- Durum: Pilot teknik hedef kabul edildi — iş etki analizi ve kurumsal onay bekliyor
+- Durum: Üretim hedefi olarak kurumsal onaylandı (ADR-018, 2026-08-12)
 - Tarih: 2026-07-30
 - Kapsam: Üst veri, asıl/türev nesneler, denetim izi ve geri yükleme
 - Sahip: Bilgi İşlem

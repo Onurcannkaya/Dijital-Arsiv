@@ -22,14 +22,15 @@ işleri devralacak kişi için tek sayfada toplar. Ayrıntı belgeleri:
 
 ## Kalan işler (önerilen sıra)
 
-### 1. Kurumsal karar (bloklayıcı)
-- [ ] Üretim yerleşiminin resmî onayı: kurum içi MinIO + Node (bu portun
-      varsayımı). Onaylanırsa Cloudflare, sentetik pilot/CI ortamı olarak
-      kalır; Faz A'nın yarım kalan Cloudflare sırları (API token, base URL)
-      yalnız o pilot istenirse tamamlanır.
-- [ ] İş Etki Analizi kararları: nihai RPO/RTO, kapasite/büyüme, ikinci
-      hata alanının fiziksel yeri (ADR-017), saklama süreleri ve KVKK
-      onayları (S3 politikası "üretim öncesi kararlar" listesi).
+### 1. Kurumsal karar — ✅ TAMAMLANDI (2026-08-12, ADR-018)
+- [x] Üretim yerleşimi onaylandı: kurum içi MinIO + Node; Cloudflare yalnız
+      sentetik CI/deneme pilotu olarak kalabilir.
+- [x] İş Etki Analizi kararları onaylandı: ADR-017 tablosu üretim hedefi
+      (tatbikat RTO'su 28800 sn), il içi ayrı tesiste ikinci MinIO + aylık
+      soğuk yedek, ilk dönem tasfiye kapalı, günlük uzlaştırma + 30 günlük
+      tam SHA turu, üç birimli çıkış/imha kurulu.
+- [ ] Açık girdiler (ADR-018): yıllık belge hacmi/büyüme tahmini (Yazı
+      İşleri + Arşiv) ve ikinci tesisin ağ ucu.
 
 ### 2. Makine kurulumu (P7 sahada)
 - [ ] Docker'lı sunucu tahsisi (`AYAGA_KALDIRMA.md` §0 ön koşulları).
@@ -71,7 +72,8 @@ işleri devralacak kişi için tek sayfada toplar. Ayrıntı belgeleri:
 ### 5. Sonraki dalgalar (Faz 1 sonrası, ayrı planlama)
 - [ ] UI'nin kurum içi sunumu (Node yığını bilinçli API-only).
 - [ ] P9: PostgreSQL geçişi + arama iyileştirmesi (çok replika gerekirse
-      öne çekilir).
+      öne çekilir) + MinIO KES/SSE ile kurum sahipliğinde anahtar (ADR-018
+      Karar 2, 2. dalga).
 - [ ] EBYS / kent bilgi sistemi (ada-parsel) entegrasyonları — varlık
       modeli hazır, bağlantılar ayrı analiz ister.
 - [ ] Kabul sonrası hijyen: `ACCEPTANCE_PROXY_TOKEN` rotasyonu, kabul
