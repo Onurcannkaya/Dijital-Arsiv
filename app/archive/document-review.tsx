@@ -17,6 +17,8 @@ type DetailValue = {
   verificationStatus:VerificationStatus; origin:"OCR"|"HUMAN"; pageNumber:number;
   box:[number,number,number,number]; evidenceText:string; model:string;
   verifiedBy:string|null; verifiedAt:string|null; corrected:boolean; correctedBy:string|null; correctedAt:string|null;
+  /** Biçim kuralı ihlali varsa gerekçe; kural sunucudadır, istemci hesaplayamaz. */
+  formatViolation:string|null;
 };
 type FieldGroup = {
   name:string; label:string; multiValue:boolean; critical:boolean; required:boolean;
@@ -257,7 +259,11 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const textPending=detail?.pages.some(page=>!page.confirmedText)??false;
   const hasTextChanges=detail?.pages.some(page=>(textDrafts[page.pageNumber]??page.confirmedText??page.fullText)!==(page.confirmedText??page.fullText))??false;
   const pendingRelations=detail?.relations.filter(relation=>relation.verificationStatus==="SUGGESTED").length??0;
-  const archiveBlocked=pendingValues>0||hasFieldChanges||hasAdditions||textPending||hasTextChanges||pendingRelations>0;
+  // Reddedilen değer arşive girmez; onun biçimi arşivlemeyi engellemez.
+  const malformed=detail?.fields.filter(value=>value.formatViolation
+    &&value.verificationStatus!=="REJECTED"&&!rejections[value.id])??[];
+  const archiveBlocked=pendingValues>0||hasFieldChanges||hasAdditions||textPending
+    ||hasTextChanges||pendingRelations>0||malformed.length>0;
   /**
    * Devre dışı arşivleme düğmesi neyin eksik olduğunu söyler. Sessizce
    * tıklanamayan bir düğme, kullanıcıya işlemin neden ilerlemediğini
@@ -266,6 +272,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const archiveBlockers=[
     pendingValues>0?`${pendingValues} alan değeri kontrol bekliyor`:null,
     pendingRelations>0?`${pendingRelations} varlık ilişkisi onay bekliyor`:null,
+    malformed.length?`${malformed.length} değer biçim kuralına uymuyor (${[...new Set(malformed.map(value=>value.label))].join(", ")})`:null,
     textPending?"OCR metni onaylanmadı":null,
     hasFieldChanges||hasAdditions?"kaydedilmemiş alan düzenlemesi var":null,
     hasTextChanges?"kaydedilmemiş metin düzenlemesi var":null,
