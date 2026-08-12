@@ -16,6 +16,7 @@ import { SettingsScreen } from "./settings";
 type View = "dashboard" | "inbox" | "review" | "archive" | "users" | "activity" | "settings";
 type DocumentRow = { id:string; referenceNo?:string; title:string; unit:string; place:string; parcel:string; status:string; rawStatus:string; confidence:number; contentMatch?:boolean; pending?:number; relations?:number };
 type CurrentUser = { email:string; displayName:string; role:string; roleLabel:string; unit:string; permissions:string[] };
+type HealthChecks = Record<string,{ok:boolean}>;
 type Overview = {
   scope:string;
   documents:{ total:number; today:number; queued:number; processing:number; review:number; ready:number; archived:number; archivedToday:number; failed:number };
@@ -51,15 +52,18 @@ function Badge({status}:{status:string}) {
 function Table({rows,onOpen,empty}:{rows:DocumentRow[],onOpen:(id:string)=>void,empty:string}) {
   if(!rows.length) return <p className="table-empty">{empty}</p>;
   return <div className="table-wrap"><table><thead><tr><th>Belge</th><th>İlgili birim</th><th>Ada / parsel</th><th>Durum</th><th>Güven</th><th /></tr></thead><tbody>
-    {rows.map(d=><tr key={d.id}><td><button className="doc-cell" onClick={()=>onOpen(d.id)}><span><FileSearch size={18}/></span><b>{d.title}<small>{d.referenceNo??d.id} · {d.place}{d.relations?` · ${d.relations} doğrulanmış ilişki`:""}</small></b></button></td><td>{d.unit}</td><td className="mono">{d.parcel}</td><td><Badge status={d.status}/>{d.pending?<small className="pending-count">{d.pending} kayıt bekliyor</small>:null}</td><td>{d.confidence>0?<b className={d.confidence<80?"low-confidence":"confidence"}>%{d.confidence}</b>:<span className="pending-confidence">Bekliyor</span>}</td><td><button className="icon-btn" aria-label={`${d.id} belgesini aç`} onClick={()=>onOpen(d.id)}><ChevronRight size={17}/></button></td></tr>)}
+    {rows.map(d=><tr key={d.id}><td><button className="doc-cell" onClick={()=>onOpen(d.id)}><span><FileSearch size={18}/></span><b>{d.title}<small>{d.referenceNo??d.id} · {d.place}{d.relations?` · ${d.relations} doğrulanmış ilişki`:""}</small></b></button></td><td>{d.unit}</td><td className="mono">{d.parcel}</td><td><Badge status={d.status}/>{d.pending?<small className="pending-count">{d.pending} kayıt bekliyor</small>:null}</td><td>{d.confidence>0?<b className={d.confidence<80?"low-confidence":"confidence"}>%{d.confidence}</b>:<span className="pending-confidence">Bekliyor</span>}</td><td><button className="icon-btn" aria-label={`${d.referenceNo??d.title} belgesini aç`} onClick={()=>onOpen(d.id)}><ChevronRight size={17}/></button></td></tr>)}
   </tbody></table></div>;
 }
 function Metric({icon:Icon,label,value,note,tone}:{icon:typeof Files,label:string,value:string,note:string,tone:string}) {
   return <article className="metric"><span className={`metric-icon ${tone}`}><Icon size={19}/></span><div><small>{label}</small><strong>{value}</strong><p>{note}</p></div></article>;
 }
 
-function Dashboard({rows,overview,open,onUpload,userName,canUpload}:{rows:DocumentRow[],overview:Overview|null,open:(id:string)=>void,onUpload:()=>void,userName:string,canUpload:boolean}) {
+function Dashboard({rows,overview,health,open,onUpload,userName,canUpload}:{rows:DocumentRow[],overview:Overview|null,health:HealthChecks|null,open:(id:string)=>void,onUpload:()=>void,userName:string,canUpload:boolean}) {
   const documents=overview?.documents;
+  const healthEntries=Object.values(health??{});
+  const healthyCount=healthEntries.filter((check)=>check.ok).length;
+  const healthTotal=healthEntries.length;
   const pending=overview?.pending;
   const waiting=(pending?.fieldValues??0)+(pending?.relations??0)+(pending?.textPages??0);
   // Doğrulama kuyruğu `review` ve `ready` içerir; gösterge de ikisini sayar,
@@ -89,9 +93,12 @@ function Dashboard({rows,overview,open,onUpload,userName,canUpload}:{rows:Docume
       <article className="panel health"><header><div><h2>Kayıt durumu</h2><p>Ölçülen değerler</p></div></header>
         {([["Bekleyen alan değeri",pending?.fieldValues,Gauge],["Bekleyen varlık ilişkisi",pending?.relations,ShieldCheck],["Onaysız metin sayfası",pending?.textPages,Search]] as const).map(([label,value,Icon])=>
           <div className="health-row" key={label}><span><Icon size={17}/>{label}</span><b className={value?"pending":""}>{value??"—"}</b></div>)}
-        {/* Yedekleme durumu, kapasite kotası ve servis sağlığı henüz ölçülmüyor;
-            uydurma değer göstermek yerine eksik olduğu açıkça bildirilir. */}
-        <div className="backup"><Clock3 size={17}/><span>Yedekleme ve servis sağlığı<b>Henüz ölçülmüyor</b></span></div>
+{/* Servis sağlığı ölçülür (Ayarlar ekranıyla aynı kaynak); yedekleme ve
+            kapasite kotası hâlâ ölçülmüyor ve öyle olduğu açıkça bildirilir. */}
+        <div className="health-row"><span><ShieldCheck size={17}/>Servis sağlığı</span>
+          <b className={health&&healthyCount<healthTotal?"pending":""}>
+            {health?`${healthyCount}/${healthTotal} çalışıyor`:"—"}</b></div>
+        <div className="backup"><Clock3 size={17}/><span>Yedekleme ve kapasite kotası<b>Henüz ölçülmüyor</b></span></div>
       </article>
     </section>
     <section className="panel recent"><header><div><h2>Son belgeler</h2><p>Kapsamınızdaki en yeni kayıtlar</p></div></header><Table rows={rows} onOpen={open} empty="Henüz belge yüklenmedi."/></section>
@@ -136,6 +143,7 @@ export function ArchiveWorkspace(){
   const [view,setView]=useState<View>("dashboard"); const [dark,setDark]=useState(false); const [mobile,setMobile]=useState(false); const [query,setQuery]=useState(""); const [selectedId,setSelectedId]=useState<string|null>(null);
   const [uploadOpen,setUploadOpen]=useState(false); const [rows,setRows]=useState<DocumentRow[]>([]); const [toast,setToast]=useState(""); const [user,setUser]=useState<CurrentUser|null>(null);
   const [overview,setOverview]=useState<Overview|null>(null);
+  const [health,setHealth]=useState<HealthChecks|null>(null);
   const [nextCursor,setNextCursor]=useState<string|null>(null);
   const [loadingMore,setLoadingMore]=useState(false);
   const searchRef=useRef<HTMLInputElement|null>(null);
@@ -181,11 +189,15 @@ export function ArchiveWorkspace(){
 
   const loadContext=useCallback(async()=>{
     try {
-      const [meResponse,overviewResponse]=await Promise.all([fetch("/api/me"),fetch("/api/overview")]);
+      const [meResponse,overviewResponse,healthResponse]=await Promise.all([
+        fetch("/api/me"),fetch("/api/overview"),fetch("/api/health"),
+      ]);
       const me=await meResponse.json() as {user?:CurrentUser};
       const counts=await overviewResponse.json() as Overview&{error?:string};
+      const status=await healthResponse.json().catch(()=>null) as {checks?:HealthChecks}|null;
       setUser(me.user??null);
       setOverview(counts.error?null:counts);
+      setHealth(status?.checks??null);
     } catch { /* Ağ hatasında mevcut görünüm korunur. */ }
   },[]);
   const refresh=useCallback(async()=>{await Promise.all([loadContext(),loadList()])},[loadContext,loadList]);
@@ -235,7 +247,7 @@ export function ArchiveWorkspace(){
       :view==="users"?<UsersScreen/>
       :view==="activity"?<ActivityScreen onOpenDocument={openDocument}/>
       :view==="settings"?<SettingsScreen/>
-      :view==="dashboard"?<Dashboard rows={rows.slice(0,5)} overview={overview} open={openDocument} onUpload={()=>setUploadOpen(true)} userName={user?.displayName??""} canUpload={canUpload}/>
+      :view==="dashboard"?<Dashboard rows={rows.slice(0,5)} overview={overview} health={health} open={openDocument} onUpload={()=>setUploadOpen(true)} userName={user?.displayName??""} canUpload={canUpload}/>
       :<List
         rows={rows}
         title={view==="inbox"?"Gelen Evrak":view==="review"?"Doğrulama":"Dijital Arşiv"}
