@@ -87,6 +87,30 @@ export async function POST(request: Request, context: RouteContext) {
           sourceSystem: text(body.address!.sourceSystem, 60) || null,
         }, principal.email);
 
+    /*
+     * Aynı varlık ikinci kez gönderildiğinde (çift tıklama, zaman aşımı sonrası
+     * yeniden deneme) ne yeni varlık ne yeni ilişki oluşur. Buna rağmen denetim
+     * olayı yazmak, olmamış bir insan kararını değişmez zincire kalıcı olarak
+     * geçirir: denetçi iki ilişki için dört "doğrulandı" görür. Zaten
+     * doğrulanmış bir ilişkiyi yeniden göndermek karar değildir.
+     *
+     * Öneri ya da reddedilmiş durumdaki bir ilişkiyi doğrulamak ise gerçek bir
+     * karardır ve kayda geçer.
+     */
+    const existing = await DB.prepare(`SELECT verification_status FROM document_entity_relations
+      WHERE document_id = ? AND entity_id = ? AND relation_type = ?`)
+      .bind(id, entity.id, relationType).first<{ verification_status: string }>();
+    if (existing?.verification_status === "VERIFIED") {
+      return Response.json({
+        saved: false,
+        unchanged: true,
+        entity: { id: entity.id, entityType: entity.entityType, displayLabel: entity.displayLabel, entityStatus: entity.entityStatus, created: false },
+        relationType,
+        message: "Bu ilişki zaten doğrulanmış; kayıt değişmedi.",
+        relations: await listDocumentRelations(DB, id),
+      });
+    }
+
     const audit = await prepareAuditEvent(DB, {
       documentId: id,
       actor: principal.email,
@@ -95,6 +119,7 @@ export async function POST(request: Request, context: RouteContext) {
         entityId: entity.id, entityType: entity.entityType, entityStatus: entity.entityStatus,
         displayLabel: entity.displayLabel, relationType, relationSource: "HUMAN",
         entityCreated: entity.created, note: text(body.note, 300) || null,
+        previousStatus: existing?.verification_status ?? null,
       },
     });
     await DB.batch([
@@ -175,15 +200,32 @@ export async function PATCH(request: Request, context: RouteContext) {
       to: operation.action === "verify" ? "VERIFIED" : "REJECTED",
       reason: operation.reason || undefined,
     };
-  }).sort((left, right) => left.relationId.localeCompare(right.relationId));
+  }).sort((left, right) => left.relationId.localeCompare(right.relationId))
+    /*
+     * Durumu değiştirmeyen işlem karar değildir. Yazılırsa değişmez zincire
+     * `from === to` olan bir "doğrulandı"/"reddedildi" olayı girer ve denetçi,
+     * olmamış bir insan kararını okur. Çift tıklama ya da zaman aşımı sonrası
+     * yeniden gönderim bunu kolayca üretir.
+     */
+    .filter((change) => change.from !== change.to);
 
+  if (!changes.length) {
+    return Response.json({
+      saved: false, unchanged: true, verified: 0, rejected: 0,
+      message: "Gönderilen ilişkiler zaten bu durumdaydı; kayıt değişmedi.",
+      relations: await listDocumentRelations(DB, id),
+    });
+  }
+
+  const changedIds = new Set(changes.map((change) => change.relationId));
   const audit = await prepareAuditEvent(DB, {
     documentId: id,
     actor: principal.email,
     action: changes.every((change) => change.to === "REJECTED") ? "relation.rejected" : "relation.verified",
     details: { changes },
   });
-  const statements = operations.map((operation) => operation.action === "verify"
+  const statements = operations.filter((operation) => changedIds.has(operation.id))
+    .map((operation) => operation.action === "verify"
     ? DB.prepare(`UPDATE document_entity_relations SET verification_status = 'VERIFIED',
         verified_by = ?, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND document_id = ?`).bind(principal.email, operation.id, id)
