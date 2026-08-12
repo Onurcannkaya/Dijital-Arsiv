@@ -160,7 +160,33 @@ export async function processNextOcrJob(bindings: ArchiveBindings, options: OcrP
     ) AND status IN ('queued', 'failed')
     RETURNING id, document_id, attempt, max_attempts`).bind(requestedDocumentId, requestedDocumentId, requestedDocumentId, options.unit, options.unit).first<ClaimedJob>();
 
-  if (!job) return { processed: false, message: "Bekleyen OCR işi yok." };
+  if (!job) {
+    /*
+     * Belge adıyla istendiğinde "bekleyen iş yok" demek yetmez: personel tam
+     * da o belge için düğmeye basmıştır. Başarısız bir koşudan sonra iş geri
+     * çekilme penceresine alınır ve bu pencerede yeniden tetiklenemez; sebep
+     * söylenmezse memur düğmeye basıp durur.
+     */
+    if (requestedDocumentId) {
+      const pending = await bindings.DB.prepare(`SELECT status, attempt, max_attempts, next_attempt_at
+        FROM processing_jobs WHERE document_id = ? AND kind = 'ocr'
+        ORDER BY created_at DESC LIMIT 1`).bind(requestedDocumentId)
+        .first<{ status: string; attempt: number; max_attempts: number; next_attempt_at: string | null }>();
+      if (!pending) return { processed: false, message: "Bu belge için OCR işi bulunmuyor." };
+      if (pending.status === "processing") {
+        return { processed: false, message: "Belgenin OCR işlemi hâlihazırda sürüyor." };
+      }
+      if (pending.status === "queued" && pending.attempt >= pending.max_attempts) {
+        return { processed: false, message: `Azami deneme sayısı aşıldı (${pending.attempt}/${pending.max_attempts}); işletim incelemesi gerekiyor.` };
+      }
+      if (pending.next_attempt_at) {
+        return { processed: false,
+          message: `Önceki deneme başarısız oldu; iş ${pending.next_attempt_at} (UTC) itibarıyla yeniden denenecek. O ana kadar elle tetiklenemez.` };
+      }
+      return { processed: false, message: "Belgenin OCR işi şu an tetiklenebilir durumda değil." };
+    }
+    return { processed: false, message: "Bekleyen OCR işi yok." };
+  }
 
   try {
     const document = await bindings.DB.prepare(`SELECT id, original_name, media_type, document_type,
@@ -179,19 +205,35 @@ export async function processNextOcrJob(bindings: ArchiveBindings, options: OcrP
     // nesneyi kendi geçici diskine akışla indirir (ADR-014/F1.3).
     const headers: HeadersInit = { "content-type": "application/json" };
     if (bindings.OCR_SERVICE_TOKEN) headers.authorization = `Bearer ${bindings.OCR_SERVICE_TOKEN}`;
-    const response = await fetch(`${serviceUrl}/v1/ocr`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        documentId: document.id,
-        objectKey: original.object_key,
-        mediaType: original.media_type,
-        byteSize: original.byte_size,
-        sha256: original.sha256,
-        profile: ocrProfile,
-      }),
-      signal: AbortSignal.timeout(120_000),
-    });
+    /*
+     * Servise hiç ulaşılamaması beklenmeyen bir iç hata değil, işletimin
+     * tanıdığı bir durumdur: OCR ayakta değildir. Korelasyon kimliğiyle geçen
+     * genel bir mesaj burada yanıltır — memur belgede bir sorun olduğunu sanıp
+     * tekrar tekrar dener, oysa yapılacak iş servisi ayağa kaldırmaktır.
+     * Servis yanıt VERDİĞİ hâlde başarısızsa ayrım kalır: o zaman sebep
+     * belgede ya da servisin kendi içinde olabilir.
+     */
+    let response: Response;
+    try {
+      response = await fetch(`${serviceUrl}/v1/ocr`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          documentId: document.id,
+          objectKey: original.object_key,
+          mediaType: original.media_type,
+          byteSize: original.byte_size,
+          sha256: original.sha256,
+          profile: ocrProfile,
+        }),
+        signal: AbortSignal.timeout(120_000),
+      });
+    } catch (reason) {
+      const timedOut = reason instanceof Error && reason.name === "TimeoutError";
+      throw new PublicError(timedOut
+        ? "OCR servisi zaman aşımına uğradı; iş kuyrukta kaldı ve yeniden denenecek."
+        : "OCR servisine ulaşılamıyor; belgede sorun yok. Servisin çalıştığını işletim ekibiyle doğrulayın.", 503);
+    }
     if (!response.ok) throw new Error(`OCR servisi ${response.status} hatası verdi: ${(await response.text()).slice(0, 300)}`);
     const result = parseOcrServiceResult(await response.json());
 

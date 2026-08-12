@@ -233,3 +233,7 @@
 .ocr-job-note span{display:flex;flex-direction:column;gap:3px}
 .ocr-job-note b{font-weight:650}
 .ocr-job-note small{color:var(--ar-muted);font-weight:500}
+
+/* Önizleme hatası, personelin yaptığı işlemin sonucunu ezmesin diye
+   üst şeritte değil kendi alanında durur. */
+.preview-error{display:flex;align-items:center;gap:8px;justify-self:stretch;margin:0 0 14px;padding:10px 14px;border:1px solid color-mix(in srgb,var(--ar-amber) 30%,var(--ar-border));border-radius:7px;background:var(--ar-amber-soft);color:var(--ar-amber);font-size:10px}
