@@ -25,7 +25,21 @@ export async function POST(request: Request, context: RouteContext) {
   if (!document) return jsonError("Belge bulunamadı.", 404);
   if (!canAccessUnit(principal, document.unit)) return jsonError("Bu belge müdürlük kapsamınızın dışında.", 403);
   if (document.status === "archived") return jsonError("Belge daha önce arşivlenmiş.", 409);
-  if (!new Set(["review", "ready"]).has(document.status)) return jsonError("Belge henüz arşivlemeye hazır değil.", 409);
+  if (!new Set(["review", "ready"]).has(document.status)) {
+    /*
+     * Tek bir "hazır değil" cümlesi üç ayrı durumu birleştiriyordu: kuyrukta
+     * bekleyen ve işlenen belge kendiliğinden çözülür, OCR'ı başarısız olan
+     * çözülmez. Memurun bekleyeceğini mi yoksa yeniden işleme başlatacağını mı
+     * bilmesi gerekir; "henüz hazır değil" demek onu bir daha gelip bakmaya
+     * gönderir, oysa kayıt kendi başına ilerlemeyecektir.
+     */
+    const reason: Record<string, string> = {
+      queued: "Belge OCR kuyruğunda; metin çıkarımı tamamlanmadan arşivlenemez.",
+      processing: "Belgenin OCR işlemi sürüyor; tamamlanmadan arşivlenemez.",
+      ocr_failed: "Belgenin OCR işlemi başarısız oldu; arşivlemeden önce yeniden işlenmelidir.",
+    };
+    return jsonError(reason[document.status] ?? "Belge henüz arşivlemeye hazır değil.", 409);
+  }
 
   const profile = await resolveDocumentProfile(DB, {
     documentTypeId: document.document_type_id,
