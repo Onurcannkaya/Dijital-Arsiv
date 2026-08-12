@@ -8,6 +8,32 @@ import {
 export const MAX_INGEST_BYTES = 2 * 1024 * 1024 * 1024;
 export const MAX_MULTIPART_PARTS = 10_000;
 
+/**
+ * Kabul edilen belge biçimleri — tek tanım.
+ *
+ * İçeriğe bakan asıl denetim tarama servisindedir
+ * (`services/content-scan/app/file_validation.py`): bildirilen tür ile
+ * dosyanın gerçek sihirli baytları orada karşılaştırılır ve K-1 kabul testi
+ * bunu kanıtlar. Ama bildirilen türün hiç desteklenmediği durum oturum
+ * açılırken bilinebilir; kabul edilirse memur 2 GiB'a kadar dosyayı boşuna
+ * yükler, baytlar karantina deposunu işgal eder ve ret ancak taramada gelir.
+ *
+ * Uzantı listesi arayüzdeki dosya seçicisini besler; MIME listesiyle birlikte
+ * burada durur ki ikisi ayrışmasın.
+ */
+export const ACCEPTED_MEDIA_TYPES: Record<string, readonly string[]> = {
+  "application/pdf": [".pdf"],
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/png": [".png"],
+  "image/tiff": [".tif", ".tiff"],
+};
+
+export const ACCEPTED_FILE_EXTENSIONS = Object.values(ACCEPTED_MEDIA_TYPES).flat();
+
+export function isAcceptedMediaType(value: string): boolean {
+  return Object.hasOwn(ACCEPTED_MEDIA_TYPES, value.trim().toLowerCase());
+}
+
 export type IngestSessionRecord = {
   id: string;
   tenantId: string;
