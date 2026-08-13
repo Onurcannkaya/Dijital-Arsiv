@@ -235,17 +235,19 @@ Bu şartname depoya alındı ve **renk + tipografi katmanı** uygulandı
 - Karanlık tema aynı lacivert ailesinden türetildi (şartname karanlık palet
   tanımlamıyor); durum renkleri koyu zeminde okunabilirlik için açıldı.
 
+- §2.2 alt sınırı uygulandı: personel arayüzünde 12px altı metin kalmadı.
+  Şartnamenin izin verdiği iki istisna korundu — rozet ve kanıt etiketi `11px`,
+  mono referans `11.5px`. 130 bildirim rolüne göre yükseltildi; sabit
+  yükseklikler §2.3'e çekildi (üst şerit 62px, araç şeridi 46px, buton 36px,
+  ikincil buton 32px).
+
 ### Bekliyor — karar gerektiriyor
 
-1. **12px alt sınırı (§2.2).** Mevcut arayüzde 8–11px metin yaygın (tablo
-   başlıkları, rozetler, alan etiketleri, denetim izi). Şartname personel
-   arayüzünde 12px altını yasaklıyor. Mekanik ama neredeyse her bileşenin
-   ölçüsünü ve yerleşim dengesini değiştirir.
-2. **Güven yüzdesinin gizlenmesi (§1 ilke 4, §6).** Bugün liste ve inceleme
+1. **Güven yüzdesinin gizlenmesi (§1 ilke 4, §6).** Bugün liste ve inceleme
    ekranı `%96`, `%68` gösteriyor. Şartname bunların personele değil yalnız
    yönetici/denetim ekranlarına ve API'ye ait olduğunu söylüyor. Bu görsel değil
    **ürün** kararıdır: memurun gördüğü bilgi değişir.
-3. **Belge Doğrulama `2a` düzeni (§4.1).** Bugünkü üç kolon (küçük resimler │
+2. **Belge Doğrulama `2a` düzeni (§4.1).** Bugünkü üç kolon (küçük resimler │
    belge │ alanlar) yerine sekme şeridi + belge + 452px görev kolonu, numaralı
    görev kartları ve katlanmış "doğru okunan" özeti. Ekranın yeniden kurulması.
-4. Şartnamenin kendi açık kararları (§9) kurumsal onay bekliyor.
+3. Şartnamenin kendi açık kararları (§9) kurumsal onay bekliyor.
