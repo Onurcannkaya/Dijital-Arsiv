@@ -264,6 +264,20 @@ Bu şartname depoya alındı ve **renk + tipografi katmanı** uygulandı
   | İlişki satırı | `OCR önerisi · %83` | `OCR önerisi · bilgisayar emin değil — belgeyle karşılaştırın` |
   | Belge listesi (`Güven` → `OCR okuması`) | `%96` | `Net okundu` / `Gözden geçirin` / `Kontrol edin` |
 
+- §4.3 teknik gösterimleri personel düzeninde kapatıldı: kanıt koordinatı, OCR
+  model sürümü, nesne ve olay `SHA-256` kırpmaları, profil kodu/sürümü.
+  Denetim izinde karma yerine §3.8'in istediği bütünlük ifadesi duruyor — ve
+  ifade **ölçülüyor**: zincir bağları istemcide doğrulanır, kopuk zincirde şerit
+  uyarıya döner. Yükleme diyalogundaki `SHA-256` terimi de iş diline çevrildi
+  (§6): "Bütünlük kontrolü — aynı belge ikinci kez yüklenirse tanınır".
+
+  Zincirin kanıtladığı şey **kaydın** değişmediğidir; asıl dosyanın bozulmadığı
+  ayrı bir denetimdir (kabul anındaki SHA doğrulaması ve bütünlük mutabakatı
+  işi). İfade bu yüzden dosyayı değil kaydı anlatır.
+
+  Yönetici düzenlerinde (`1a`/`1b`) bu gösterimler açık kalacak; o düzenler
+  henüz kurulmadı.
+
 ### Bekliyor — karar gerektiriyor
 
 1. Şartnamenin kendi açık kararları (§9) kurumsal onay bekliyor.

@@ -108,7 +108,13 @@ test("personnel confirmation archives through a tamper-evident audit chain", asy
   assert.match(approveRoute, /status = 'archived'/);
   assert.match(auditHelper, /previousHash/);
   assert.match(auditHelper, /SHA-256/);
-  assert.match(detail, /Değiştirilemez denetim izi/);
+  // Ekran değişmez kaydı gösterir. Karma değeri personel düzeninde kapalıdır
+  // (design.md §4.3), yerine ZİNCİRİ DOĞRULANMIŞ bütünlük ifadesi durur —
+  // ifadenin körü körüne yazılmadığı da burada tutulur.
+  assert.match(detail, /Değiştirilemez işlem kaydı/);
+  assert.match(detail, /chainBroken=auditChain\.some/);
+  assert.match(detail, /zinciri kopuksuz/);
+  assert.match(detail, /zinciri kopuk; işletim ekibine bildirin/);
   assert.match(detail, /Alanları onayla/);
   assert.match(migration, /audit_events_no_update/);
   assert.match(migration, /audit_events_no_delete/);

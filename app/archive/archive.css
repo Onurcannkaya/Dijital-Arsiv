@@ -312,3 +312,9 @@
 .read-summary[open]>summary{border-bottom:1px solid var(--border-subtle)}
 .read-summary .evidence-fields{padding:4px 0 10px}
 .read-summary .field-group.settled{margin:0}
+
+/* design.md §3.8 — karma yerine bütünlük ifadesi. İfade ölçülmüş olduğu için
+   kopuk zincirde uyarıya döner. */
+.chain-state{display:flex;align-items:center;gap:8px;margin:12px 17px 18px;padding:10px 12px;border-radius:7px;font-size:12px}
+.chain-state.intact{background:var(--ar-green-soft);color:var(--ar-green);border:1px solid var(--green-100)}
+.chain-state.broken{background:var(--ar-red-soft);color:var(--ar-red);border:1px solid var(--red-100)}

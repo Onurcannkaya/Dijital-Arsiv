@@ -190,7 +190,7 @@ export function UploadDialog({ open, onClose, onCreated }: UploadDialogProps) {
               : <option value={DEFAULT_UNIT_LABEL}>{DEFAULT_UNIT_LABEL}</option>}
           </select></label>
         </div>
-        <div className="integrity-strip"><span><Fingerprint size={17}/><b>SHA-256</b><small>Tekrar ve bütünlük kontrolü</small></span><span><Database size={17}/><b>Asıl dosya kasası</b><small>OCR türevinden ayrı saklama</small></span></div>
+        <div className="integrity-strip"><span><Fingerprint size={17}/><b>Bütünlük kontrolü</b><small>Aynı belge ikinci kez yüklenirse tanınır</small></span><span><Database size={17}/><b>Asıl dosya kasası</b><small>OCR türevinden ayrı saklama</small></span></div>
         {message ? <div className={`upload-message ${phase}`} role="status">{phase === "uploading" ? <LoaderCircle className="spin" size={17}/> : phase === "done" ? <CheckCircle2 size={17}/> : <Fingerprint size={17}/>}<span>{message}{result ? <small>{result.sha256.slice(0, 16)}… · {result.referenceNo}</small> : null}</span></div> : null}
         <footer><button className="outline" type="button" onClick={close} disabled={phase === "uploading"}>{phase === "done" ? "Kapat" : "Vazgeç"}</button><button className="primary" type="submit" disabled={!file || phase === "uploading" || phase === "done"}>{phase === "uploading" ? <><LoaderCircle className="spin" size={17}/> Yükleniyor</> : <><Upload size={17}/> Güvenli yükle</>}</button></footer>
       </form>
