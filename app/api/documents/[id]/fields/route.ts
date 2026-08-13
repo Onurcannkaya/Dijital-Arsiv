@@ -2,7 +2,7 @@ import { prepareAuditEvent } from "../../../../../lib/audit";
 import { authorizeRequest, canAccessUnit } from "../../../../../lib/authorization";
 import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
 import {
-  FIELD_REJECTION_REASONS, type ValidatedRejection, validateRejection,
+  FIELD_REJECTION_VOCABULARY_CODE, type ValidatedRejection, validateRejection,
 } from "../../../../../lib/rejection-reasons";
 import { loadProfileByName, loadVocabularyTerms, resolveDocumentProfile, type FieldDefinition } from "../../../../../lib/document-profile";
 import {
@@ -77,11 +77,14 @@ export async function PATCH(request: Request, context: RouteContext) {
    * girdileri önler ve OCR'ın hangi alanlarda yanıldığının ölçülmesini sağlar.
    */
   const rejectionByValue = new Map<string, ValidatedRejection>();
-  for (const operation of operations) {
-    if (operation.action !== "reject") continue;
-    const validated = validateRejection(operation.rejection, FIELD_REJECTION_REASONS);
-    if (typeof validated === "string") return jsonError(validated);
-    rejectionByValue.set(operation.id, validated);
+  if (operations.some((operation) => operation.action === "reject")) {
+    const reasons = await loadVocabularyTerms(DB, FIELD_REJECTION_VOCABULARY_CODE);
+    for (const operation of operations) {
+      if (operation.action !== "reject") continue;
+      const validated = validateRejection(operation.rejection, reasons);
+      if (typeof validated === "string") return jsonError(validated);
+      rejectionByValue.set(operation.id, validated);
+    }
   }
 
   const document = await DB.prepare(`SELECT status, unit, document_type, document_type_id

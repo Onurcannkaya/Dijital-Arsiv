@@ -1,7 +1,7 @@
 /**
- * Ret gerekçeleri — kontrollü liste.
+ * Ret gerekçeleri — kontrollü sözlük.
  *
- * Denetim izi değişmezdir (ADR-016) ve bugüne dek "kim reddetti, ne zaman"
+ * Denetim izi değişmezdir (ADR-016) ve bir zamanlar "kim reddetti, ne zaman"
  * bilgisini tutuyor, "neden" bilgisini tutmuyordu. Bir taşınmaz dosyasında
  * yıllar sonra sorulacak soru tam olarak budur: bu ada/parsel bağı neden
  * koparıldı, bu alan değeri neden atıldı?
@@ -11,16 +11,25 @@
  * ve ne sıklıkla yanıldığını ölçmeyi de mümkün kılar; bu ölçüm olmadan model
  * ve profil ayarı körlemesine yapılır.
  *
+ * Liste `vocabulary_terms` tablosunda yaşar — müdürlük ve mahalle sözlükleri
+ * gibi. Kurum kendi gerekçesini ekleyebilmeli, kullanmadığını pasifleştirebilmeli
+ * ve bunu yeni bir sürüm beklemeden yapabilmelidir. Buradaki diziler yalnız
+ * BAŞLANGIÇ kümesidir; göç `ON CONFLICT DO NOTHING` ile yazar, kurumun
+ * düzenlemesini geri almaz.
+ *
  * `OTHER` listenin dışında kalan durum içindir ve serbest açıklamayı ZORUNLU
  * kılar; aksi halde listeden kaçış yolu haline gelir ve liste anlamsızlaşır.
  */
 
+export const FIELD_REJECTION_VOCABULARY_CODE = "FIELD_REJECTION_REASON";
+export const RELATION_REJECTION_VOCABULARY_CODE = "RELATION_REJECTION_REASON";
 export const OTHER_REASON_CODE = "OTHER";
+export const MAX_REJECTION_NOTE = 300;
 
 export type RejectionReason = { code: string; label: string };
 
-/** Alan değeri reddi. */
-export const FIELD_REJECTION_REASONS: readonly RejectionReason[] = [
+/** Alan değeri reddi — başlangıç kümesi. */
+export const SEED_FIELD_REJECTION_REASONS: readonly RejectionReason[] = [
   { code: "NOT_IN_DOCUMENT", label: "Belgede böyle bir bilgi yok" },
   { code: "MISREAD", label: "Yanlış okunmuş (OCR hatası)" },
   { code: "WRONG_FIELD", label: "Değer başka bir alana ait" },
@@ -29,8 +38,8 @@ export const FIELD_REJECTION_REASONS: readonly RejectionReason[] = [
   { code: OTHER_REASON_CODE, label: "Diğer (açıklama girin)" },
 ];
 
-/** Varlık ilişkisi reddi. */
-export const RELATION_REJECTION_REASONS: readonly RejectionReason[] = [
+/** Varlık ilişkisi reddi — başlangıç kümesi. */
+export const SEED_RELATION_REJECTION_REASONS: readonly RejectionReason[] = [
   { code: "WRONG_ENTITY", label: "Belge bu taşınmaza ait değil" },
   { code: "MISREAD", label: "Ada/parsel yanlış okunmuş" },
   { code: "ILLEGIBLE", label: "Kanıt okunamıyor" },
@@ -38,24 +47,30 @@ export const RELATION_REJECTION_REASONS: readonly RejectionReason[] = [
   { code: OTHER_REASON_CODE, label: "Diğer (açıklama girin)" },
 ];
 
-export const MAX_REJECTION_NOTE = 300;
-
 export type RejectionInput = { reasonCode?: unknown; reasonNote?: unknown };
 export type ValidatedRejection = { reasonCode: string; reasonLabel: string; reasonNote: string | null };
 
 /**
- * Ret gerekçesini doğrular. Geçersizse insan okunur mesaj döner.
+ * Ret gerekçesini yürürlükteki sözlüğe göre doğrular; geçersizse insan okunur
+ * mesaj döner.
  *
- * Etiket de kayda yazılır: kod listesi ileride değişse bile denetçi, kararın
+ * `terms` `null` ise sözlük yüklenmemiştir. Bu durumda serbest geçiş
+ * verilmez: gerekçesiz bir ret değişmez ize girerse bir daha düzeltilemez,
+ * oysa eksik sözlük işletim tarafında dakikalar içinde giderilebilir.
+ *
+ * Etiket de kayda yazılır: kurum listeyi düzenlediğinde bile denetçi, kararın
  * verildiği andaki gerekçenin ne anlama geldiğini okuyabilmelidir.
  */
 export function validateRejection(
   input: RejectionInput,
-  allowed: readonly RejectionReason[],
+  terms: readonly RejectionReason[] | null,
 ): ValidatedRejection | string {
+  if (!terms?.length) {
+    return "Ret gerekçesi sözlüğü yüklenmemiş; şema göçü çalıştırılmadan ret kaydedilemez.";
+  }
   const code = typeof input.reasonCode === "string" ? input.reasonCode.trim() : "";
   if (!code) return "Ret gerekçesi seçilmelidir.";
-  const reason = allowed.find((entry) => entry.code === code);
+  const reason = terms.find((entry) => entry.code === code);
   if (!reason) return `Ret gerekçesi kontrollü listede bulunmuyor: ${code}.`;
   const note = typeof input.reasonNote === "string"
     ? input.reasonNote.trim().slice(0, MAX_REJECTION_NOTE) : "";

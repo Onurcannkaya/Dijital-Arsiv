@@ -3,6 +3,9 @@ import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../..
 import { loadVocabularyTerms, resolveDocumentProfile } from "../../../../lib/document-profile";
 import { listDocumentRelations } from "../../../../lib/entities";
 import { formatViolation, isMultiValueField } from "../../../../lib/field-policy";
+import {
+  FIELD_REJECTION_VOCABULARY_CODE, RELATION_REJECTION_VOCABULARY_CODE,
+} from "../../../../lib/rejection-reasons";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +57,15 @@ export async function GET(request: Request, context: RouteContext) {
     documentTypeId: row.document_type_id,
     documentType: row.document_type,
   });
-  const vocabularyCodes = [...new Set(profile.fields.map((field) => field.vocabularyCode).filter((code): code is string => Boolean(code)))];
+  /*
+   * Ret gerekçeleri de kontrollü sözlüktür ve kurum düzenleyebilir; arayüz
+   * listeyi kod içinden değil buradan almalıdır, yoksa kurumun eklediği
+   * gerekçe ekranda görünmez ve kaldırdığı gerekçe seçilmeye devam eder.
+   */
+  const vocabularyCodes = [...new Set([
+    ...profile.fields.map((field) => field.vocabularyCode).filter((code): code is string => Boolean(code)),
+    FIELD_REJECTION_VOCABULARY_CODE, RELATION_REJECTION_VOCABULARY_CODE,
+  ])];
   const vocabularies = Object.fromEntries(await Promise.all(vocabularyCodes.map(async (code) =>
     [code, await loadVocabularyTerms(bindings.DB, code)] as const)));
 

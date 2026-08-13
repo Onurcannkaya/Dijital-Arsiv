@@ -24,6 +24,9 @@
  */
 
 import {
+  FIELD_REJECTION_VOCABULARY_CODE, RELATION_REJECTION_VOCABULARY_CODE,
+} from "./rejection-reasons.ts";
+import {
   DEFAULT_DOCUMENT_TYPE_CODE, SEED_PROFILE_VERSION, extractionPolicyFor,
   seedDocumentTypes, seedFieldsFor, seedVocabularies,
 } from "./archive-seed.ts";
@@ -41,7 +44,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 24;
+export const ARCHIVE_SCHEMA_VERSION = 25;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -1147,9 +1150,10 @@ async function migrateProfileColumns(db: D1Database) {
  * yeniden çalıştırma yeni satır üretmez. (İleride profil yönetim arayüzü
  * eklendiğinde yeni kayıtlar UUID alır.)
  */
-async function seedControlledVocabulariesAndProfiles(db: D1Database) {
+/** Bir sözlüğü ve terimlerini yazar; var olan kayda dokunmaz. */
+function vocabularyStatements(db: D1Database, vocabularies: typeof seedVocabularies) {
   const statements: D1PreparedStatement[] = [];
-  for (const vocabulary of seedVocabularies) {
+  for (const vocabulary of vocabularies) {
     const vocabularyId = `vocab:${vocabulary.code}`;
     statements.push(db.prepare(`INSERT INTO vocabularies (id, code, name, owner, source, version, valid_from)
       VALUES (?, ?, ?, ?, ?, ?, NULL) ON CONFLICT(code) DO NOTHING`)
@@ -1160,6 +1164,11 @@ async function seedControlledVocabulariesAndProfiles(db: D1Database) {
         .bind(`term:${vocabulary.code}:${term.code}`, vocabularyId, term.code, term.label, index));
     });
   }
+  return statements;
+}
+
+async function seedControlledVocabulariesAndProfiles(db: D1Database) {
+  const statements: D1PreparedStatement[] = vocabularyStatements(db, seedVocabularies);
 
   for (const documentType of seedDocumentTypes) {
     const typeId = `doctype:${documentType.code}@${SEED_PROFILE_VERSION}`;
@@ -1294,7 +1303,24 @@ const dataMigrations: MigrationStep[] = [
   { version: 8, run: migrateOriginalShaUniqueness },
   // 8 → 9: tarama denemeleri ayrı, değiştirilemez alındılar olarak saklanır.
   { version: 9, run: migrateIngestReceiptHistory },
+  // 24 → 25: ret gerekçeleri kontrollü sözlüğe taşındı.
+  { version: 25, run: seedRejectionReasonVocabularies },
 ];
+
+/**
+ * Ret gerekçeleri kod içindeki sabit listeden `vocabulary_terms` tablosuna
+ * taşındı; kurum kendi gerekçesini ekleyebilmeli ve kullanmadığını
+ * pasifleştirebilmelidir.
+ *
+ * `ON CONFLICT DO NOTHING` ile yazılır: kurumun düzenlemesi geri alınmaz,
+ * pasifleştirdiği terim yeniden etkinleşmez.
+ */
+async function seedRejectionReasonVocabularies(db: D1Database) {
+  const vocabularies = seedVocabularies.filter((vocabulary) =>
+    vocabulary.code === FIELD_REJECTION_VOCABULARY_CODE
+    || vocabulary.code === RELATION_REJECTION_VOCABULARY_CODE);
+  await db.batch(vocabularyStatements(db, vocabularies));
+}
 
 /** Sürüm sözleşmesi denetimi ve raporlama için birleşik liste. */
 export const archiveMigrationSteps: MigrationStep[] = [...structuralMigrations, ...dataMigrations]

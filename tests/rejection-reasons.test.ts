@@ -19,8 +19,10 @@ import test from "node:test";
 // Rota modülleri uzantısız import kullanır; kanca kayıttan SONRA yüklenmeli.
 register("../server/ts-extension-hooks.mjs", import.meta.url);
 const { startNodeServer } = await import("../server/app.ts");
-const { FIELD_REJECTION_REASONS, OTHER_REASON_CODE, RELATION_REJECTION_REASONS, validateRejection } =
-  await import("../lib/rejection-reasons.ts");
+const {
+  FIELD_REJECTION_VOCABULARY_CODE, OTHER_REASON_CODE, RELATION_REJECTION_VOCABULARY_CODE,
+  SEED_FIELD_REJECTION_REASONS, SEED_RELATION_REJECTION_REASONS, validateRejection,
+} = await import("../lib/rejection-reasons.ts");
 type NodeServer = Awaited<ReturnType<typeof startNodeServer>>;
 
 const STAFF = "gerekce@sivas.bel.tr";
@@ -31,6 +33,13 @@ const DOC = "belge-gerekce";
 const PARCEL = { blockNo: "1284", parcelNo: "17", districtCode: "5801", cadastralNeighborhood: "KILAVUZ" };
 
 test("gerekçe doğrulaması listeyi ve `Diğer` kuralını uygular", () => {
+  const FIELD_REJECTION_REASONS = SEED_FIELD_REJECTION_REASONS;
+  const RELATION_REJECTION_REASONS = SEED_RELATION_REJECTION_REASONS;
+  // Sözlük yüklenmemişse serbest geçiş verilmez: gerekçesiz bir ret değişmez
+  // ize girerse düzeltilemez, oysa eksik sözlük dakikalar içinde giderilir.
+  assert.equal(typeof validateRejection({ reasonCode: "MISREAD" }, null), "string");
+  assert.equal(typeof validateRejection({ reasonCode: "MISREAD" }, []), "string");
+
   const ok = validateRejection({ reasonCode: "MISREAD", reasonNote: "  ada yanlış  " }, FIELD_REJECTION_REASONS);
   assert.notEqual(typeof ok, "string");
   assert.deepEqual(ok, { reasonCode: "MISREAD", reasonLabel: "Yanlış okunmuş (OCR hatası)", reasonNote: "ada yanlış" });
@@ -144,5 +153,47 @@ test("kabul edilen gerekçe koduyla ve etiketiyle denetim izine yazılır", asyn
      */
     assert.equal(rejection.reasonLabel, "Yanlış okunmuş (OCR hatası)");
     assert.equal(rejection.reasonNote, "Ada 1285 olmalı");
+  });
+});
+
+test("gerekçe listesi kurumca düzenlenebilir ve düzenleme hemen geçerlidir", async () => {
+  await withServer(async (server) => {
+    // Taşımanın amacı budur: kurum yeni gerekçe ekleyebilmeli, kullanmadığını
+    // pasifleştirebilmeli ve bunun için yeni bir sürüm beklememelidir.
+    const seeded = await server.db.prepare(`SELECT t.code FROM vocabulary_terms t
+      INNER JOIN vocabularies v ON v.id = t.vocabulary_id WHERE v.code = ? ORDER BY t.sort_order`)
+      .bind(FIELD_REJECTION_VOCABULARY_CODE).all<{ code: string }>();
+    assert.deepEqual((seeded.results ?? []).map((row) => row.code),
+      SEED_FIELD_REJECTION_REASONS.map((reason) => reason.code), "başlangıç kümesi yazılmadı");
+
+    // Kuruma özgü yeni gerekçe.
+    await server.db.prepare(`INSERT INTO vocabulary_terms (id, vocabulary_id, code, label, sort_order)
+      VALUES ('term:ozel', ?, 'MAHKEME_KARARI', 'Mahkeme kararıyla düşürüldü', 99)`)
+      .bind(`vocab:${FIELD_REJECTION_VOCABULARY_CODE}`).run();
+    const accepted = await call(server, `/api/documents/${DOC}/fields`, "PATCH",
+      { values: [{ id: "deger-1", action: "reject", reasonCode: "MAHKEME_KARARI" }] });
+    assert.equal(accepted.status, 200, "kurumun eklediği gerekçe kabul edilmedi");
+
+    // Pasifleştirilen gerekçe artık seçilememeli.
+    await server.db.prepare(`UPDATE vocabulary_terms SET active = 0
+      WHERE vocabulary_id = ? AND code = 'DUPLICATE'`)
+      .bind(`vocab:${FIELD_REJECTION_VOCABULARY_CODE}`).run();
+    await server.db.prepare("UPDATE extracted_fields SET verification_status = 'SUGGESTED' WHERE id = 'deger-1'").run();
+    const stale = await call(server, `/api/documents/${DOC}/fields`, "PATCH",
+      { values: [{ id: "deger-1", action: "reject", reasonCode: "DUPLICATE" }] });
+    assert.equal(stale.status, 400, "pasifleştirilen gerekçe hâlâ kabul ediliyor");
+  });
+});
+
+test("belge detayı gerekçe listelerini arayüze taşır", async () => {
+  await withServer(async (server) => {
+    // Arayüz listeyi kod içinden okursa kurumun eklediği gerekçe ekranda
+    // görünmez, kaldırdığı gerekçe seçilmeye devam eder.
+    const response = await fetch(`${server.url}/api/documents/${DOC}`, { headers: IDENTITY });
+    const body = await response.json() as { vocabularies: Record<string, Array<{ code: string }> | null> };
+    assert.deepEqual(body.vocabularies[FIELD_REJECTION_VOCABULARY_CODE]?.map((term) => term.code),
+      SEED_FIELD_REJECTION_REASONS.map((reason) => reason.code));
+    assert.deepEqual(body.vocabularies[RELATION_REJECTION_VOCABULARY_CODE]?.map((term) => term.code),
+      SEED_RELATION_REJECTION_REASONS.map((reason) => reason.code));
   });
 });

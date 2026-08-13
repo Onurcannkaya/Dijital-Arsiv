@@ -6,7 +6,10 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, Download, FileClock, FileCog, F
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EntityRelation, EntityRelations } from "./entity-relations";
 import { auditLabels } from "./audit-labels";
-import { FIELD_REJECTION_REASONS, OTHER_REASON_CODE } from "../../lib/rejection-reasons";
+import {
+  FIELD_REJECTION_VOCABULARY_CODE, OTHER_REASON_CODE,
+  RELATION_REJECTION_VOCABULARY_CODE, type RejectionReason,
+} from "../../lib/rejection-reasons";
 
 const MISSING_VALUE = "Belirlenmedi";
 
@@ -57,6 +60,9 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const [rejections,setRejections]=useState<Record<string,boolean>>({});
   /** Ret gerekçesi kontrollü koddur; kayda geçmeden önce burada toplanır. */
   const [rejectionDrafts,setRejectionDrafts]=useState<Record<string,RejectionDraft>>({});
+  // Gerekçe listeleri kurumun düzenlediği sözlüklerdir; kod içinde sabit değil.
+  const fieldRejectionReasons:RejectionReason[]=detail?.vocabularies[FIELD_REJECTION_VOCABULARY_CODE]??[];
+  const relationRejectionReasons:RejectionReason[]=detail?.vocabularies[RELATION_REJECTION_VOCABULARY_CODE]??[];
   const [additions,setAdditions]=useState<Addition[]>([]);
   const [textDrafts,setTextDrafts]=useState<Record<number,string>>({});
   const [loading,setLoading]=useState(true);
@@ -439,7 +445,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
                   <select aria-label="Ret gerekçesi" value={rejectionDrafts[valueId]?.code??""}
                     onChange={event=>{const code=event.target.value;setRejectionDrafts(current=>({...current,[valueId]:{code,note:current[valueId]?.note??""}}));}}>
                     <option value="">Ret gerekçesi seçin…</option>
-                    {FIELD_REJECTION_REASONS.map(reason=><option key={reason.code} value={reason.code}>{reason.label}</option>)}
+                    {fieldRejectionReasons.map(reason=><option key={reason.code} value={reason.code}>{reason.label}</option>)}
                   </select>
                   <input aria-label="Ret açıklaması" maxLength={300}
                     placeholder={rejectionDrafts[valueId]?.code===OTHER_REASON_CODE?"Açıklama zorunlu":"Açıklama (isteğe bağlı)"}
@@ -467,6 +473,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
           <EntityRelations
             documentId={documentId}
             relations={detail.relations}
+            rejectionReasons={relationRejectionReasons}
             canReview={canReview}
             archived={archived}
             onChanged={relations=>setDetail(current=>current?{...current,relations}:current)}

@@ -15,6 +15,11 @@
  * hukuk/KVKK onayı almadan `VALIDATED` sayılmazlar.
  */
 
+import {
+  FIELD_REJECTION_VOCABULARY_CODE, RELATION_REJECTION_VOCABULARY_CODE,
+  SEED_FIELD_REJECTION_REASONS, SEED_RELATION_REJECTION_REASONS,
+} from "./rejection-reasons.ts";
+
 export const SEED_PROFILE_VERSION = "1.0";
 export const DEFAULT_DOCUMENT_TYPE_CODE = "TASNIF_BEKLIYOR";
 export const UNIT_VOCABULARY_CODE = "ORGANIZATION_UNIT";
@@ -51,6 +56,27 @@ export const seedVocabularies: SeedVocabulary[] = [
       { code: "ZABITA", label: "Zabıta Müdürlüğü" },
       { code: "HUKUK_ISLERI", label: "Hukuk İşleri Müdürlüğü" },
     ],
+  },
+  /*
+   * Ret gerekçeleri kurumun düzenleyebileceği sözlüklerdir: yeni gerekçe
+   * eklemek ya da kullanılmayanı pasifleştirmek yeni bir sürüm beklememelidir.
+   * Alan ve ilişki ayrı listelerdir; "Belge bu taşınmaza ait değil" bir tarih
+   * alanı için söylenebilecek bir şey değildir ve ortak liste ikisine birden
+   * uyacak kadar belirsiz olmak zorunda kalırdı.
+   */
+  {
+    code: FIELD_REJECTION_VOCABULARY_CODE,
+    name: "Alan değeri ret gerekçeleri",
+    owner: "Arşiv birimi",
+    source: "Başlangıç kümesi — doğrulama pratiğine göre kurumca güncellenir",
+    terms: [...SEED_FIELD_REJECTION_REASONS],
+  },
+  {
+    code: RELATION_REJECTION_VOCABULARY_CODE,
+    name: "Varlık ilişkisi ret gerekçeleri",
+    owner: "Arşiv birimi",
+    source: "Başlangıç kümesi — doğrulama pratiğine göre kurumca güncellenir",
+    terms: [...SEED_RELATION_REJECTION_REASONS],
   },
   {
     code: NEIGHBORHOOD_VOCABULARY_CODE,
