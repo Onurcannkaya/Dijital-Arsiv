@@ -2,8 +2,9 @@ import { prepareAuditEvent } from "../../../../../lib/audit";
 import { authorizeRequest, canAccessUnit } from "../../../../../lib/authorization";
 import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
 import { failure } from "../../../../../lib/errors";
+import { loadVocabularyTerms } from "../../../../../lib/document-profile";
 import {
-  RELATION_REJECTION_REASONS, type ValidatedRejection, validateRejection,
+  RELATION_REJECTION_VOCABULARY_CODE, type ValidatedRejection, validateRejection,
 } from "../../../../../lib/rejection-reasons";
 import {
   isRelationType, listDocumentRelations, relationStatement,
@@ -187,11 +188,14 @@ export async function PATCH(request: Request, context: RouteContext) {
    * önler ve OCR'ın nerede yanıldığının ölçülmesini sağlar.
    */
   const rejectionByRelation = new Map<string, ValidatedRejection>();
-  for (const operation of operations) {
-    if (operation.action !== "reject") continue;
-    const validated = validateRejection(operation.rejection, RELATION_REJECTION_REASONS);
-    if (typeof validated === "string") return jsonError(validated);
-    rejectionByRelation.set(operation.id, validated);
+  if (operations.some((operation) => operation.action === "reject")) {
+    const reasons = await loadVocabularyTerms(DB, RELATION_REJECTION_VOCABULARY_CODE);
+    for (const operation of operations) {
+      if (operation.action !== "reject") continue;
+      const validated = validateRejection(operation.rejection, reasons);
+      if (typeof validated === "string") return jsonError(validated);
+      rejectionByRelation.set(operation.id, validated);
+    }
   }
   if (new Set(operations.map((operation) => operation.id)).size !== operations.length) {
     return jsonError("Aynı ilişki birden fazla gönderilemez.");

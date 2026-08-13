@@ -2,7 +2,7 @@
 
 import { CheckCircle2, LoaderCircle, MapPin, Plus, ShieldCheck, Signpost, ThumbsDown, X } from "lucide-react";
 import { useState } from "react";
-import { OTHER_REASON_CODE, RELATION_REJECTION_REASONS } from "../../lib/rejection-reasons";
+import { OTHER_REASON_CODE, type RejectionReason } from "../../lib/rejection-reasons";
 
 export type EntityRelation = {
   id: string;
@@ -37,6 +37,8 @@ const entityStatusLabels: Record<string, string> = {
 type Props = {
   documentId: string;
   relations: EntityRelation[];
+  /** Kurumun düzenlediği ret gerekçesi sözlüğü; sunucudan gelir. */
+  rejectionReasons: RejectionReason[];
   canReview: boolean;
   archived: boolean;
   onChanged: (relations: EntityRelation[]) => void;
@@ -49,7 +51,7 @@ type FormMode = "none" | "parcel" | "address";
 const emptyParcel = { blockNo: "", parcelNo: "", districtCode: "", cadastralNeighborhood: "", externalId: "" };
 const emptyAddress = { neighborhood: "", street: "", doorNo: "", unitNo: "", externalId: "" };
 
-export function EntityRelations({ documentId, relations, canReview, archived, onChanged, onError, onNotice }: Props) {
+export function EntityRelations({ documentId, relations, rejectionReasons, canReview, archived, onChanged, onError, onNotice }: Props) {
   const [mode, setMode] = useState<FormMode>("none");
   const [parcel, setParcel] = useState(emptyParcel);
   const [address, setAddress] = useState(emptyAddress);
@@ -151,7 +153,7 @@ export function EntityRelations({ documentId, relations, canReview, archived, on
         {rejecting === relation.id ? <div className="rejection-reason">
           <select aria-label="Ret gerekçesi" value={reasonCode} onChange={(event) => setReasonCode(event.target.value)}>
             <option value="">Ret gerekçesi seçin…</option>
-            {RELATION_REJECTION_REASONS.map((reason) => <option key={reason.code} value={reason.code}>{reason.label}</option>)}
+            {rejectionReasons.map((reason) => <option key={reason.code} value={reason.code}>{reason.label}</option>)}
           </select>
           <input aria-label="Ret açıklaması" maxLength={300} value={reasonNote}
             placeholder={reasonCode === OTHER_REASON_CODE ? "Açıklama zorunlu" : "Açıklama (isteğe bağlı)"}
