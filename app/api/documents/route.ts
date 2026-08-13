@@ -145,7 +145,9 @@ export async function GET(request: Request) {
           WHERE r.document_id = d.id AND r.verification_status = 'VERIFIED'
           AND (e.display_label LIKE ? ESCAPE '\\' OR COALESCE(e.external_id, '') LIKE ? ESCAPE '\\'))
         OR EXISTS (SELECT 1 FROM ocr_pages p WHERE p.document_id = d.id
-          AND (p.full_text LIKE ? ESCAPE '\\' OR p.raw_text LIKE ? ESCAPE '\\' OR p.search_text LIKE ? ESCAPE '\\')))`);
+          AND (COALESCE(p.confirmed_text, p.full_text) LIKE ? ESCAPE '\\'
+            OR COALESCE(p.confirmed_text, p.raw_text) LIKE ? ESCAPE '\\'
+            OR p.search_text LIKE ? ESCAPE '\\')))`);
       bindingsList.push(rawPattern, rawPattern, rawPattern, rawPattern, rawPattern, normalizedPattern,
         rawPattern, rawPattern, rawPattern, rawPattern, normalizedPattern);
     });
@@ -164,6 +166,14 @@ export async function GET(request: Request) {
       bindingsList.push(page.cursor.createdAt, page.cursor.createdAt, page.cursor.id);
     }
 
+    /*
+     * Personel onayından sonra yetkili metin onaylanan metindir. Ham OCR
+     * çıktısında aramaya devam etmek, düzeltmenin kaldırdığı içeriği bulunur
+     * bırakır: OCR'ın uydurduğu bir vatandaş adı silinse bile belge o adla
+     * bulunmaya devam eder ve kişiyle hiç ilgisi olmayan bir belge arasında
+     * yanlış bağ kalır. Onaylanmamış sayfada ham çıktı hâlâ tek kaynaktır ve
+     * aranmaya devam eder.
+     */
     const sql = `${documentSelect},
       CASE WHEN ? = '' THEN 0 ELSE EXISTS (SELECT 1 FROM ocr_pages p WHERE p.document_id = d.id AND p.search_text LIKE ? ESCAPE '\\') END AS content_match
       FROM archive_documents d WHERE ${filters.join(" AND ")}
