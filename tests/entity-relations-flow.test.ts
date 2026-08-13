@@ -77,6 +77,70 @@ const auditActions = async (server: NodeServer, documentId: string) => {
   return (rows.results ?? []).map((row) => row.action);
 };
 
+/** Toplu senaryo için N adet OCR önerisi eker (SUGGESTED, TEXT_MENTION). */
+async function seedSuggestions(server: NodeServer, documentId: string, count: number): Promise<string[]> {
+  const ids: string[] = [];
+  for (let index = 0; index < count; index++) {
+    const entityId = `varlik-${documentId}-${index}`;
+    const relationId = `iliski-${documentId}-${index}`;
+    await server.db.prepare(`INSERT INTO entities (id, entity_type, display_label, created_by)
+      VALUES (?, 'PARCEL', ?, 'ocr:test')`).bind(entityId, `${100 + index} ada ${index + 1} parsel`).run();
+    await server.db.prepare(`INSERT INTO document_entity_relations
+        (id, document_id, entity_id, relation_type, relation_source, relation_confidence,
+         verification_status, evidence_json, created_by)
+      VALUES (?, ?, ?, 'TEXT_MENTION', 'OCR', 0.93, 'SUGGESTED', ?, 'ocr:test')`)
+      .bind(relationId, documentId, entityId,
+        JSON.stringify({ evidenceText: `${100 + index} ada ${index + 1} parsel`, pageNumber: 1, box: [10, 20 + index, 200, 40 + index] })).run();
+    ids.push(relationId);
+  }
+  return ids;
+}
+
+test("toplu karar: 60 ilişki tek istekte, tek denetim olayıyla işlenir", async () => {
+  await withServer(async (server) => {
+    /*
+     * "68 parsel" senaryosunun sunucu yarısı: imar kararı onlarca parsele
+     * dokunur ve panel kararları tek PATCH ile gönderir. Sunucu sınırı istek
+     * başına 60'tır; panel fazlasını parçalara böler. Buradaki güvence, bir
+     * parçanın ATOMİK olduğu ve zincire TEK olay yazdığıdır — 60 karar 60
+     * olay olarak yazılsaydı denetim izi okunamaz hale gelirdi; sıfır olay
+     * yazılsaydı kararlar kayıtsız kalırdı.
+     */
+    const ids = await seedSuggestions(server, "belge-a", 60);
+    const bulk = await call(server, "/api/documents/belge-a/relations", "PATCH",
+      { relations: ids.map((id) => ({ id, action: "verify" })) });
+    assert.equal(bulk.status, 200);
+    assert.equal(bulk.body.relations?.filter((item) => item.verificationStatus === "VERIFIED").length, 60);
+    assert.deepEqual(await auditActions(server, "belge-a"), ["relation.verified"], "tek olay yazılmalıydı");
+
+    const event = await server.db.prepare(`SELECT details_json FROM audit_events
+      WHERE document_id = 'belge-a'`).first<{ details_json: string }>();
+    const details = JSON.parse(event?.details_json ?? "{}") as { changes?: unknown[] };
+    assert.equal(details.changes?.length, 60, "olay 60 kararın hepsini taşımalı");
+  });
+});
+
+test("toplu ret ortak gerekçeyle yazılır; 60 üstü tek istek reddedilir", async () => {
+  await withServer(async (server) => {
+    const ids = await seedSuggestions(server, "belge-a", 61);
+
+    // Sunucu sınırı: 61 ilişki tek istekte işlenmez, istek bütünüyle reddedilir.
+    const over = await call(server, "/api/documents/belge-a/relations", "PATCH",
+      { relations: ids.map((id) => ({ id, action: "verify" })) });
+    assert.equal(over.status, 400);
+    assert.deepEqual(await auditActions(server, "belge-a"), [], "reddedilen istek olay yazdı");
+
+    // Panelin ikinci yolu: seçime tek ortak gerekçe (§9.2 kararı).
+    const rejected = await call(server, "/api/documents/belge-a/relations", "PATCH", {
+      relations: ids.slice(0, 3).map((id) => ({ id, action: "reject", reasonCode: "WRONG_ENTITY", reasonNote: "Kararın kapsamı dışında" })),
+    });
+    assert.equal(rejected.status, 200);
+    const declined = rejected.body.relations?.filter((item) => item.verificationStatus === "REJECTED") ?? [];
+    assert.equal(declined.length, 3);
+    assert.deepEqual(await auditActions(server, "belge-a"), ["relation.rejected"]);
+  });
+});
+
 test("varlık kimliğiyle tekildir: aynı parsel ikinci belgede yeniden yaratılmaz", async () => {
   await withServer(async (server) => {
     const first = await call(server, "/api/documents/belge-a/relations", "POST", { parcel: PARCEL });

@@ -12,6 +12,7 @@ import {
 } from "../../lib/rejection-reasons";
 import { confidencePhrase } from "../../lib/confidence-language";
 import { evidenceCropStyle, hasEvidenceBox } from "../../lib/evidence-crop";
+import { RelationBulkPanel } from "./relation-bulk-panel";
 
 const MISSING_VALUE = "Belirlenmedi";
 
@@ -83,6 +84,8 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
    * "şimdi ne yapmam gerekiyor" kalsın.
    */
   const [activeTab,setActiveTab]=useState<"fields"|"relations"|"audit">("fields");
+  /** §9.2: çok önerili belgede toplu karar paneli belge alanının üzerine kayar. */
+  const [bulkOpen,setBulkOpen]=useState(false);
   const [fileSrc,setFileSrc]=useState("");
   /*
    * Önizleme hatası kendi durumunda tutulur. Ortak `error` kullanıldığında,
@@ -551,6 +554,19 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
                 {page.confirmedText!==null&&page.confirmedText!==page.fullText
                   ?<details className="ocr-original"><summary>OCR&apos;ın okuduğu özgün metni göster</summary><p>{page.fullText||"OCR bu sayfada metin üretmedi."}</p></details>
                   :null}{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:isImage?<div className="image-evidence"><img src={fileSrc||undefined} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&hasEvidenceBox(selected.box)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}>{/* design.md §3.3: bitişik altın ad etiketi — yalnız alan adı, yüzde yok. */}<b>{selected.label}</b></span>:null}</div>:<object data={fileSrc||undefined} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Güvenli görüntüleme kopyası bu tarayıcıda gösterilemiyor.</p></object>}</div>
+        {/* §9.2 kararı: toplu karar paneli belge alanının üzerine kayar —
+            geniş yer, bağlamdan kopmadan. Kapanınca belge yine görünür. */}
+        {bulkOpen&&canReview&&!archived?<RelationBulkPanel
+          documentId={documentId}
+          suggestions={detail.relations.filter(relation=>relation.verificationStatus==="SUGGESTED")}
+          rejectionReasons={relationRejectionReasons}
+          fileSrc={isImage?fileSrc||null:null}
+          pageDims={pageNumber=>{const page=pageByNumber.get(pageNumber);return page?{width:page.width,height:page.height}:null;}}
+          onChanged={relations=>setDetail(current=>current?{...current,relations}:current)}
+          onError={setError}
+          onNotice={setNotice}
+          onClose={()=>setBulkOpen(false)}
+        />:null}
       </section>
       <aside className="fields">
         <header><Sparkles size={18}/><span><b>OCR alan kanıtları</b><small>{detail.fields.length?`${detail.fields.length} değer · ${detail.fieldGroups.length} alan`:"Henüz OCR sonucu yok"}</small></span></header>
@@ -588,6 +604,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
             rejectionReasons={relationRejectionReasons}
             canReview={canReview}
             archived={archived}
+            onOpenBulk={()=>setBulkOpen(true)}
             onChanged={relations=>setDetail(current=>current?{...current,relations}:current)}
             onError={setError}
             onNotice={setNotice}
