@@ -238,6 +238,8 @@ export type DocumentRelation = {
   relationConfidence: number | null;
   verificationStatus: RelationVerification;
   evidence: unknown;
+  /** Reddedilmişse gerekçesi; belgeye bakan kişi kararı sebebiyle görmelidir. */
+  rejection: { code: string; label: string; note: string | null } | null;
   verifiedBy: string | null;
   verifiedAt: string | null;
   createdAt: string;
@@ -281,6 +283,7 @@ export async function listDocumentRelations(db: D1Database, documentId: string):
     relationConfidence: row.relation_confidence,
     verificationStatus: row.verification_status,
     evidence: parseEvidence(row.evidence_json),
+    rejection: parseRejection(row.evidence_json),
     verifiedBy: row.verified_by,
     verifiedAt: row.verified_at,
     createdAt: row.created_at,
@@ -291,6 +294,22 @@ export async function listDocumentRelations(db: D1Database, documentId: string):
       ? { neighborhood: row.neighborhood ?? UNKNOWN_IDENTITY, street: row.street ?? UNKNOWN_IDENTITY, doorNo: row.door_no ?? UNKNOWN_IDENTITY, unitNo: row.unit_no ?? "" }
       : null,
   }));
+}
+
+/** Kanıt gövdesine işlenmiş ret gerekçesini okur; biçimi bozuksa yok sayar. */
+function parseRejection(value: string) {
+  try {
+    const parsed = JSON.parse(value || "{}") as { rejection?: unknown };
+    const rejection = parsed?.rejection as { reasonCode?: unknown; reasonLabel?: unknown; reasonNote?: unknown } | undefined;
+    if (typeof rejection?.reasonCode !== "string" || typeof rejection?.reasonLabel !== "string") return null;
+    return {
+      code: rejection.reasonCode,
+      label: rejection.reasonLabel,
+      note: typeof rejection.reasonNote === "string" ? rejection.reasonNote : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function parseEvidence(value: string) {

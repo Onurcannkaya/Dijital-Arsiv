@@ -185,3 +185,36 @@ test("eksik ve çelişkili ilişki isteği reddedilir", async () => {
     }
   });
 });
+
+test("ret gerekçesi kararın yanında görünür ve geri alınınca temizlenir", async () => {
+  await withServer(async (server) => {
+    const created = await call(server, "/api/documents/belge-a/relations", "POST", { parcel: PARCEL });
+    const relationId = created.body.relations?.[0].id ?? "";
+
+    /*
+     * Gerekçe yalnız denetim izine yazılırsa belgeye sonradan bakan kişi
+     * göremez ve aynı yanlış parseli yeniden ekleyebilir. "Bu bağ neden
+     * koparıldı" sorusu belgeye bakılarak sorulur, ham JSON okunarak değil.
+     */
+    const rejected = await call(server, "/api/documents/belge-a/relations", "PATCH", {
+      relations: [{ id: relationId, action: "reject", reasonCode: "MISREAD", reasonNote: "Tutanakta 1285 yazıyor" }],
+    });
+    const shown = rejected.body.relations?.[0] as unknown as
+      { rejection?: { code: string; label: string; note: string | null } };
+    assert.equal(shown.rejection?.code, "MISREAD");
+    assert.equal(shown.rejection?.label, "Ada/parsel yanlış okunmuş");
+    assert.equal(shown.rejection?.note, "Tutanakta 1285 yazıyor");
+
+    // Belge detayı da taşımalı: inceleme ekranı listeyi oradan okur.
+    const detail = await call(server, "/api/documents/belge-a", "GET");
+    const fromDetail = (detail.body.relations as unknown as Array<{ rejection?: { code: string } }>)[0];
+    assert.equal(fromDetail.rejection?.code, "MISREAD");
+
+    // Karar geri alınınca gerekçe ilişkinin üzerinde asılı kalmamalıdır.
+    const restored = await call(server, "/api/documents/belge-a/relations", "PATCH",
+      { relations: [{ id: relationId, action: "verify" }] });
+    const after = restored.body.relations?.[0] as unknown as { rejection?: unknown; verificationStatus: string };
+    assert.equal(after.verificationStatus, "VERIFIED");
+    assert.equal(after.rejection, null, "geri alınan ret gerekçesi ilişkide kaldı");
+  });
+});

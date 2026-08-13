@@ -244,3 +244,7 @@
 .rejection-actions{display:flex;gap:6px;flex:1 1 100%;justify-content:flex-end}
 .rejection-actions button{height:28px;padding:0 10px;display:flex;align-items:center;gap:5px;border:1px solid var(--ar-border);border-radius:5px;background:var(--ar-surface);color:var(--ar-text);font-size:10px;font-weight:650}
 .rejection-actions button:disabled{opacity:.55;cursor:not-allowed}
+
+/* Ret gerekçesi kararın yanında durur; denetim izini açmaya gerek kalmaz. */
+.relation-rejection{display:flex;align-items:flex-start;gap:5px;margin-top:5px;color:var(--ar-amber);font-size:9px;line-height:1.45}
+.relation-rejection svg{flex:none;margin-top:1px}
