@@ -10,6 +10,7 @@ import {
   FIELD_REJECTION_VOCABULARY_CODE, OTHER_REASON_CODE,
   RELATION_REJECTION_VOCABULARY_CODE, type RejectionReason,
 } from "../../lib/rejection-reasons";
+import { confidencePhrase } from "../../lib/confidence-language";
 
 const MISSING_VALUE = "Belirlenmedi";
 
@@ -414,7 +415,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
               >
                 <span>
                   <b>{group.multiValue?`${group.label} ${value.valueIndex+1}`:group.label}</b>
-                  <em className={`risk-${value.riskLevel.toLowerCase()}`}>{riskLabels[value.riskLevel]}{value.origin==="OCR"?` · %${Math.round(value.confidence*100)}`:" · personel"}</em>
+                  <em className={`risk-${value.riskLevel.toLowerCase()}`}>{riskLabels[value.riskLevel]} · {confidencePhrase(value.confidence,value.origin)}</em>
                 </span>
                 {terms
                   ?<select

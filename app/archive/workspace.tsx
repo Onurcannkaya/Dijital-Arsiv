@@ -12,6 +12,7 @@ import { StoredDocument, UploadDialog } from "./upload-dialog";
 import { UsersScreen } from "./users";
 import { ActivityScreen } from "./activity";
 import { SettingsScreen } from "./settings";
+import { confidenceBadge } from "../../lib/confidence-language";
 
 type View = "dashboard" | "inbox" | "review" | "archive" | "users" | "activity" | "settings";
 type DocumentRow = { id:string; referenceNo?:string; title:string; unit:string; place:string; parcel:string; status:string; rawStatus:string; confidence:number; contentMatch?:boolean; pending?:number; relations?:number };
@@ -51,8 +52,10 @@ function Badge({status}:{status:string}) {
 }
 function Table({rows,onOpen,empty}:{rows:DocumentRow[],onOpen:(id:string)=>void,empty:string}) {
   if(!rows.length) return <p className="table-empty">{empty}</p>;
-  return <div className="table-wrap"><table><thead><tr><th>Belge</th><th>İlgili birim</th><th>Ada / parsel</th><th>Durum</th><th>Güven</th><th /></tr></thead><tbody>
-    {rows.map(d=><tr key={d.id}><td><button className="doc-cell" onClick={()=>onOpen(d.id)}><span><FileSearch size={18}/></span><b>{d.title}<small>{d.referenceNo??d.id} · {d.place}{d.relations?` · ${d.relations} doğrulanmış ilişki`:""}</small></b></button></td><td>{d.unit}</td><td className="mono">{d.parcel}</td><td><Badge status={d.status}/>{d.pending?<small className="pending-count">{d.pending} kayıt bekliyor</small>:null}</td><td>{d.confidence>0?<b className={d.confidence<80?"low-confidence":"confidence"}>%{d.confidence}</b>:<span className="pending-confidence">Bekliyor</span>}</td><td><button className="icon-btn" aria-label={`${d.referenceNo??d.title} belgesini aç`} onClick={()=>onOpen(d.id)}><ChevronRight size={17}/></button></td></tr>)}
+  return <div className="table-wrap"><table><thead><tr><th>Belge</th><th>İlgili birim</th><th>Ada / parsel</th><th>Durum</th><th>OCR okuması</th><th /></tr></thead><tbody>
+    {rows.map(d=><tr key={d.id}><td><button className="doc-cell" onClick={()=>onOpen(d.id)}><span><FileSearch size={18}/></span><b>{d.title}<small>{d.referenceNo??d.id} · {d.place}{d.relations?` · ${d.relations} doğrulanmış ilişki`:""}</small></b></button></td><td>{d.unit}</td><td className="mono">{d.parcel}</td><td><Badge status={d.status}/>{d.pending?<small className="pending-count">{d.pending} kayıt bekliyor</small>:null}</td><td>{d.confidence>0?(()=>{const okuma=confidenceBadge(d.confidence/100);
+      return <b className={okuma.needsReview?"low-confidence":"confidence"}>{okuma.label}</b>;})()
+      :<span className="pending-confidence">Bekliyor</span>}</td><td><button className="icon-btn" aria-label={`${d.referenceNo??d.title} belgesini aç`} onClick={()=>onOpen(d.id)}><ChevronRight size={17}/></button></td></tr>)}
   </tbody></table></div>;
 }
 function Metric({icon:Icon,label,value,note,tone}:{icon:typeof Files,label:string,value:string,note:string,tone:string}) {

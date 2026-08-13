@@ -252,10 +252,18 @@ Bu şartname depoya alındı ve **renk + tipografi katmanı** uygulandı
   çekmemesi; personelin önceden onayladığı bir değeri düzeltememesi değil.
   Arşivlendikten sonra zaten bütün alanlar salt okunur olur.
 
+- §1 ilke 4 ve §6 uygulandı: personel arayüzünde güven yüzdesi gösterilmiyor,
+  yerine eylem cümlesi geçiyor (`lib/confidence-language.ts`). Eşikler risk
+  hesabıyla aynı yerlerden geçer (0.75 / 0.90) ki ekranın söylediğiyle sistemin
+  hesapladığı ayrışmasın. Sayı API'de, denetim izinde ve yönetici düzenlerinde
+  (§4.3) durmaya devam ediyor.
+
+  | Yer | Önce | Sonra |
+  |---|---|---|
+  | Alan satırı | `Yüksek risk · %66` | `Yüksek risk · bilgisayar bu yazıdan emin değil — belgedeki değeri kontrol edin` |
+  | İlişki satırı | `OCR önerisi · %83` | `OCR önerisi · bilgisayar emin değil — belgeyle karşılaştırın` |
+  | Belge listesi (`Güven` → `OCR okuması`) | `%96` | `Net okundu` / `Gözden geçirin` / `Kontrol edin` |
+
 ### Bekliyor — karar gerektiriyor
 
-1. **Güven yüzdesinin gizlenmesi (§1 ilke 4, §6).** Bugün liste ve inceleme
-   ekranı `%96`, `%68` gösteriyor. Şartname bunların personele değil yalnız
-   yönetici/denetim ekranlarına ve API'ye ait olduğunu söylüyor. Bu görsel değil
-   **ürün** kararıdır: memurun gördüğü bilgi değişir.
-2. Şartnamenin kendi açık kararları (§9) kurumsal onay bekliyor.
+1. Şartnamenin kendi açık kararları (§9) kurumsal onay bekliyor.

@@ -3,6 +3,7 @@
 import { CheckCircle2, LoaderCircle, MapPin, Plus, ShieldCheck, Signpost, ThumbsDown, X } from "lucide-react";
 import { useState } from "react";
 import { OTHER_REASON_CODE, type RejectionReason } from "../../lib/rejection-reasons";
+import { confidencePhrase } from "../../lib/confidence-language";
 
 export type EntityRelation = {
   id: string;
@@ -142,7 +143,8 @@ export function EntityRelations({ documentId, relations, rejectionReasons, canRe
         </div>
         <small>
           {relationTypeLabels[relation.relationType] ?? relation.relationType} · {sourceLabels[relation.relationSource] ?? relation.relationSource}
-          {relation.relationConfidence !== null ? ` · %${Math.round(relation.relationConfidence * 100)}` : ""}
+          {relation.relationConfidence !== null && relation.relationSource === "OCR"
+            ? ` · ${confidencePhrase(relation.relationConfidence, "OCR")}` : ""}
           {" · "}{entityStatusLabels[relation.entityStatus] ?? relation.entityStatus}
           {relation.externalId ? ` · ${relation.authoritySource}:${relation.externalId}` : ""}
         </small>
