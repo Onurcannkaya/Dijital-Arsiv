@@ -202,7 +202,10 @@ export async function PATCH(request: Request, context: RouteContext) {
         definition, value: from, confidence: current.confidence,
         origin: current.origin === "HUMAN" ? "HUMAN" : "OCR", violations: check.violations,
       });
+      // Reddi geri alınan değerin gerekçesi silinir; aksi halde canlı bir
+      // değerin üzerinde artık geçerli olmayan bir ret kaydı asılı kalır.
       statements.push(DB.prepare(`UPDATE extracted_fields SET verification_status = 'CONFIRMED',
+        rejection_reason_code = NULL, rejection_reason_label = NULL, rejection_reason_note = NULL,
         verified_by = ?, verified_at = CURRENT_TIMESTAMP, risk_level = ?,
         field_definition_id = COALESCE(field_definition_id, ?), updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND document_id = ?`).bind(principal.email, risk, definition?.id ?? null, operation.id, id));
@@ -210,9 +213,18 @@ export async function PATCH(request: Request, context: RouteContext) {
       continue;
     }
     if (operation.action === "reject") {
+      /*
+       * Gerekçe yalnız denetim zincirine yazılırsa belgeye bakan personel
+       * "Reddedildi" ibaresini sebepsiz okur ve kararı yeniden vermeye
+       * çalışabilir. Karar kaydın kendisinde de durur.
+       */
+      const rejection = rejectionByValue.get(operation.id)!;
       statements.push(DB.prepare(`UPDATE extracted_fields SET verification_status = 'REJECTED',
+        rejection_reason_code = ?, rejection_reason_label = ?, rejection_reason_note = ?,
         verified_by = ?, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND document_id = ?`).bind(principal.email, operation.id, id));
+        WHERE id = ? AND document_id = ?`)
+        .bind(rejection.reasonCode, rejection.reasonLabel, rejection.reasonNote,
+          principal.email, operation.id, id));
       changes.push({ id: operation.id, fieldName: current.field_name, action: "reject", from, to: null,
         riskLevel: "LOW", ...(rejectionByValue.get(operation.id) ?? {}) });
       continue;
@@ -224,6 +236,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     const risk = assessRisk({ definition, value: operation.value, confidence: current.confidence, origin: "HUMAN", violations: check.violations });
     statements.push(DB.prepare(`UPDATE extracted_fields SET verification_status = 'CORRECTED',
       corrected_value = ?, corrected_by = ?, corrected_at = CURRENT_TIMESTAMP,
+      rejection_reason_code = NULL, rejection_reason_label = NULL, rejection_reason_note = NULL,
       verified_by = ?, verified_at = CURRENT_TIMESTAMP, risk_level = ?,
       field_definition_id = COALESCE(field_definition_id, ?), updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND document_id = ?`)

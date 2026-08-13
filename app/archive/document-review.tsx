@@ -23,6 +23,8 @@ type DetailValue = {
   verifiedBy:string|null; verifiedAt:string|null; corrected:boolean; correctedBy:string|null; correctedAt:string|null;
   /** Biçim kuralı ihlali varsa gerekçe; kural sunucudadır, istemci hesaplayamaz. */
   formatViolation:string|null;
+  /** Reddedilmişse gerekçesi; karar sebebiyle birlikte okunmalıdır. */
+  rejection:{code:string;label:string;note:string|null}|null;
 };
 type FieldGroup = {
   name:string; label:string; multiValue:boolean; critical:boolean; required:boolean;
@@ -441,6 +443,12 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
                     ?<button type="button" onClick={event=>{event.preventDefault();setRejections(current=>({...current,[valueId]:false}));setRejectionDrafts(current=>{const next={...current};delete next[valueId];return next;});}} disabled={value.verificationStatus==="REJECTED"}><RotateCcw size={12}/> Geri al</button>
                     :<button type="button" className="value-reject" onClick={event=>{event.preventDefault();setRejections(current=>({...current,[valueId]:true}));setRejectionDrafts(current=>({...current,[valueId]:{code:"",note:""}}));}}><ThumbsDown size={12}/> Bu değeri reddet</button>}
                 </div>:null}
+                {/* Kaydedilmiş ret gerekçesi kararın yanında durur; personel
+                    "Reddedildi" ibaresini sebepsiz okumamalıdır. */}
+                {value.rejection?<small className="relation-rejection">
+                  <ThumbsDown size={11}/> {value.rejection.label}
+                  {value.rejection.note?` — ${value.rejection.note}`:""}
+                </small>:null}
                 {rejections[valueId]&&value.verificationStatus!=="REJECTED"?<div className="rejection-reason">
                   <select aria-label="Ret gerekçesi" value={rejectionDrafts[valueId]?.code??""}
                     onChange={event=>{const code=event.target.value;setRejectionDrafts(current=>({...current,[valueId]:{code,note:current[valueId]?.note??""}}));}}>

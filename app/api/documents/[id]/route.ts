@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ id: string }> };
 type DocumentRow = { id:string; reference_no:string; original_name:string; media_type:string; byte_size:number; sha256:string; document_type:string; document_type_id:string|null; document_profile_version:string|null; unit:string; status:string; uploaded_by:string; created_at:string; updated_at:string };
-type FieldRow = { id:string; field_name:string; value_index:number; field_value:string; normalized_value:string|null; confidence:number; risk_level:string; page_number:number; bbox_json:string; evidence_text:string; model:string; verification_status:string; origin:string; verified_by:string|null; verified_at:string|null; corrected_value:string|null; corrected_by:string|null; corrected_at:string|null };
+type FieldRow = { id:string; field_name:string; value_index:number; field_value:string; normalized_value:string|null; confidence:number; risk_level:string; page_number:number; bbox_json:string; evidence_text:string; model:string; verification_status:string; origin:string; verified_by:string|null; verified_at:string|null; corrected_value:string|null; corrected_by:string|null; corrected_at:string|null;
+  rejection_reason_code:string|null; rejection_reason_label:string|null; rejection_reason_note:string|null };
 type PageRow = { page_number:number; width:number; height:number; raw_text:string; full_text:string; search_text:string; confirmed_text:string|null; confirmed_by:string|null; confirmed_at:string|null; words_json:string; average_confidence:number; model:string };
 type AuditRow = { event_number:number; actor:string; action:string; details_json:string; previous_hash:string|null; event_hash:string; created_at:string };
 type OcrJobRow = { status:string; attempt:number; max_attempts:number; error_message:string|null;
@@ -34,7 +35,9 @@ export async function GET(request: Request, context: RouteContext) {
     bindings.DB.prepare(`SELECT page_number, width, height, raw_text, full_text, search_text, confirmed_text, confirmed_by, confirmed_at, words_json, average_confidence, model FROM ocr_pages WHERE document_id = ? ORDER BY page_number`).bind(id).all<PageRow>(),
     bindings.DB.prepare(`SELECT id, field_name, value_index, field_value, normalized_value, confidence, risk_level,
       page_number, bbox_json, evidence_text, model, verification_status, origin, verified_by, verified_at,
-      corrected_value, corrected_by, corrected_at FROM extracted_fields WHERE document_id = ?
+      corrected_value, corrected_by, corrected_at,
+      rejection_reason_code, rejection_reason_label, rejection_reason_note
+      FROM extracted_fields WHERE document_id = ?
       ORDER BY field_name, value_index`).bind(id).all<FieldRow>(),
     bindings.DB.prepare(`SELECT event_number, actor, action, details_json, previous_hash, event_hash, created_at FROM audit_events WHERE document_id = ? ORDER BY event_number DESC LIMIT 25`).bind(id).all<AuditRow>(),
     bindings.DB.prepare(`SELECT id, object_class, media_type, byte_size, sha256,
@@ -90,6 +93,11 @@ export async function GET(request: Request, context: RouteContext) {
     corrected: Boolean(field.corrected_value),
     correctedBy: field.corrected_by,
     correctedAt: field.corrected_at,
+    // Reddedilmişse gerekçesi; personel kararı sebebiyle görmelidir.
+    rejection: field.rejection_reason_code
+      ? { code: field.rejection_reason_code, label: field.rejection_reason_label ?? field.rejection_reason_code,
+          note: field.rejection_reason_note }
+      : null,
     /*
      * Biçim kuralı `field_definitions` içindeki desendir ve istemciye
      * gönderilmez; ihlali yalnız sunucu bilebilir. Bildirilmezse inceleme
