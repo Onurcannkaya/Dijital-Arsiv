@@ -75,6 +75,12 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const [notice,setNotice]=useState("");
   const [activeValueId,setActiveValueId]=useState<string|null>(null);
   const [previewMode,setPreviewMode]=useState<"image"|"text">("image");
+  /*
+   * design.md §4.1 (2a): ekran tek bir soru sorar. İlişkiler, nesne kayıtları
+   * ve denetim izi ayrı sekmelere alınır ki doğrulama kolonunda yalnız
+   * "şimdi ne yapmam gerekiyor" kalsın.
+   */
+  const [activeTab,setActiveTab]=useState<"fields"|"relations"|"audit">("fields");
   const [fileSrc,setFileSrc]=useState("");
   /*
    * Önizleme hatası kendi durumunda tutulur. Ortak `error` kullanıldığında,
@@ -352,74 +358,44 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     hasTextChanges?"kaydedilmemiş metin düzenlemesi var":null,
   ].filter(Boolean) as string[];
 
+  /*
+   * design.md ilke 2: makinenin doğru okuduğu alanlar katlanır, öne çıkmaz.
+   * Kontrol bekleyen gruplar numaralı görev kartı olur; karara bağlananlar
+   * katlanmış özete iner ama DÜZENLENEBİLİR kalır — personel önceden
+   * onayladığı bir değeri düzeltebilmelidir.
+   */
+  const groupPending=(group:FieldGroup)=>group.valueIds.some(valueId=>{
+    const value=valuesById.get(valueId);
+    return value?.verificationStatus==="SUGGESTED"&&!rejections[valueId];
+  });
+  const pendingGroups=(detail?.fieldGroups??[]).filter(groupPending);
+  const settledGroups=(detail?.fieldGroups??[]).filter(group=>!groupPending(group));
+  const orderedGroups=[
+    ...pendingGroups.map((group,index)=>({group,pending:true,taskNumber:index+1})),
+    ...settledGroups.map(group=>({group,pending:false,taskNumber:0})),
+  ];
+
   const addValue=(fieldName:string)=>setAdditions(current=>[...current,{key:crypto.randomUUID(),fieldName,value:""}]);
 
   if(loading)return <div className="detail-state"><LoaderCircle className="spin"/><b>Belge kaydı hazırlanıyor…</b></div>;
   if(!detail)return <div className="detail-state error"><AlertTriangle/><b>{error||"Belge bulunamadı."}</b><button className="outline" onClick={onBack}>Listeye dön</button></div>;
 
-  return <div className="review">
-    <div className="review-head">
-      <button onClick={onBack}><ArrowLeft size={15}/> Belge listesi</button>
-      <span><span className={`status ${archived||detail.document.status==="ready"?"success":detail.document.status==="processing"?"info":"warning"}`}><i/>{statusLabels[detail.document.status]||detail.document.status}</span><b>{detail.document.referenceNo}</b></span>
-      <div>{needsOcr?
-        canProcess?<button className="approve" onClick={process} disabled={processing}>{processing?<LoaderCircle className="spin" size={16}/>:<Play size={16}/>} OCR işlemini çalıştır</button>:<span className="archived-lock restricted"><LockKeyhole size={15}/> OCR yetkisi gerekli</span>:
-        archived?<span className="archived-lock"><LockKeyhole size={15}/> Salt okunur</span>:
-        <>{canReview?<button className="outline save-fields" onClick={saveFields} disabled={saving||incompleteRejections.length>0||(!pendingValues&&!hasFieldChanges&&!hasAdditions)} title={incompleteRejections.length?"Reddedilen her değer için gerekçe seçilmelidir.":undefined}>{saving?<LoaderCircle className="spin" size={15}/>:<Save size={15}/>} {pendingValues?"Alanları onayla":"Düzeltmeleri kaydet"}</button>:null}{canArchive?<button className="approve" onClick={approve} disabled={saving||savingText||archiveBlocked} title={archiveBlockers.length?`Arşivlemeden önce tamamlanmalı: ${archiveBlockers.join(", ")}.`:undefined}><CheckCircle2 size={17}/> Doğrula ve arşivle</button>:null}{!canReview&&!canArchive?<span className="archived-lock restricted"><LockKeyhole size={15}/> Görüntüleme yetkisi</span>:null}</>}
-      </div>
-      {ocrJob&&(needsOcr||ocrJob.status==="failed")
-        ?<p className={`ocr-job-note ${ocrJob.deadLettered?"blocked":""}`}>
-          <FileClock size={14}/>
-          <span><b>{ocrJobNote}</b>{ocrJob.errorMessage?<small>Son hata: {ocrJob.errorMessage}</small>:null}</span>
-        </p>
-        :null}
-      {canArchive&&!archived&&!needsOcr&&archiveBlockers.length
-        ?<p className="archive-blockers"><AlertTriangle size={14}/> Arşivlemeden önce: {archiveBlockers.join(" · ")}</p>
-        :null}
-    </div>
-    {error?<div className="inline-error"><AlertTriangle size={16}/>{error}</div>:null}
-    {notice?<div className="inline-notice"><CheckCircle2 size={16}/>{notice}</div>:null}
-    <div className="review-grid">
-      <aside className="thumbs">{(detail.pages.length?detail.pages:[{pageNumber:1}]).map((page,index)=><button className={index===0?"active":""} key={page.pageNumber}><span>{page.pageNumber}</span><i/></button>)}</aside>
-      <section className="document">
-        <div className="document-tools"><span>{detail.document.originalName}</span>{canDownload?<button className="download-original" onClick={()=>{void downloadOriginal()}} type="button"><Download size={14}/> Aslını indir</button>:null}<div className="preview-switch"><button className={previewMode==="image"?"active":""} onClick={()=>setPreviewMode("image")} aria-label="Belge görüntüsü"><ImageIcon size={15}/> Görüntü</button><button className={previewMode==="text"?"active":""} onClick={()=>setPreviewMode("text")} disabled={!detail.pages.length} aria-label="Okunabilir OCR metni"><FileText size={15}/> Okunabilir metin</button></div></div>
-        <div className="real-preview">{previewError&&previewMode!=="text"?<p className="preview-error"><AlertTriangle size={15}/>{previewError}</p>:null}{previewMode==="text"?<article className="ocr-transcript"><header><div><span><FileText size={17}/><b>Onaylı ve aranabilir belge metni</b><em className={textPending?"pending":"verified"}>{textPending?"Kontrol bekliyor":"Personel onaylı"}</em></span><small>Otomatik metni asıl belgeyle karşılaştırın. Kaydedilen her düzeltme sürüm ve SHA-256 denetim iziyle korunur.</small></div>{canReview&&!archived?<button className="text-confirm" onClick={saveText} disabled={savingText||(!textPending&&!hasTextChanges)}>{savingText?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {hasTextChanges?"Düzeltmeleri kaydet":"Metni onayla"}</button>:null}</header>{detail.pages.map(page=><section key={page.pageNumber}><h3><span>Sayfa {page.pageNumber}</span>{page.confirmedBy
-                  ?<small>{page.confirmedBy} · {page.confirmedAt?new Date(page.confirmedAt).toLocaleString("tr-TR"):"Onaylandı"}{page.confirmedText!==null&&page.confirmedText!==page.fullText?" · personel düzeltmesi":" · olduğu gibi onaylandı"}</small>
-                  :<small>Henüz personel onayı yok</small>}</h3>
-                {/* Arşivlenen metin, insanların arayıp alıntılayacağı metindir.
-                    Personelin değiştirdiği bir sayfa, yalnızca kontrol edilmiş
-                    sayfadan maddi olarak farklıdır; ikisi aynı görünmemelidir.
-                    Makinenin ne okuduğu da erişilebilir kalmalıdır. */}
-                {page.confirmedText!==null&&page.confirmedText!==page.fullText
-                  ?<details className="ocr-original"><summary>OCR&apos;ın okuduğu özgün metni göster</summary><p>{page.fullText||"OCR bu sayfada metin üretmedi."}</p></details>
-                  :null}{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:isImage?<div className="image-evidence"><img src={fileSrc||undefined} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&selected.box.some(value=>value>0)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}/>:null}</div>:<object data={fileSrc||undefined} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Güvenli görüntüleme kopyası bu tarayıcıda gösterilemiyor.</p></object>}</div>
-      </section>
-      <aside className="fields">
-        <header><Sparkles size={18}/><span><b>OCR alan kanıtları</b><small>{detail.fields.length?`${detail.fields.length} değer · ${detail.fieldGroups.length} alan`:"Henüz OCR sonucu yok"}</small></span><em>{detail.pages[0]?.model||"PaddleOCR"}</em></header>
-        <div className="profile-strip">
-          <FileCog size={15}/>
-          <span>
-            <b>{detail.profile.name}</b>
-            <small>
-              Profil {detail.profile.code} · sürüm {detail.profile.version}
-              {detail.profile.recordedVersion&&detail.profile.recordedVersion!==detail.profile.version?` (kayıt: ${detail.profile.recordedVersion})`:""}
-              {" · "}{detail.profile.ownerDepartment}
-            </small>
-          </span>
-          <em className={`profile-status ${detail.profile.status.toLowerCase()}`}>{profileStatusLabels[detail.profile.status]??detail.profile.status}</em>
-        </div>
-        {detail.fields.length?<>
-          <div className={`quality ${pendingValues?"":"quality-good"}`}><Gauge size={17}/><span><b>{archived?"Personel tarafından arşivlendi":pendingValues?`${pendingValues} değer personel kontrolü bekliyor`:"Bütün değerler personel tarafından karara bağlandı"}</b><small>Güven, risk seviyesi, kanıt konumu ve doğrulayan birlikte saklanır.</small></span></div>
-          {emptyRequired.length?<div className="empty-required"><AlertTriangle size={15}/><span>{emptyRequired.map(value=>value.label).join(", ")} OCR tarafından bulunamadı; onaylamak için değeri girin.</span></div>:null}
-
-          <div className="evidence-fields">{detail.fieldGroups.map(group=>{
+  /*
+   * Grup çizimi tek yerde durur: bekleyen görev kartları ile katlanmış
+   * özet aynı denetimleri gösterir, yalnız yerleşimleri farklıdır.
+   * Karara bağlanmış değer düzenlenebilir kalır — personel önceden
+   * onayladığı bir değeri düzeltebilmelidir.
+   */
+  const renderGroup=({group,pending,taskNumber}:{group:FieldGroup;pending:boolean;taskNumber:number})=>{
           const terms=group.vocabularyCode?detail.vocabularies[group.vocabularyCode]??null:null;
-          const activeValues=group.valueIds.filter(valueId=>{
+          const activeValues=group.valueIds.filter((valueId:string)=>{
             const value=valuesById.get(valueId);
             return value&&!rejections[valueId]&&value.verificationStatus!=="REJECTED";
           }).length;
           const canAdd=canReview&&!archived&&group.extractionPolicy!=="NONE"&&(group.multiValue||activeValues===0);
-          return <div className="field-group" key={group.name}>
+          return <div className={`field-group ${pending?"task-card":"settled"}`} key={group.name}>
             <div className="field-group-head">
+              {pending?<i className="task-medallion">{taskNumber}</i>:null}
               <b>{group.label}</b>
               <span>
                 {group.critical?<em className="tag-critical">kritik</em>:null}
@@ -499,11 +475,89 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
             </label>)}
             {canAdd?<button type="button" className="field-add" onClick={()=>addValue(group.name)}><Plus size={13}/> {group.label} değeri ekle</button>:null}
           </div>;
-          })}</div>
+          };
 
-          {selected?<div className="evidence-detail"><b>Kanıt metni</b><p>{selected.evidenceText}</p><span><ScanLine size={14}/>{selected.model} · Sayfa {selected.pageNumber}</span></div>:null}
 
-          <EntityRelations
+  return <div className="review">
+    <div className="review-head">
+      <button onClick={onBack}><ArrowLeft size={15}/> Belge listesi</button>
+      <span><span className={`status ${archived||detail.document.status==="ready"?"success":detail.document.status==="processing"?"info":"warning"}`}><i/>{statusLabels[detail.document.status]||detail.document.status}</span><b>{detail.document.referenceNo}</b></span>
+      <div>{needsOcr?
+        canProcess?<button className="approve" onClick={process} disabled={processing}>{processing?<LoaderCircle className="spin" size={16}/>:<Play size={16}/>} OCR işlemini çalıştır</button>:<span className="archived-lock restricted"><LockKeyhole size={15}/> OCR yetkisi gerekli</span>:
+        archived?<span className="archived-lock"><LockKeyhole size={15}/> Salt okunur</span>:
+        <>{canReview?<button className="outline save-fields" onClick={saveFields} disabled={saving||incompleteRejections.length>0||(!pendingValues&&!hasFieldChanges&&!hasAdditions)} title={incompleteRejections.length?"Reddedilen her değer için gerekçe seçilmelidir.":undefined}>{saving?<LoaderCircle className="spin" size={15}/>:<Save size={15}/>} {pendingValues?"Alanları onayla":"Düzeltmeleri kaydet"}</button>:null}{canArchive?<button className="approve" onClick={approve} disabled={saving||savingText||archiveBlocked} title={archiveBlockers.length?`Arşivlemeden önce tamamlanmalı: ${archiveBlockers.join(", ")}.`:undefined}><CheckCircle2 size={17}/> Doğrula ve arşivle</button>:null}{!canReview&&!canArchive?<span className="archived-lock restricted"><LockKeyhole size={15}/> Görüntüleme yetkisi</span>:null}</>}
+      </div>
+      {ocrJob&&(needsOcr||ocrJob.status==="failed")
+        ?<p className={`ocr-job-note ${ocrJob.deadLettered?"blocked":""}`}>
+          <FileClock size={14}/>
+          <span><b>{ocrJobNote}</b>{ocrJob.errorMessage?<small>Son hata: {ocrJob.errorMessage}</small>:null}</span>
+        </p>
+        :null}
+      {canArchive&&!archived&&!needsOcr&&archiveBlockers.length
+        ?<p className="archive-blockers"><AlertTriangle size={14}/> Arşivlemeden önce: {archiveBlockers.join(" · ")}</p>
+        :null}
+    </div>
+    {error?<div className="inline-error"><AlertTriangle size={16}/>{error}</div>:null}
+    {notice?<div className="inline-notice"><CheckCircle2 size={16}/>{notice}</div>:null}
+    {/* design.md §3.2 sekme şeridi: doğrulama, ilişkiler ve denetim izi ayrılır. */}
+    <nav className="review-tabs" aria-label="Belge bölümleri">
+      {([["fields","Belge ve alanlar",pendingValues],
+         ["relations","İlişkiler ve geçmiş",detail.relations.length],
+         ["audit","İşlem kayıtları",detail.audit.length]] as const).map(([key,label,count])=>
+        <button key={key} type="button" className={activeTab===key?"active":""}
+          aria-current={activeTab===key?"page":undefined}
+          onClick={()=>setActiveTab(key)}>
+          {label}{count?<b>{count}</b>:null}
+        </button>)}
+    </nav>
+    <div className="review-grid">
+      <aside className="thumbs">{(detail.pages.length?detail.pages:[{pageNumber:1}]).map((page,index)=><button className={index===0?"active":""} key={page.pageNumber}><span>{page.pageNumber}</span><i/></button>)}</aside>
+      <section className="document">
+        <div className="document-tools"><span>{detail.document.originalName}</span>{canDownload?<button className="download-original" onClick={()=>{void downloadOriginal()}} type="button"><Download size={14}/> Aslını indir</button>:null}<div className="preview-switch"><button className={previewMode==="image"?"active":""} onClick={()=>setPreviewMode("image")} aria-label="Belge görüntüsü"><ImageIcon size={15}/> Görüntü</button><button className={previewMode==="text"?"active":""} onClick={()=>setPreviewMode("text")} disabled={!detail.pages.length} aria-label="Okunabilir OCR metni"><FileText size={15}/> Okunabilir metin</button></div></div>
+        <div className="real-preview">{previewError&&previewMode!=="text"?<p className="preview-error"><AlertTriangle size={15}/>{previewError}</p>:null}{previewMode==="text"?<article className="ocr-transcript"><header><div><span><FileText size={17}/><b>Onaylı ve aranabilir belge metni</b><em className={textPending?"pending":"verified"}>{textPending?"Kontrol bekliyor":"Personel onaylı"}</em></span><small>Otomatik metni asıl belgeyle karşılaştırın. Kaydedilen her düzeltme sürüm ve SHA-256 denetim iziyle korunur.</small></div>{canReview&&!archived?<button className="text-confirm" onClick={saveText} disabled={savingText||(!textPending&&!hasTextChanges)}>{savingText?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {hasTextChanges?"Düzeltmeleri kaydet":"Metni onayla"}</button>:null}</header>{detail.pages.map(page=><section key={page.pageNumber}><h3><span>Sayfa {page.pageNumber}</span>{page.confirmedBy
+                  ?<small>{page.confirmedBy} · {page.confirmedAt?new Date(page.confirmedAt).toLocaleString("tr-TR"):"Onaylandı"}{page.confirmedText!==null&&page.confirmedText!==page.fullText?" · personel düzeltmesi":" · olduğu gibi onaylandı"}</small>
+                  :<small>Henüz personel onayı yok</small>}</h3>
+                {/* Arşivlenen metin, insanların arayıp alıntılayacağı metindir.
+                    Personelin değiştirdiği bir sayfa, yalnızca kontrol edilmiş
+                    sayfadan maddi olarak farklıdır; ikisi aynı görünmemelidir.
+                    Makinenin ne okuduğu da erişilebilir kalmalıdır. */}
+                {page.confirmedText!==null&&page.confirmedText!==page.fullText
+                  ?<details className="ocr-original"><summary>OCR&apos;ın okuduğu özgün metni göster</summary><p>{page.fullText||"OCR bu sayfada metin üretmedi."}</p></details>
+                  :null}{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:isImage?<div className="image-evidence"><img src={fileSrc||undefined} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&selected.box.some(value=>value>0)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}/>:null}</div>:<object data={fileSrc||undefined} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Güvenli görüntüleme kopyası bu tarayıcıda gösterilemiyor.</p></object>}</div>
+      </section>
+      <aside className="fields">
+        <header><Sparkles size={18}/><span><b>OCR alan kanıtları</b><small>{detail.fields.length?`${detail.fields.length} değer · ${detail.fieldGroups.length} alan`:"Henüz OCR sonucu yok"}</small></span><em>{detail.pages[0]?.model||"PaddleOCR"}</em></header>
+        {activeTab==="fields"?<div className="profile-strip">
+          <FileCog size={15}/>
+          <span>
+            <b>{detail.profile.name}</b>
+            <small>
+              Profil {detail.profile.code} · sürüm {detail.profile.version}
+              {detail.profile.recordedVersion&&detail.profile.recordedVersion!==detail.profile.version?` (kayıt: ${detail.profile.recordedVersion})`:""}
+              {" · "}{detail.profile.ownerDepartment}
+            </small>
+          </span>
+          <em className={`profile-status ${detail.profile.status.toLowerCase()}`}>{profileStatusLabels[detail.profile.status]??detail.profile.status}</em>
+        </div>:null}
+        {detail.fields.length?<>
+          {activeTab==="fields"?<div className={`quality ${pendingValues?"":"quality-good"}`}><Gauge size={17}/><span><b>{archived?"Personel tarafından arşivlendi":pendingValues?`${pendingValues} değer personel kontrolü bekliyor`:"Bütün değerler personel tarafından karara bağlandı"}</b><small>Güven, risk seviyesi, kanıt konumu ve doğrulayan birlikte saklanır.</small></span></div>:null}
+          {activeTab==="fields"&&emptyRequired.length?<div className="empty-required"><AlertTriangle size={15}/><span>{emptyRequired.map(value=>value.label).join(", ")} OCR tarafından bulunamadı; onaylamak için değeri girin.</span></div>:null}
+
+          {activeTab==="fields"?<>
+          {/* design.md §4.1: kolon tek bir soru sorar — "şimdi ne yapmam gerekiyor". */}
+          {pendingGroups.length?<p className="task-heading">{pendingValues} değer onayınızı bekliyor</p>:null}
+          <div className="evidence-fields">{orderedGroups.filter(entry=>entry.pending).map(renderGroup)}</div>
+
+          {/* design.md §3.5: doğru okunan alanlar katlanır, öne çıkmaz. */}
+          {settledGroups.length?<details className="read-summary">
+            <summary><CheckCircle2 size={14}/> Doğru okunan {settledGroups.length} alan</summary>
+            <div className="evidence-fields">{orderedGroups.filter(entry=>!entry.pending).map(renderGroup)}</div>
+          </details>:null}
+          </>:null}
+
+          {activeTab==="fields"&&selected?<div className="evidence-detail"><b>Kanıt metni</b><p>{selected.evidenceText}</p><span><ScanLine size={14}/>{selected.model} · Sayfa {selected.pageNumber}</span></div>:null}
+
+          {activeTab==="relations"?<EntityRelations
             documentId={documentId}
             relations={detail.relations}
             rejectionReasons={relationRejectionReasons}
@@ -512,11 +566,11 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
             onChanged={relations=>setDetail(current=>current?{...current,relations}:current)}
             onError={setError}
             onNotice={setNotice}
-          />
+          />:null}
 
-          <section className="objects"><header><ShieldCheck size={15}/><span><b>Nesne kayıtları</b><small>Asıl dosya ve türevler</small></span></header>{detail.objects.map(object=><article key={object.id}><b>{object.objectClass}</b><small>{Math.max(1,Math.round(object.byteSize/1024))} KB · {object.sha256.slice(0,12)}…</small><small>{object.generator??"—"} · {object.legalHoldStatus==="HELD"?"Yasal bekletme":object.retentionStatus}</small></article>)}</section>
+          {activeTab==="relations"?<section className="objects"><header><ShieldCheck size={15}/><span><b>Nesne kayıtları</b><small>Asıl dosya ve türevler</small></span></header>{detail.objects.map(object=><article key={object.id}><b>{object.objectClass}</b><small>{Math.max(1,Math.round(object.byteSize/1024))} KB · {object.sha256.slice(0,12)}…</small><small>{object.generator??"—"} · {object.legalHoldStatus==="HELD"?"Yasal bekletme":object.retentionStatus}</small></article>)}</section>:null}
 
-          <section className="audit-trail"><header><History size={15}/><span><b>Değiştirilemez denetim izi</b><small>Belge bazında SHA-256 özet zinciri</small></span><ShieldCheck size={15}/></header>{detail.audit.length?detail.audit.map(event=><article key={event.eventNumber}><i/><span><b>{auditLabels[event.action]||event.action}</b><small>{event.actor} · {new Date(event.createdAt).toLocaleString("tr-TR")}</small><code>#{event.eventNumber} · {event.eventHash.slice(0,12)}…</code></span></article>):<p>Henüz personel işlemi kaydedilmedi.</p>}</section>
+          {activeTab==="audit"?<section className="audit-trail"><header><History size={15}/><span><b>Değiştirilemez denetim izi</b><small>Belge bazında SHA-256 özet zinciri</small></span><ShieldCheck size={15}/></header>{detail.audit.length?detail.audit.map(event=><article key={event.eventNumber}><i/><span><b>{auditLabels[event.action]||event.action}</b><small>{event.actor} · {new Date(event.createdAt).toLocaleString("tr-TR")}</small><code>#{event.eventNumber} · {event.eventHash.slice(0,12)}…</code></span></article>):<p>Henüz personel işlemi kaydedilmedi.</p>}</section>:null}
         </>:<div className="empty-ocr"><FileClock size={28}/><b>OCR sonucu bekleniyor</b><p>Asıl dosya güvenli kasada. Yerel OCR servisi çalıştığında metin ve alan kanıtları burada görünecek.</p>{canProcess?<button className="primary" onClick={process} disabled={processing}>{processing?<LoaderCircle className="spin" size={16}/>:<Play size={16}/>} Kuyruğu işle</button>:null}</div>}
       </aside>
     </div>

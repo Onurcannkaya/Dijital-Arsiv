@@ -241,13 +241,21 @@ Bu şartname depoya alındı ve **renk + tipografi katmanı** uygulandı
   yükseklikler §2.3'e çekildi (üst şerit 62px, araç şeridi 46px, buton 36px,
   ikincil buton 32px).
 
+- §4.1 `2a` düzeni uygulandı: sekme şeridi (Belge ve alanlar · İlişkiler ve
+  geçmiş · İşlem kayıtları), 452px görev kolonu, numaralı görev kartları ve
+  katlanmış "doğru okunan" özeti. İlişkiler, nesne kayıtları ve denetim izi
+  kendi sekmelerine taşındı; doğrulama kolonunda yalnız "şimdi ne yapmam
+  gerekiyor" kaldı.
+
+  **Şartnameden bilinçli sapma:** §3.5 katlanmış özeti salt okunur anlatıyor,
+  burada düzenlenebilir bırakıldı. Amaç doğru okunan alanların dikkat
+  çekmemesi; personelin önceden onayladığı bir değeri düzeltememesi değil.
+  Arşivlendikten sonra zaten bütün alanlar salt okunur olur.
+
 ### Bekliyor — karar gerektiriyor
 
 1. **Güven yüzdesinin gizlenmesi (§1 ilke 4, §6).** Bugün liste ve inceleme
    ekranı `%96`, `%68` gösteriyor. Şartname bunların personele değil yalnız
    yönetici/denetim ekranlarına ve API'ye ait olduğunu söylüyor. Bu görsel değil
    **ürün** kararıdır: memurun gördüğü bilgi değişir.
-2. **Belge Doğrulama `2a` düzeni (§4.1).** Bugünkü üç kolon (küçük resimler │
-   belge │ alanlar) yerine sekme şeridi + belge + 452px görev kolonu, numaralı
-   görev kartları ve katlanmış "doğru okunan" özeti. Ekranın yeniden kurulması.
-3. Şartnamenin kendi açık kararları (§9) kurumsal onay bekliyor.
+2. Şartnamenin kendi açık kararları (§9) kurumsal onay bekliyor.
