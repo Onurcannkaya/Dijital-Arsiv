@@ -349,3 +349,65 @@ test("bulunmayan belge ve yetkisiz istek ayrı ayrı reddedilir", async () => {
     assert.equal(anonymous.status, 401);
   });
 });
+
+test("inceleme ekranı sunucunun her arşivleme engelini önceden sayar", async () => {
+  /*
+   * Ekranda görünmeyen bir engel, memura düğmeyi açık gösterir ve gerekçeyi
+   * ancak tıklamadan sonra 409 olarak öğretir. Sunucunun durdurduğu her
+   * durumun ekranda bir karşılığı olmalıdır.
+   */
+  const source = await (await import("node:fs/promises"))
+    .readFile(new URL("../app/archive/document-review.tsx", import.meta.url), "utf8");
+
+  // Sunucunun durdurma sebepleri ve ekrandaki karşılıkları.
+  const blockers: Array<[server: string, screen: RegExp]> = [
+    ["Kontrol bekleyen alanlar", /pendingValues>0\?/],
+    ["Kontrol bekleyen varlık ilişkileri", /pendingRelations>0\?/],
+    ["Tam metin personel tarafından onaylanmadan", /textPending\?/],
+    ["Biçim kuralına uymayan değerler", /malformed\.length\?/],
+    ["doğrulanmış bir değer olmadan arşivlenemez", /missingRequired\.length\?/],
+  ];
+  for (const [label, pattern] of blockers) {
+    assert.match(source, pattern, `${label} ekranda sayılmıyor`);
+  }
+  // Hepsi düğmeyi de kapatmalı, yalnız listede görünmesi yetmez.
+  assert.match(source, /const archiveBlocked=[^;]*missingRequired\.length>0/);
+});
+
+test("zorunlu alanın değeri reddedilince yerine yenisi konabilir", async () => {
+  await withServer(async (server) => {
+    const id = await seedDocument(server, { id: "doc-yerine" });
+    // Muhatap yerine ada reddedilir: profilde zorunludur.
+    await call(server, `/api/documents/${id}/fields`, {
+      method: "PATCH", headers: JSON_IDENTITY,
+      body: JSON.stringify({ values: [
+        ...FIELDS.map((_, index) => ({ id: `${id}-f${index}`, action: "confirm" }))
+          .filter((value) => value.id !== `${id}-f4`),
+        { id: `${id}-f4`, action: "reject", reasonCode: "MISREAD" },
+      ] }),
+    });
+    await confirmText(server, id);
+
+    const blocked = await archive(server, id);
+    assert.equal(blocked.status, 409);
+    assert.match(blocked.body.error ?? "", /Ada/);
+
+    /*
+     * Memurun yolu: reddedilen değerin yerine doğrusunu elle ekler. Çok
+     * değerli alanda ret, alanı kalıcı olarak boş bırakmaz.
+     */
+    const added = await call(server, `/api/documents/${id}/fields`, {
+      method: "PATCH", headers: JSON_IDENTITY,
+      body: JSON.stringify({ additions: [{ fieldName: "ada", value: "1285" }] }),
+    });
+    assert.equal(added.status, 200);
+    assert.equal((await archive(server, id)).status, 200);
+
+    // Reddedilen değer arşivde kalır; kararın kendisi de kayıttır.
+    const detail = await call(server, `/api/documents/${id}`, { headers: IDENTITY });
+    const ada = (detail.body.fields as Array<{ name: string; value: string; verificationStatus: string }>)
+      .filter((field) => field.name === "ada");
+    assert.deepEqual(ada.map((field) => `${field.value}:${field.verificationStatus}`),
+      ["1284:REJECTED", "1285:CONFIRMED"]);
+  });
+});
