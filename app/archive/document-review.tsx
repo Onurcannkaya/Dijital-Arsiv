@@ -376,6 +376,20 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     ...settledGroups.map(group=>({group,pending:false,taskNumber:0})),
   ];
 
+  /*
+   * design.md §3.8: karma değeri personel düzeninde gösterilmez, yerine
+   * bütünlük ifadesi durur. İfade körü körüne yazılmaz — zincir bağları
+   * burada ölçülür. Kopuk bir zincir sessizce "bozulmamış" diye
+   * gösterilirse şerit güvence değil süs olur.
+   *
+   * Zincirin kanıtladığı şey KAYDIN değişmediğidir; asıl dosyanın
+   * bozulmadığı ayrı bir denetimdir (kabul anındaki SHA doğrulaması ve
+   * bütünlük mutabakatı işi). İfade bu yüzden kaydı anlatır.
+   */
+  const auditChain=[...(detail?.audit??[])].sort((a,b)=>a.eventNumber-b.eventNumber);
+  const chainBroken=auditChain.some((event,index)=>
+    index>0&&event.previousHash!==auditChain[index-1].eventHash);
+
   const addValue=(fieldName:string)=>setAdditions(current=>[...current,{key:crypto.randomUUID(),fieldName,value:""}]);
 
   if(loading)return <div className="detail-state"><LoaderCircle className="spin"/><b>Belge kaydı hazırlanıyor…</b></div>;
@@ -437,7 +451,6 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
                   />}
                 <small>
                   {valueStatusLabels[value.verificationStatus]} · Sayfa {value.pageNumber}
-                  {value.box.some(coordinate=>coordinate>0)?` · [${value.box.map(coordinate=>Math.round(coordinate)).join(", ")}]`:""}
                   {value.verifiedBy?` · ${value.verifiedBy}`:""}
                 </small>
                 {canReview&&!archived&&group.multiValue?<div className="value-actions">
@@ -527,16 +540,14 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
                   :null}{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:isImage?<div className="image-evidence"><img src={fileSrc||undefined} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&selected.box.some(value=>value>0)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}/>:null}</div>:<object data={fileSrc||undefined} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Güvenli görüntüleme kopyası bu tarayıcıda gösterilemiyor.</p></object>}</div>
       </section>
       <aside className="fields">
-        <header><Sparkles size={18}/><span><b>OCR alan kanıtları</b><small>{detail.fields.length?`${detail.fields.length} değer · ${detail.fieldGroups.length} alan`:"Henüz OCR sonucu yok"}</small></span><em>{detail.pages[0]?.model||"PaddleOCR"}</em></header>
+        <header><Sparkles size={18}/><span><b>OCR alan kanıtları</b><small>{detail.fields.length?`${detail.fields.length} değer · ${detail.fieldGroups.length} alan`:"Henüz OCR sonucu yok"}</small></span></header>
         {activeTab==="fields"?<div className="profile-strip">
           <FileCog size={15}/>
           <span>
             <b>{detail.profile.name}</b>
-            <small>
-              Profil {detail.profile.code} · sürüm {detail.profile.version}
-              {detail.profile.recordedVersion&&detail.profile.recordedVersion!==detail.profile.version?` (kayıt: ${detail.profile.recordedVersion})`:""}
-              {" · "}{detail.profile.ownerDepartment}
-            </small>
+            {/* Profil kodu ve sürümü teknik gösterimdir (design.md §4.3);
+                personel düzeninde belge türünün adı ve sahibi müdürlük yeter. */}
+            <small>{detail.profile.ownerDepartment} belge türü tanımı uygulanıyor</small>
           </span>
           <em className={`profile-status ${detail.profile.status.toLowerCase()}`}>{profileStatusLabels[detail.profile.status]??detail.profile.status}</em>
         </div>:null}
@@ -556,7 +567,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
           </details>:null}
           </>:null}
 
-          {activeTab==="fields"&&selected?<div className="evidence-detail"><b>Kanıt metni</b><p>{selected.evidenceText}</p><span><ScanLine size={14}/>{selected.model} · Sayfa {selected.pageNumber}</span></div>:null}
+          {activeTab==="fields"&&selected?<div className="evidence-detail"><b>Kanıt metni</b><p>{selected.evidenceText}</p><span><ScanLine size={14}/>Sayfa {selected.pageNumber}</span></div>:null}
 
           {activeTab==="relations"?<EntityRelations
             documentId={documentId}
@@ -569,9 +580,15 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
             onNotice={setNotice}
           />:null}
 
-          {activeTab==="relations"?<section className="objects"><header><ShieldCheck size={15}/><span><b>Nesne kayıtları</b><small>Asıl dosya ve türevler</small></span></header>{detail.objects.map(object=><article key={object.id}><b>{object.objectClass}</b><small>{Math.max(1,Math.round(object.byteSize/1024))} KB · {object.sha256.slice(0,12)}…</small><small>{object.generator??"—"} · {object.legalHoldStatus==="HELD"?"Yasal bekletme":object.retentionStatus}</small></article>)}</section>:null}
+          {activeTab==="relations"?<section className="objects"><header><ShieldCheck size={15}/><span><b>Nesne kayıtları</b><small>Asıl dosya ve türevler</small></span></header>{detail.objects.map(object=><article key={object.id}><b>{object.objectClass}</b><small>{Math.max(1,Math.round(object.byteSize/1024))} KB</small><small>{object.generator??"—"} · {object.legalHoldStatus==="HELD"?"Yasal bekletme":object.retentionStatus}</small></article>)}</section>:null}
 
-          {activeTab==="audit"?<section className="audit-trail"><header><History size={15}/><span><b>Değiştirilemez denetim izi</b><small>Belge bazında SHA-256 özet zinciri</small></span><ShieldCheck size={15}/></header>{detail.audit.length?detail.audit.map(event=><article key={event.eventNumber}><i/><span><b>{auditLabels[event.action]||event.action}</b><small>{event.actor} · {new Date(event.createdAt).toLocaleString("tr-TR")}</small><code>#{event.eventNumber} · {event.eventHash.slice(0,12)}…</code></span></article>):<p>Henüz personel işlemi kaydedilmedi.</p>}</section>:null}
+          {activeTab==="audit"?<section className="audit-trail"><header><History size={15}/><span><b>Değiştirilemez işlem kaydı</b><small>Her işlem eklendiği anda kilitlenir</small></span><ShieldCheck size={15}/></header>{detail.audit.length?detail.audit.map(event=><article key={event.eventNumber}><i/><span><b>{auditLabels[event.action]||event.action}</b><small>{event.actor} · {new Date(event.createdAt).toLocaleString("tr-TR")}</small></span></article>):<p>Henüz personel işlemi kaydedilmedi.</p>}
+            {auditChain.length>1?<p className={`chain-state ${chainBroken?"broken":"intact"}`}>
+              {chainBroken
+                ?<><AlertTriangle size={14}/> İşlem kaydı zinciri kopuk; işletim ekibine bildirin.</>
+                :<><ShieldCheck size={14}/> İşlem kaydı zinciri kopuksuz — kayıtlar eklendiği günden beri değişmedi.</>}
+            </p>:null}
+          </section>:null}
         </>:<div className="empty-ocr"><FileClock size={28}/><b>OCR sonucu bekleniyor</b><p>Asıl dosya güvenli kasada. Yerel OCR servisi çalıştığında metin ve alan kanıtları burada görünecek.</p>{canProcess?<button className="primary" onClick={process} disabled={processing}>{processing?<LoaderCircle className="spin" size={16}/>:<Play size={16}/>} Kuyruğu işle</button>:null}</div>}
       </aside>
     </div>
