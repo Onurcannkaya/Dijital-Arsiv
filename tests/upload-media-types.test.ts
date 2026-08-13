@@ -107,3 +107,62 @@ test("desteklenmeyen biçim için yükleme oturumu hiç açılmaz", async () => 
     await server.close();
   }
 });
+
+test("kabul hattındaki her ret makine okunur kod taşır", async () => {
+  const server = await startNodeServer({
+    runtime: {
+      dbPath: ":memory:",
+      env: {
+        ARCHIVE_STORAGE_DRIVER: "local",
+        ARCHIVE_LOCAL_STORAGE_DIR: ".wrangler/tmp/yukleme-kod",
+        ARCHIVE_ADMIN_EMAILS: STAFF,
+        APP_ENV: "staging",
+      },
+    },
+    host: "127.0.0.1", port: 0, scheduler: false,
+  });
+  try {
+    const identity = { "oai-authenticated-user-email": STAFF, "content-type": "application/json" };
+    const open = (body: unknown, key: string) => fetch(`${server.url}/api/uploads`, {
+      method: "POST", headers: { ...identity, "idempotency-key": key }, body: JSON.stringify(body),
+    });
+    const base = { unit: UNIT, byteSize: 600, mediaType: "application/pdf", originalName: "p.pdf" };
+
+    const created = await (await open(base, "kod-1")).json() as { session: { id: string } };
+    const sessionId = created.session.id;
+
+    /*
+     * Tümleşik istemci reddi metinden değil koddan ayırt eder: metin çevrilir
+     * ya da yeniden yazılır, kod sözleşmedir. Kodsuz kalan tek bir ret, o
+     * istemciyi metin eşleştirmeye zorlar.
+     */
+    const rejections: Array<[label: string, response: Promise<Response>]> = [
+      ["desteklenmeyen biçim", open({ ...base, mediaType: "application/x-msdownload" }, "kod-2")],
+      ["geçersiz boyut", open({ ...base, byteSize: 0 }, "kod-3")],
+      ["geçersiz belge adı", open({ ...base, originalName: "   " }, "kod-4")],
+      ["idempotency anahtarı yok", fetch(`${server.url}/api/uploads`, {
+        method: "POST", headers: identity, body: JSON.stringify(base) })],
+      ["idempotency çakışması", open({ ...base, originalName: "baska.pdf" }, "kod-1")],
+      ["aralık dışı parça", fetch(`${server.url}/api/uploads/${sessionId}/parts`, {
+        method: "PUT",
+        headers: { "oai-authenticated-user-email": STAFF, "x-part-number": "9",
+          "x-content-sha256": "a".repeat(64), "content-type": "application/octet-stream" },
+        body: new Uint8Array(600) })],
+      ["eksik parçayla tamamlama", fetch(`${server.url}/api/uploads/${sessionId}/complete`, {
+        method: "POST", headers: identity, body: "{}" })],
+      ["olmayan oturum", fetch(`${server.url}/api/uploads/yok/complete`, {
+        method: "POST", headers: identity, body: "{}" })],
+    ];
+
+    for (const [label, pending] of rejections) {
+      const response = await pending;
+      const body = await response.json().catch(() => null) as { error?: string; code?: string };
+      assert.ok(response.status >= 400, `${label} reddedilmedi`);
+      assert.ok(body?.error, `${label} gerekçesiz`);
+      assert.ok(body?.code, `${label} makine okunur kod taşımıyor`);
+      assert.match(body.code, /^[A-Z_]+$/, `${label} kodu kapalı biçimde değil`);
+    }
+  } finally {
+    await server.close();
+  }
+});
