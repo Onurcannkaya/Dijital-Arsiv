@@ -11,6 +11,7 @@ import {
   RELATION_REJECTION_VOCABULARY_CODE, type RejectionReason,
 } from "../../lib/rejection-reasons";
 import { confidencePhrase } from "../../lib/confidence-language";
+import { evidenceCropStyle, hasEvidenceBox } from "../../lib/evidence-crop";
 
 const MISSING_VALUE = "Belirlenmedi";
 
@@ -431,6 +432,18 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
                   <b>{group.multiValue?`${group.label} ${value.valueIndex+1}`:group.label}</b>
                   <em className={`risk-${value.riskLevel.toLowerCase()}`}>{riskLabels[value.riskLevel]} · {confidencePhrase(value.confidence,value.origin)}</em>
                 </span>
+                {/* design.md §3.4: iddia kanıtıyla yan yana durur — değerin
+                    belgede okunduğu yerin kırpması, girişin hemen üstünde.
+                    §9.1 kararı: ayrı görsel üretilmez, görüntüleme türevinden
+                    CSS ile anlık kırpılır (lib/evidence-crop.ts). */}
+                {(()=>{
+                  const page=pageByNumber.get(value.pageNumber);
+                  const crop=isImage&&fileSrc&&page&&hasEvidenceBox(value.box)
+                    ?evidenceCropStyle(value.box,page.width,page.height):null;
+                  return crop?<i className="evidence-crop" role="img"
+                    aria-label={`${group.label} kanıtının belge kırpması — sayfa ${value.pageNumber}`}
+                    style={{backgroundImage:`url(${fileSrc})`,...crop}}/>:null;
+                })()}
                 {terms
                   ?<select
                     value={drafts[valueId]??value.value}
@@ -537,7 +550,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
                     Makinenin ne okuduğu da erişilebilir kalmalıdır. */}
                 {page.confirmedText!==null&&page.confirmedText!==page.fullText
                   ?<details className="ocr-original"><summary>OCR&apos;ın okuduğu özgün metni göster</summary><p>{page.fullText||"OCR bu sayfada metin üretmedi."}</p></details>
-                  :null}{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:isImage?<div className="image-evidence"><img src={fileSrc||undefined} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&selected.box.some(value=>value>0)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}/>:null}</div>:<object data={fileSrc||undefined} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Güvenli görüntüleme kopyası bu tarayıcıda gösterilemiyor.</p></object>}</div>
+                  :null}{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:isImage?<div className="image-evidence"><img src={fileSrc||undefined} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&hasEvidenceBox(selected.box)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}>{/* design.md §3.3: bitişik altın ad etiketi — yalnız alan adı, yüzde yok. */}<b>{selected.label}</b></span>:null}</div>:<object data={fileSrc||undefined} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Güvenli görüntüleme kopyası bu tarayıcıda gösterilemiyor.</p></object>}</div>
       </section>
       <aside className="fields">
         <header><Sparkles size={18}/><span><b>OCR alan kanıtları</b><small>{detail.fields.length?`${detail.fields.length} değer · ${detail.fieldGroups.length} alan`:"Henüz OCR sonucu yok"}</small></span></header>
