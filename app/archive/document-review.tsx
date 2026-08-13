@@ -317,10 +317,25 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     &&value.verificationStatus!=="REJECTED"
     &&(!rejectionDrafts[value.id]?.code
       ||(rejectionDrafts[value.id]?.code===OTHER_REASON_CODE&&!rejectionDrafts[value.id]?.note.trim())))??[];
+  /*
+   * Profilde zorunlu olan bir alan, değeri reddedildiğinde ya da boş
+   * bırakıldığında kullanılabilir değer olmadan kalır ve sunucu arşivlemeyi
+   * durdurur. Ekran bunu saymazsa buton açık görünür, memur tıklar ve gerekçeyi
+   * ancak 409 olarak öğrenir — oysa neyin eksik olduğu baştan bellidir.
+   *
+   * Sunucunun kuralı birebir izlenir: CONFIRMED ya da CORRECTED, ve değer
+   * "Belirlenmedi" olmamalı. Kaydedilmemiş düzenleme zaten ayrı bir engel
+   * olduğundan hesap kaydedilmiş durumdan yapılır.
+   */
+  const usableFieldNames=new Set((detail?.fields??[])
+    .filter(value=>["CONFIRMED","CORRECTED"].includes(value.verificationStatus)&&value.value!==MISSING_VALUE)
+    .map(value=>value.name));
+  const missingRequired=(detail?.fieldGroups??[])
+    .filter(group=>group.requirement!=="OPTIONAL"&&!usableFieldNames.has(group.name));
   const malformed=detail?.fields.filter(value=>value.formatViolation
     &&value.verificationStatus!=="REJECTED"&&!rejections[value.id])??[];
   const archiveBlocked=pendingValues>0||hasFieldChanges||hasAdditions||textPending
-    ||hasTextChanges||pendingRelations>0||malformed.length>0;
+    ||hasTextChanges||pendingRelations>0||malformed.length>0||missingRequired.length>0;
   /**
    * Devre dışı arşivleme düğmesi neyin eksik olduğunu söyler. Sessizce
    * tıklanamayan bir düğme, kullanıcıya işlemin neden ilerlemediğini
@@ -331,6 +346,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     pendingRelations>0?`${pendingRelations} varlık ilişkisi onay bekliyor`:null,
     malformed.length?`${malformed.length} değer biçim kuralına uymuyor (${[...new Set(malformed.map(value=>value.label))].join(", ")})`:null,
     incompleteRejections.length?`${incompleteRejections.length} ret gerekçesi seçilmedi`:null,
+    missingRequired.length?`zorunlu alanda doğrulanmış değer yok (${missingRequired.map(group=>group.label).join(", ")})`:null,
     textPending?"OCR metni onaylanmadı":null,
     hasFieldChanges||hasAdditions?"kaydedilmemiş alan düzenlemesi var":null,
     hasTextChanges?"kaydedilmemiş metin düzenlemesi var":null,
