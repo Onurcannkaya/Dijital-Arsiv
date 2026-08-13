@@ -17,6 +17,7 @@ export type EntityRelation = {
   relationConfidence: number | null;
   verificationStatus: "SUGGESTED" | "VERIFIED" | "REJECTED";
   verifiedBy: string | null;
+  rejection: { code: string; label: string; note: string | null } | null;
   verifiedAt: string | null;
   parcel: { districtCode: string; cadastralNeighborhood: string; blockNo: string; parcelNo: string } | null;
   address: { neighborhood: string; street: string; doorNo: string; unitNo: string } | null;
@@ -146,6 +147,12 @@ export function EntityRelations({ documentId, relations, rejectionReasons, canRe
           {relation.externalId ? ` · ${relation.authoritySource}:${relation.externalId}` : ""}
         </small>
         {relation.verifiedBy ? <small className="relation-actor">{relation.verifiedBy}{relation.verifiedAt ? ` · ${new Date(relation.verifiedAt).toLocaleString("tr-TR")}` : ""}</small> : null}
+        {/* Ret gerekçesi kararla birlikte görünür; aksi halde sonraki personel
+            aynı yanlış parseli yeniden ekleyebilir. */}
+        {relation.rejection ? <small className="relation-rejection">
+          <ThumbsDown size={11} /> {relation.rejection.label}
+          {relation.rejection.note ? ` — ${relation.rejection.note}` : ""}
+        </small> : null}
         {editable && relation.verificationStatus === "SUGGESTED" ? <div className="relation-actions">
           <button type="button" className="relation-verify" onClick={() => decide(relation.id, "verify")} disabled={busy}><CheckCircle2 size={13} /> Doğrula</button>
           <button type="button" className="relation-reject" onClick={() => openRejection(relation.id)} disabled={busy}><ThumbsDown size={13} /> Reddet</button>

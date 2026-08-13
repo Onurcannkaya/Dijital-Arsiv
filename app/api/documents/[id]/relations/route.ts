@@ -153,7 +153,7 @@ export async function POST(request: Request, context: RouteContext) {
 }
 
 type SubmittedRelation = { id?: unknown; action?: unknown; reasonCode?: unknown; reasonNote?: unknown };
-type RelationRow = { id: string; entity_id: string; relation_type: string; relation_source: string; verification_status: string; display_label: string };
+type RelationRow = { id: string; entity_id: string; relation_type: string; relation_source: string; verification_status: string; display_label: string; evidence_json: string };
 
 /** OCR önerisi olan ilişkileri personel onayına veya reddine bağlar. */
 export async function PATCH(request: Request, context: RouteContext) {
@@ -207,7 +207,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (document.status === "archived") return jsonError("Arşivlenmiş belgenin ilişkileri değiştirilemez.", 409);
 
   const stored = await DB.prepare(`SELECT r.id, r.entity_id, r.relation_type, r.relation_source,
-    r.verification_status, e.display_label FROM document_entity_relations r
+    r.verification_status, r.evidence_json, e.display_label FROM document_entity_relations r
     INNER JOIN entities e ON e.id = r.entity_id WHERE r.document_id = ?`).bind(id).all<RelationRow>();
   const byId = new Map(stored.results.map((row) => [row.id, row]));
   if (operations.some((operation) => !byId.has(operation.id))) return jsonError("Belgede bulunmayan bir ilişki gönderildi.");
@@ -238,6 +238,30 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const changedIds = new Set(changes.map((change) => change.relationId));
+  /*
+   * Gerekçe yalnız denetim izine yazılırsa belgeye sonradan bakan kişi onu
+   * göremez: ekranda "Reddedildi · kim · ne zaman" kalır. Oysa "bu parsel bağı
+   * neden koparıldı" sorusunu soran kişi belgeye bakar, ham denetim JSON'unu
+   * okumaz — ve göremezse aynı yanlış parseli yeniden ekleyebilir. Gerekçe
+   * ilişkinin kendi kanıtına da işlenir; doğrulamaya dönerse temizlenir ki
+   * geri alınmış bir ret kaydı ilişkinin üzerinde asılı kalmasın.
+   */
+  const evidenceFor = (relationId: string, current: string) => {
+    const base = (() => {
+      try {
+        const parsed = JSON.parse(current || "{}") as Record<string, unknown>;
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch {
+        return {};
+      }
+    })();
+    const rejection = rejectionByRelation.get(relationId);
+    if (!rejection) {
+      delete base.rejection;
+      return JSON.stringify(base);
+    }
+    return JSON.stringify({ ...base, rejection });
+  };
   const audit = await prepareAuditEvent(DB, {
     documentId: id,
     actor: principal.email,
@@ -245,13 +269,13 @@ export async function PATCH(request: Request, context: RouteContext) {
     details: { changes },
   });
   const statements = operations.filter((operation) => changedIds.has(operation.id))
-    .map((operation) => operation.action === "verify"
-    ? DB.prepare(`UPDATE document_entity_relations SET verification_status = 'VERIFIED',
+    .map((operation) => DB.prepare(`UPDATE document_entity_relations
+        SET verification_status = ?, evidence_json = ?,
         verified_by = ?, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND document_id = ?`).bind(principal.email, operation.id, id)
-    : DB.prepare(`UPDATE document_entity_relations SET verification_status = 'REJECTED',
-        verified_by = ?, verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND document_id = ?`).bind(principal.email, operation.id, id));
+        WHERE id = ? AND document_id = ?`)
+      .bind(operation.action === "verify" ? "VERIFIED" : "REJECTED",
+        evidenceFor(operation.id, byId.get(operation.id)?.evidence_json ?? "{}"),
+        principal.email, operation.id, id));
   statements.push(DB.prepare("UPDATE archive_documents SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(id));
   statements.push(audit.statement);
   await DB.batch(statements);
