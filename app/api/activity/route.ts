@@ -1,6 +1,6 @@
 import { authorizeRequest } from "../../../lib/authorization";
 import { getArchiveBindings, jsonError, requireArchiveSchema } from "../../../lib/archive-storage";
-import { listActivity, type ActivityKind } from "../../../lib/activity-log";
+import { decodeActivityCursor, listActivity, type ActivityKind } from "../../../lib/activity-log";
 import { failure } from "../../../lib/errors";
 
 export const dynamic = "force-dynamic";
@@ -25,9 +25,28 @@ export async function GET(request: Request) {
     if (!["all", "document", "user"].includes(rawKind)) {
       return jsonError("`kind` değeri all, document veya user olmalıdır.");
     }
+    /*
+     * Basamak sayısı aralık denetimi değildir: `0` ve `999` desenden geçip
+     * sessizce 1'e ve 100'e kırpılıyordu. İstemci istediğinden başka bir
+     * sayfa boyutu alıp bunu bilmiyordu; kural 1–100 diyorsa aralık dışı
+     * değer reddedilmelidir.
+     */
     const rawLimit = parameters.get("limit");
-    if (rawLimit !== null && !/^\d{1,3}$/.test(rawLimit)) {
-      return jsonError("`limit` 1 ile 100 arasında bir tam sayı olmalıdır.");
+    if (rawLimit !== null) {
+      const parsed = Number(rawLimit);
+      if (!/^\d+$/.test(rawLimit) || !Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+        return jsonError("`limit` 1 ile 100 arasında bir tam sayı olmalıdır.");
+      }
+    }
+
+    /*
+     * Çözülemeyen imleç sessizce yok sayılıyor ve İLK sayfa dönüyordu. Denetim
+     * izini sayfa sayfa okuyan biri bozuk bir imleçle farkında olmadan başa
+     * döner ve döngüde kalıp izin tamamını gördüğünü sanır.
+     */
+    const rawCursor = parameters.get("cursor");
+    if (rawCursor !== null && !decodeActivityCursor(rawCursor)) {
+      return jsonError("`cursor` değeri geçersiz.");
     }
     const includeUserEvents = principal.permissions.includes("users.manage");
 
@@ -36,7 +55,7 @@ export async function GET(request: Request) {
       includeUserEvents,
       kind: rawKind as ActivityKind | "all",
       limit: rawLimit ? Number(rawLimit) : undefined,
-      cursor: parameters.get("cursor"),
+      cursor: rawCursor,
     });
     return Response.json({
       ...page,
