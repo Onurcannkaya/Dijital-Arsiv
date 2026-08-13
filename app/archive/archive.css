@@ -248,3 +248,8 @@
 /* Ret gerekçesi kararın yanında durur; denetim izini açmaya gerek kalmaz. */
 .relation-rejection{display:flex;align-items:flex-start;gap:5px;margin-top:5px;color:var(--ar-amber);font-size:9px;line-height:1.45}
 .relation-rejection svg{flex:none;margin-top:1px}
+
+/* Personel düzeltmesi yapılmış sayfada makinenin özgün okuması. */
+.ocr-original{margin:6px 0 0;border:1px solid var(--ar-border);border-radius:6px;background:var(--ar-surface-2)}
+.ocr-original summary{padding:7px 10px;cursor:pointer;color:var(--ar-violet);font-size:9px;font-weight:650}
+.ocr-original p{margin:0;padding:0 10px 9px;color:var(--ar-muted);font-size:10px;line-height:1.55;white-space:pre-wrap}
