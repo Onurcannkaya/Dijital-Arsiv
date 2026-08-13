@@ -1,16 +1,20 @@
 "use client";
 
 import {
-  Building2, CheckCircle2, Database, LoaderCircle, Lock, Plus, RefreshCw,
+  Building2, CheckCircle2, Database, ListChecks, LoaderCircle, Lock, Plus, RefreshCw,
   ShieldCheck, TriangleAlert,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 type Unit = { code:string; label:string; active:boolean; sortOrder:number; documentCount:number; userCount:number };
+type TermUsage = { label:string; count:number };
+type Term = { code:string; label:string; active:boolean; sortOrder:number; usage:TermUsage[] };
+type ManagedVocabulary = { key:string; name:string; description:string; terms:Term[] };
 type LockedSetting = { key:string; label:string; reason:string };
 type MaintenanceProgress = { task?:string; status?:string; processed?:number; total?:number|null; done?:boolean }|null;
 type Settings = {
   units:Unit[];
+  vocabularies:ManagedVocabulary[];
   schema:{version:number; expected:number; ok:boolean};
   maintenance:MaintenanceProgress;
   lockedSettings:LockedSetting[];
@@ -34,6 +38,9 @@ export function SettingsScreen() {
   const [busyCode,setBusyCode]=useState("");
   const [label,setLabel]=useState("");
   const [adding,setAdding]=useState(false);
+  /** Her sözlüğün kendi "yeni terim" kutusu; tek alan hepsini paylaşamaz. */
+  const [termDrafts,setTermDrafts]=useState<Record<string,string>>({});
+  const [addingTerm,setAddingTerm]=useState("");
   const [maintenanceBusy,setMaintenanceBusy]=useState(false);
 
   const load=useCallback(async(signal?:AbortSignal)=>{
@@ -80,6 +87,26 @@ export function SettingsScreen() {
     try {
       await send("PATCH",{code:unit.code,active:!unit.active},
         unit.active?`${unit.label} listeden kaldırıldı`:`${unit.label} yeniden açıldı`);
+    } finally { setBusyCode(""); }
+  };
+
+  const addTerm=async(vocabulary:ManagedVocabulary,event:React.FormEvent)=>{
+    event.preventDefault();
+    const draft=(termDrafts[vocabulary.key]??"").trim();
+    if(!draft) return;
+    setAddingTerm(vocabulary.key);
+    try {
+      if(await send("POST",{vocabulary:vocabulary.key,label:draft},`${draft} eklendi`)) {
+        setTermDrafts(current=>({...current,[vocabulary.key]:""}));
+      }
+    } finally { setAddingTerm(""); }
+  };
+
+  const toggleTerm=async(vocabulary:ManagedVocabulary,term:Term)=>{
+    setBusyCode(`${vocabulary.key}:${term.code}`);
+    try {
+      await send("PATCH",{vocabulary:vocabulary.key,code:term.code,active:!term.active},
+        term.active?`${term.label} listeden kaldırıldı`:`${term.label} yeniden açıldı`);
     } finally { setBusyCode(""); }
   };
 
@@ -164,6 +191,32 @@ export function SettingsScreen() {
         </button>
       </form>
     </section>
+
+    {(settings.vocabularies??[]).map((vocabulary)=><section className="panel" key={vocabulary.key}>
+      <header><div><h2>{vocabulary.name}</h2><p>{vocabulary.description} Kaldırma kaydı silmez; geçmiş kararlar gerekçesini korur.</p></div></header>
+      <div className="table-wrap"><table><thead><tr>
+        <th>Gerekçe</th><th>Kullanım</th><th>Durum</th><th /></tr></thead><tbody>
+        {vocabulary.terms.map((term)=><tr key={term.code}>
+          <td><div className="user-cell"><span><ListChecks size={17}/></span>
+            <b>{term.label}<small className="mono">{term.code}</small></b></div></td>
+          <td><small>{term.usage.map((entry)=>`${entry.count} ${entry.label}`).join(" · ")||"—"}</small></td>
+          <td><span className={`status ${term.active?"success":"danger"}`}><i/>{term.active?"Listede":"Kaldırıldı"}</span></td>
+          <td><button className="outline" disabled={busyCode===`${vocabulary.key}:${term.code}`}
+            onClick={()=>void toggleTerm(vocabulary,term)}
+            title={term.active&&term.usage.some((entry)=>entry.count>0)
+              ?"Geçmiş kararlar bu gerekçeyi taşımaya devam eder; yalnız yeni retlerde görünmez.":undefined}>
+            {busyCode===`${vocabulary.key}:${term.code}`?<LoaderCircle className="spin" size={14}/>:null}
+            {term.active?"Listeden kaldır":"Yeniden aç"}</button></td>
+        </tr>)}
+      </tbody></table></div>
+      <form className="user-form" onSubmit={(event)=>void addTerm(vocabulary,event)}>
+        <label>Yeni gerekçe<input required value={termDrafts[vocabulary.key]??""} placeholder="ör. Mahkeme kararıyla düşürüldü"
+          onChange={(event)=>setTermDrafts(current=>({...current,[vocabulary.key]:event.target.value}))}/></label>
+        <button className="primary" type="submit" disabled={addingTerm===vocabulary.key||!(termDrafts[vocabulary.key]??"").trim()}>
+          {addingTerm===vocabulary.key?<LoaderCircle className="spin" size={15}/>:<Plus size={15}/>} Gerekçe ekle
+        </button>
+      </form>
+    </section>)}
 
     <section className="panel">
       <header><div><h2>Arayüzden değiştirilemeyenler</h2>

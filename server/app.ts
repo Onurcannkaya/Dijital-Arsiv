@@ -44,6 +44,9 @@ import * as jobsProcess from "../app/api/jobs/process/route.ts";
 import * as adminMaintenance from "../app/api/admin/maintenance/route.ts";
 import * as adminMigrate from "../app/api/admin/migrate/route.ts";
 import * as acceptanceEvidence from "../app/api/admin/acceptance-evidence/[id]/route.ts";
+import * as activity from "../app/api/activity/route.ts";
+import * as settings from "../app/api/settings/route.ts";
+import * as users from "../app/api/users/route.ts";
 
 type RouteModule = Record<string, unknown>;
 type RouteHandler = (request: Request, context: { params: Promise<Record<string, string>> }) => Promise<Response>;
@@ -54,6 +57,9 @@ const ROUTES: Array<{ pattern: RegExp; module: RouteModule }> = [
   { pattern: /^\/api\/me$/, module: me },
   { pattern: /^\/api\/overview$/, module: overview },
   { pattern: /^\/api\/profiles$/, module: profiles },
+  { pattern: /^\/api\/activity$/, module: activity },
+  { pattern: /^\/api\/settings$/, module: settings },
+  { pattern: /^\/api\/users$/, module: users },
   { pattern: /^\/api\/documents$/, module: documents },
   { pattern: /^\/api\/documents\/([^/]+)$/, module: documentDetail },
   { pattern: /^\/api\/documents\/([^/]+)\/approve$/, module: documentApprove },
