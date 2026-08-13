@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, LoaderCircle, MapPin, Plus, ShieldCheck, Signpost, ThumbsDown, X } from "lucide-react";
+import { CheckCircle2, ListChecks, LoaderCircle, MapPin, Plus, ShieldCheck, Signpost, ThumbsDown, X } from "lucide-react";
 import { useState } from "react";
 import { OTHER_REASON_CODE, type RejectionReason } from "../../lib/rejection-reasons";
 import { confidencePhrase } from "../../lib/confidence-language";
@@ -17,6 +17,8 @@ export type EntityRelation = {
   relationSource: string;
   relationConfidence: number | null;
   verificationStatus: "SUGGESTED" | "VERIFIED" | "REJECTED";
+  /** OCR önerisinin kanıt gövdesi (evidenceText, pageNumber, box); API'den ham gelir. */
+  evidence?: unknown;
   verifiedBy: string | null;
   rejection: { code: string; label: string; note: string | null } | null;
   verifiedAt: string | null;
@@ -43,6 +45,8 @@ type Props = {
   rejectionReasons: RejectionReason[];
   canReview: boolean;
   archived: boolean;
+  /** Verilirse çok önerili belgede toplu onay panelini açan giriş görünür (§9.2). */
+  onOpenBulk?: () => void;
   onChanged: (relations: EntityRelation[]) => void;
   onError: (message: string) => void;
   onNotice: (message: string) => void;
@@ -53,7 +57,7 @@ type FormMode = "none" | "parcel" | "address";
 const emptyParcel = { blockNo: "", parcelNo: "", districtCode: "", cadastralNeighborhood: "", externalId: "" };
 const emptyAddress = { neighborhood: "", street: "", doorNo: "", unitNo: "", externalId: "" };
 
-export function EntityRelations({ documentId, relations, rejectionReasons, canReview, archived, onChanged, onError, onNotice }: Props) {
+export function EntityRelations({ documentId, relations, rejectionReasons, canReview, archived, onOpenBulk, onChanged, onError, onNotice }: Props) {
   const [mode, setMode] = useState<FormMode>("none");
   const [parcel, setParcel] = useState(emptyParcel);
   const [address, setAddress] = useState(emptyAddress);
@@ -134,6 +138,12 @@ export function EntityRelations({ documentId, relations, rejectionReasons, canRe
       </span>
       <ShieldCheck size={15} />
     </header>
+
+    {/* design.md §3.6 "Listeyi aç" / §9.2 kararı: çok önerili belgede kararlar
+        tek tek satır aramadan, belge alanının üzerine kayan panelde verilir. */}
+    {editable && onOpenBulk && pending.length >= 2 ? <button type="button" className="bulk-open" onClick={onOpenBulk}>
+      <ListChecks size={14} /> Listeyi aç — {pending.length} öneriyi topluca karara bağla
+    </button> : null}
 
     {relations.length ? <ul className="relation-list">
       {relations.map((relation) => <li key={relation.id} className={`relation-${relation.verificationStatus.toLowerCase()}`}>

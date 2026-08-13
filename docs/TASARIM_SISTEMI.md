@@ -214,7 +214,12 @@ Bu düzenlerde teknik gösterim (yüzde, kanıt koordinatı `[165,188,332,206]`,
    güvenli görüntüleme türevinden `background-position/size` ile anlık kesilir
    (`lib/evidence-crop.ts`). Ek depolama ve üretim hattı yoktur, WORM kasasına
    yeni nesne girmez ve kanıt türevin kendisinden sapamaz.
-2. "68 parsel" listesinin toplu onay ekranı — ayrı ekran mı, kayan panel mi.
+2. ~~"68 parsel" listesinin toplu onay ekranı~~ — **karara bağlandı
+   (2026-08-13): kayan panel.** Ayrı ekran memuru belge bağlamından koparırdı;
+   panel belge alanının üzerine kayar (`relation-bulk-panel.tsx`). Her satır
+   kanıt kırpması ve kanıt metniyle gelir; toplu ret, seçime TEK ortak
+   kontrollü gerekçeyle yazılır — farklı gerekçe gereken satır panelden
+   çıkarılıp tekil akışla reddedilir.
 3. Yönetici düzeninde (`1a`) teknik gösterimin yetkiye mi, kullanıcı tercihine mi bağlanacağı.
 4. Mobil tarama akışının bu dille eşleşmesi (henüz tasarlanmadı).
 5. Dosya planı ve saklama kuralı seçiminin doğrulama akışının hangi adımında istendiği.
@@ -291,7 +296,15 @@ Bu şartname depoya alındı ve **renk + tipografi katmanı** uygulandı
   kutusu olmayan değer kırpma göstermez — ilke 3 gereği kanıtı
   gösterilemeyen değer görsel bağ da kurmaz.
 
+- §9.2 toplu parsel onayı kayan panel olarak kuruldu: İlişkiler sekmesindeki
+  "Listeyi aç" girişi (≥2 öneri) belge alanının üzerine kayan paneli açar.
+  Bütün öneriler seçili başlar — panelin işi şüphelileri seçimden çıkarmaktır
+  ve her satır kanıtıyla (kırpma + metin) gelir, toplu onay kanıtsız onay
+  değildir. Sunucu PATCH ucu istek başına 60 ilişkiyi atomik işler ve zincire
+  TEK denetim olayı yazar (60 karar = 1 olay); panel fazlasını parçalara
+  böler. Toplu ret seçime tek ortak gerekçeyle yazılır.
+
 ### Bekliyor — karar gerektiriyor
 
-1. Şartnamenin kendi açık kararları (§9.2–§9.5) kurumsal onay bekliyor;
-   §9.1 karara bağlandı (anlık CSS kırpması).
+1. Şartnamenin kendi açık kararları (§9.3–§9.5) kurumsal onay bekliyor;
+   §9.1 (anlık CSS kırpması) ve §9.2 (kayan panel) karara bağlandı.
