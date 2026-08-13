@@ -37,6 +37,13 @@ export type ArchiveBindings = {
   APP_ENV?: string;
   /** Yalnız staging kabul kanıtı okuma uç noktasının ayrı, en-dar yetki anahtarıdır. */
   ARCHIVE_ACCEPTANCE_TOKEN?: string;
+  /**
+   * YALNIZ YEREL GELİŞTİRME: "enabled" iken /api/internal/objects ucu açılır ve
+   * Python servisleri nesneleri S3 yerine uygulamadan indirir. Üretimde ve kabul
+   * koşusunda tanımlanmaz — servisler MinIO'ya salt-okunur kimlikle doğrudan
+   * bağlanır (ADR-014); bu bayrak dağıtım yapılandırmalarına asla girmez.
+   */
+  ARCHIVE_INTERNAL_OBJECT_FETCH?: string;
 };
 
 export type ArchiveBindingsProvider = () => Partial<ArchiveBindings>;
@@ -88,6 +95,7 @@ const NODE_CONFIG_KEYS = [
   "ARCHIVE_MIGRATION_TOKEN",
   "APP_ENV",
   "ARCHIVE_ACCEPTANCE_TOKEN",
+  "ARCHIVE_INTERNAL_OBJECT_FETCH",
 ] as const;
 
 /**

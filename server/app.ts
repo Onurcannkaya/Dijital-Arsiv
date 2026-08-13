@@ -43,8 +43,10 @@ import * as uploadComplete from "../app/api/uploads/[id]/complete/route.ts";
 import * as jobsProcess from "../app/api/jobs/process/route.ts";
 import * as adminMaintenance from "../app/api/admin/maintenance/route.ts";
 import * as adminMigrate from "../app/api/admin/migrate/route.ts";
+import * as adminScan from "../app/api/admin/scan/route.ts";
 import * as acceptanceEvidence from "../app/api/admin/acceptance-evidence/[id]/route.ts";
 import * as activity from "../app/api/activity/route.ts";
+import * as internalObjects from "../app/api/internal/objects/route.ts";
 import * as settings from "../app/api/settings/route.ts";
 import * as users from "../app/api/users/route.ts";
 
@@ -58,6 +60,9 @@ const ROUTES: Array<{ pattern: RegExp; module: RouteModule }> = [
   { pattern: /^\/api\/overview$/, module: overview },
   { pattern: /^\/api\/profiles$/, module: profiles },
   { pattern: /^\/api\/activity$/, module: activity },
+  // Yalnız yerel geliştirmede açılır (ARCHIVE_INTERNAL_OBJECT_FETCH); rota
+  // kayıtlı kalır ki uç, bayrak kapalıyken de tek tip 404 versin.
+  { pattern: /^\/api\/internal\/objects$/, module: internalObjects },
   { pattern: /^\/api\/settings$/, module: settings },
   { pattern: /^\/api\/users$/, module: users },
   { pattern: /^\/api\/documents$/, module: documents },
@@ -74,6 +79,7 @@ const ROUTES: Array<{ pattern: RegExp; module: RouteModule }> = [
   { pattern: /^\/api\/jobs\/process$/, module: jobsProcess },
   { pattern: /^\/api\/admin\/maintenance$/, module: adminMaintenance },
   { pattern: /^\/api\/admin\/migrate$/, module: adminMigrate },
+  { pattern: /^\/api\/admin\/scan$/, module: adminScan },
   { pattern: /^\/api\/admin\/acceptance-evidence\/([^/]+)$/, module: acceptanceEvidence },
 ];
 

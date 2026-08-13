@@ -1,7 +1,7 @@
 import { prepareAuditEvent } from "../../../../lib/audit";
 import { authorizeRequest } from "../../../../lib/authorization";
 import {
-  getArchiveBindings, getArchiveObjectStorage, requireArchiveSchema,
+  getArchiveBindings, getDerivativeObjectStorage, requireArchiveSchema,
   jsonError, localOcrServiceUrl, resolveOriginalObject, type ArchiveBindings,
 } from "../../../../lib/archive-storage";
 import { DEFAULT_DOCUMENT_TYPE_CODE, UNIT_VOCABULARY_CODE } from "../../../../lib/archive-seed";
@@ -140,7 +140,6 @@ export type OcrProcessOptions = {
 
 /** HTTP ve Cron Trigger tarafından paylaşılan tek OCR işi tüketicisi. */
 export async function processNextOcrJob(bindings: ArchiveBindings, options: OcrProcessOptions) {
-  const objectStorage = getArchiveObjectStorage(bindings);
   const serviceUrl = options.serviceUrl;
   if (!serviceUrl) throw new PublicError("OCR servis adresi yapılandırılmamış.", 503);
   const requestedDocumentId = options.requestedDocumentId ?? null;
@@ -287,7 +286,20 @@ export async function processNextOcrJob(bindings: ArchiveBindings, options: OcrP
      * korunur; türev sonraki çalıştırmada yeniden üretilir.
      */
     let accessObjectId: string | null = null;
-    if (result.accessDerivative) {
+    /*
+     * Türev, asıl kasaya DEĞİL kendi deposuna yazılır. Önceki kod türevi
+     * ARCHIVE_FILES'a koyup öyle kaydediyordu; bilet ve dosya sunumu ise
+     * ADR-014 gereği yalnız DERIVATIVE_FILES altındaki erişim türevine
+     * bağlanır. Yazanla okuyan farklı yer söylediği için önizleme, türev
+     * üretildiğinde bile hiç açılamıyordu.
+     */
+    const derivativeStorage = getDerivativeObjectStorage(bindings);
+    if (result.accessDerivative && !derivativeStorage) {
+      logEvent("error", "ocr.access-derivative-skipped", {
+        documentId: document.id, reason: "DERIVATIVE_FILES binding missing",
+      });
+    }
+    if (result.accessDerivative && derivativeStorage) {
       const originalRecord = await bindings.DB.prepare(
         "SELECT id FROM binary_objects WHERE document_id = ? AND object_class = 'original' LIMIT 1",
       ).bind(document.id).first<{ id: string }>();
@@ -301,7 +313,7 @@ export async function processNextOcrJob(bindings: ArchiveBindings, options: OcrP
         }
         const digest = await crypto.subtle.digest("SHA-256", bytes);
         const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-        await objectStorage.put(derivativeKey, bytes, {
+        await derivativeStorage.put(derivativeKey, bytes, {
           contentType: result.accessDerivative.mediaType,
           customMetadata: { sha256, documentId: document.id, binaryObjectId: derivativeId },
         });
@@ -310,13 +322,13 @@ export async function processNextOcrJob(bindings: ArchiveBindings, options: OcrP
         await bindings.DB.prepare(`INSERT INTO binary_objects
             (id, document_id, object_class, object_key, storage_provider, bucket_or_namespace,
              media_type, byte_size, sha256, derived_from_id, generator)
-            VALUES (?, ?, 'access', ?, 'r2', 'ARCHIVE_FILES', ?, ?, ?, ?, ?)`)
+            VALUES (?, ?, 'access', ?, 'r2', 'DERIVATIVE_FILES', ?, ?, ?, ?, ?)`)
             .bind(derivativeId, document.id, derivativeKey, result.accessDerivative.mediaType,
               bytes.byteLength, sha256, originalRecord?.id ?? null, `ocr:${result.model}`).run();
         accessObjectId = derivativeId;
       } catch (derivativeError) {
         // R2 yazılmış fakat D1 kaydı yazılamamışsa yetkili liste dışında nesne bırakma.
-        if (derivativeStored) await objectStorage.delete(derivativeKey).catch(() => undefined);
+        if (derivativeStored) await derivativeStorage.delete(derivativeKey).catch(() => undefined);
         logEvent("error", "ocr.access-derivative-failed", {
           documentId: document.id,
           error: derivativeError instanceof Error ? derivativeError.message : String(derivativeError),

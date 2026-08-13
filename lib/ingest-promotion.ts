@@ -220,7 +220,11 @@ async function readAndVerifyVault(
   context: PromotionContext,
 ): Promise<{ stat: ObjectStat; digest: StreamDigest }> {
   const object = await dependencies.vaultReader.get(context.target_object_key);
-  if (!object || object.range !== null) throw new Error("Promoted vault object cannot be read in full.");
+  if (!object || object.range !== null) {
+    // Teşhis kaydı: "tam okunamadı" tek başına sebebini saklıyor ve yerelde
+    // Miniflare aralık davranışını ayıklarken saatlere mal oluyordu.
+    throw new Error(`Promoted vault object cannot be read in full (exists=${Boolean(object)}, range=${JSON.stringify(object?.range ?? null)}, size=${object?.size ?? "?"}, bodySize=${object?.bodySize ?? "?"}).`);
+  }
   verifyProviderStat(object, context);
   if (object.bodySize !== context.byte_size) {
     throw new Error("Vault response body size does not match quarantine evidence.");

@@ -17,9 +17,31 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 // (npm i ile) bu satır kaldırılıp wrangler.jsonc tarihine dönülmelidir.
 const LOCAL_COMPATIBILITY_DATE = "2026-05-22";
 
+/**
+ * `.dev.vars` yerel bağlara elle taşınır: buradaki inline yapılandırma
+ * wrangler.jsonc'un yerine geçtiğinden eklenti dosyayı kendisi okumuyor ve
+ * yeni anahtarlar (servis jetonları, ARCHIVE_INTERNAL_OBJECT_FETCH) Worker'a
+ * hiç ulaşmıyordu. Dosya .gitignore'dadır; sırlar depoya girmez.
+ */
+function readDevVars(): Record<string, string> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const raw = require("node:fs").readFileSync(".dev.vars", "utf8") as string;
+    return Object.fromEntries(raw.split(String.fromCharCode(10))
+      .filter((line: string) => line.includes("=") && !line.trimStart().startsWith("#"))
+      .map((line: string) => {
+        const at = line.indexOf("=");
+        return [line.slice(0, at).trim(), line.slice(at + 1).trim()];
+      }));
+  } catch {
+    return {};
+  }
+}
+
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_date: LOCAL_COMPATIBILITY_DATE,
+  vars: readDevVars(),
   // `nodejs_compat` yalnız wrangler.jsonc'ta tanımlıdır. Burada tekrar
   // verilmesi Miniflare'de "flag specified multiple times" hatasına yol açar
   // ve dev sunucusu hiç açılmaz.

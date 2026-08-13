@@ -124,12 +124,57 @@ Belge yükleme sonrası listede GÖRÜNMEZ; bu doğru davranıştır. `archive_d
 kaydı ancak tarama ve terfi tamamlandığında oluşur (F1.5). Lokalde tarama
 servisi olmadığından oturum `QUARANTINED` durumunda bekler.
 
-## Tarama/terfi de dahil tam hat isteniyorsa
+## Tarama/terfi de dahil tam hat — Docker'sız
 
-QUARANTINED sonrası ACCEPTED'a giden zincir üç Python servisini ister
-(content-scan, ocr, document-render) ve gerçek nesne deposunu. Bunun için
+Yerel zincir (yükleme → tarama → terfi → **gerçek PaddleOCR** → önizleme)
+Docker olmadan çalışır. İki yardımcı süreç ve `.dev.vars` içinde beş anahtar
+gerekir:
+
+```bash
+# .dev.vars — jetonları kendiniz üretin (secrets.token_urlsafe)
+OCR_SERVICE_URL=http://127.0.0.1:8090
+OCR_SERVICE_TOKEN=<jeton>
+CONTENT_SCAN_SERVICE_URL=http://127.0.0.1:8091
+CONTENT_SCAN_SERVICE_TOKEN=<jeton>
+ARCHIVE_INTERNAL_OBJECT_FETCH=enabled
+```
+
+`ARCHIVE_INTERNAL_OBJECT_FETCH` YALNIZ yerel geliştirme içindir: Miniflare
+R2'nin S3 ucu olmadığından servisler nesneleri `/api/internal/objects`
+ucundan indirir (kapsam başına jeton, önek kilidi, yol geçişi reddi).
+Üretimde ve kabul koşusunda tanımlanmaz; servisler MinIO'ya salt-okunur
+kimlikle doğrudan bağlanır (ADR-014).
+
+```bash
+# 1) Gerçek OCR servisi (fastapi+uvicorn+paddleocr kurulu olmalı)
+cd services/ocr
+OCR_SERVICE_TOKEN=<jeton> OCR_FETCH_URL=http://localhost:3000/api/internal/objects PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True python -m uvicorn app.main:app --host 127.0.0.1 --port 8090
+
+# 2) İçerik tarama taklidi (clamav/qpdf yerelde yok; sihirli bayt + SHA
+#    denetimini GERÇEKTEN yapar, alındıya "gelistirme-stub" yazar)
+CONTENT_SCAN_SERVICE_TOKEN=<jeton> INTERNAL_FETCH_URL=http://localhost:3000/api/internal/objects node scripts/dev-content-scan.mjs
+```
+
+Cron yerelde ateşlenmez; tarama+terfi turu elle ilerletilir (arayüzdeki
+yönetici kimliğiyle):
+
+```bash
+curl -X POST http://localhost:3000/api/admin/scan   # tarama + terfi turu
+```
+
+Belge `queued` durumuna geçince inceleme ekranındaki **"OCR işlemini
+çalıştır"** düğmesi gerçek PaddleOCR'ı koşturur (ilk çağrıda model yüklenir,
+~1 dk). Alanlar, ilişki önerileri ve görüntüleme türevi üretilir; önizleme
+gerçek taramayı gösterir.
+
+> Not: `vite.config.ts` `.dev.vars` dosyasını yerel bağlara kendisi taşır —
+> buradaki inline yapılandırma wrangler.jsonc'un yerine geçtiğinden eklenti
+> dosyayı kendiliğinden okumaz. Yeni anahtar eklerseniz dev sunucusunu
+> yeniden başlatın.
+
+Gerçek üretim eşleniği (ClamAV, qpdf, MinIO, document-render) için
 `docker compose` yığını gerekir: Docker'lı bir makinede `AYAGA_KALDIRMA.md`
-izlenir. Yalnız Node/depolama/DB katmanını geliştirirken bu belge yeterlidir.
+izlenir.
 
 ## Temizlik
 
