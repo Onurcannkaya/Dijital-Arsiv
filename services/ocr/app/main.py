@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import tempfile
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,14 +19,51 @@ from .text_cleaner import readable_text
 MAX_BYTES = 2 * 1024 * 1024 * 1024
 ALLOWED_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/tiff"}
 _engine: Any | None = None
+# Paddle öngörücüsü iş parçacığı güvenli değildir; çıkarım tek uçuşla sınırlanır.
+# Uç sync olduğundan FastAPI onu havuzda koşturur ve kilit yalnız çıkarımı
+# sıralar: sağlık ucu ve diğer istekler event loop'ta yanıt vermeye devam eder.
+_predict_lock = threading.Lock()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Üretim imajında modeli trafik kabul edilmeden önce belleğe alır."""
+    """Üretim imajında modeli trafik kabul edilmeden önce belleğe alır ve ısıtır.
+
+    Model dosyalarının yüklenmesi yetmez: ilk çıkarım oneDNN çekirdek
+    derlemesini de öder ve gerçek bir belgede bu, işin zaman aşımı tavanını
+    aşabilir (ölçüm: aynı görüntü soğuk süreçte 155 sn, ısınmış süreçte çok
+    daha kısa). Isınma bedeli burada, servis trafiğe açılmadan önce ödenir;
+    uvicorn lifespan bitmeden istek kabul etmediğinden sağlık ucu ancak
+    ısınmış bir servis için "hazır" der.
+    """
     if os.getenv("OCR_PRELOAD_MODEL", "false").lower() == "true":
-        engine()
+        _warmup()
     yield
+
+
+def _warmup() -> None:
+    """Gerçek belge boyutunda sentetik bir görüntüyle tam bir çıkarım koşturur.
+
+    oneDNN çekirdekleri girdi ŞEKLİNE özgü derlenir: minik bir görüntü yalnız
+    minik şekillerin yolunu ısıtır ve ilk gerçek belge derleme bedelini yine
+    öder. Görüntü bu yüzden tarama hattının gerçek çalışma boyutundadır —
+    A4 oranında, uzun kenarı det sınırıyla (1600) aynı.
+    """
+    import numpy as np
+
+    canvas = np.full((1600, 1131, 3), 255, dtype="uint8")
+    try:
+        import cv2
+
+        for line in range(6):
+            cv2.putText(canvas, "ISINMA CIKARIMI 2026", (80, 220 + line * 240),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.6, (0, 0, 0), 3)
+    except Exception:
+        pass  # Yazı çizilemese de boş görüntüyle çıkarım yine ısıtır.
+    started = time.perf_counter()
+    with _predict_lock:
+        list(engine().predict(canvas))
+    print(f"[ocr] isinma cikarimi {time.perf_counter() - started:.1f} sn surdu", flush=True)
 
 
 app = FastAPI(title="Sivas Arşiv Yerel OCR", version="0.1.0", lifespan=lifespan)
@@ -272,7 +310,17 @@ def health() -> dict[str, str | bool]:
 
 
 @app.post("/v1/ocr", dependencies=[Depends(authorize)])
-async def run_ocr(reference: OcrObjectRequest) -> dict[str, Any]:
+def run_ocr(reference: OcrObjectRequest) -> dict[str, Any]:
+    """OCR isteğini işler; uç BİLEREK sync tanımlıdır.
+
+    Önceki tanım `async def` idi ve bloklayan indirme + Paddle çıkarımı doğrudan
+    event loop üzerinde koşuyordu: çıkarım sürerken /health dahil hiçbir istek
+    yanıt alamıyordu. İşletimde bunun anlamı, uzun bir belge işlenirken canlılık
+    sondasının servisi "ölü" sayıp kapatmasıdır. Sync uç FastAPI'nin iş parçacığı
+    havuzunda koşar; sağlık ucu her zaman yanıt verir, çıkarım ise aşağıdaki
+    kilitle tek uçuşa sıralanır (Paddle öngörücüsü iş parçacığı güvenli değildir
+    ve eşzamanlı iki çıkarım CPU'yu ezip ikisini de zaman aşımına sürükler).
+    """
     document_profile = parse_profile(reference.profile)
     if reference.mediaType not in ALLOWED_TYPES:
         raise HTTPException(status_code=415, detail="Desteklenmeyen dosya türü")
@@ -285,7 +333,10 @@ async def run_ocr(reference: OcrObjectRequest) -> dict[str, Any]:
             source_path = temporary.name
         download_original(reference, source_path)
         processing_path, enhanced, image_width, image_height, quality, generated_path = prepare_image(source_path, reference.mediaType)
-        predictions = engine().predict(processing_path)
+        # `predict` üreteçtir; asıl hesap yineleme sırasında koşar. Kilit bu
+        # yüzden yalnız çağrıyı değil, tüketimi de kapsar.
+        with _predict_lock:
+            predictions = list(engine().predict(processing_path))
         pages = [page_from_result(item, index + 1) for index, item in enumerate(predictions)]
         if len(pages) == 1 and image_width and image_height:
             pages[0]["width"] = image_width
