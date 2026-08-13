@@ -350,3 +350,9 @@
 .bulk-rejection{display:flex;flex:1;gap:8px;align-items:center}
 .bulk-rejection select,.bulk-rejection input{flex:1;min-width:0}
 .archive-app.dark .bulk-panel{background:var(--ar-surface)}.archive-app.dark .bulk-open{color:var(--ar-text)}
+
+/* Teknik görünüm (design.md §9.3 kararı: yetki erişimi verir, tercih açar).
+   Okumalar mono 11.5px — §2.2'nin izinli mono istisnası. */
+.tech-toggle{margin-left:auto;display:flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid var(--border-base);border-radius:6px;background:var(--ar-surface-2);color:var(--ar-muted);font-size:12px;align-self:center}
+.tech-toggle.on{border-color:var(--navy-800);background:var(--navy-800);color:#fff}
+.tech-readout{display:block;margin-top:4px;color:var(--ar-violet);font:11.5px "IBM Plex Mono",Consolas,monospace;word-break:break-all}

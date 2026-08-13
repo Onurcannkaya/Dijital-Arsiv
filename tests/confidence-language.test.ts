@@ -19,7 +19,7 @@ import test from "node:test";
 
 register("../server/ts-extension-hooks.mjs", import.meta.url);
 const { startNodeServer } = await import("../server/app.ts");
-const { confidenceBadge, confidencePhrase } = await import("../lib/confidence-language.ts");
+const { confidenceBadge, confidencePhrase, technicalConfidence } = await import("../lib/confidence-language.ts");
 
 const read = (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const STAFF = "guven@sivas.bel.tr";
@@ -51,11 +51,25 @@ test("eşikler risk hesabıyla aynı yerlerden geçer", () => {
   assert.equal(new Set([0.95, 0.8, 0.5].map((v) => confidenceBadge(v).label)).size, 3);
 });
 
+test("teknik görünüm yüzdesi Türkçe biçimlenir ve tek yerden gelir", () => {
+  /*
+   * design.md §9.3 kararı: ham yüzde yalnız `technical.view` yetkisiyle
+   * açılan teknik görünümde belirir ve biçimleme ortak çeviri modülünde
+   * durur — yüzeyler sayıyı kendi başına çevirmez (alttaki test bunu
+   * kaynak düzeyinde denetlemeye devam eder). Türkçe sayı biçimi: %98,9.
+   */
+  assert.equal(technicalConfidence(0.989), "%98,9");
+  assert.equal(technicalConfidence(1), "%100,0");
+  assert.equal(technicalConfidence(0), "%0,0");
+});
+
 test("personel arayüzü güven yüzdesi biçimlemez", async () => {
   /*
    * Kural üç ekranda birden geçerli olmalı: alan satırı, ilişki satırı ve
    * belge listesi. Biri kaçarsa personel aynı belgede hem sayı hem cümle
-   * görür ve hangisine güveneceğini bilmez.
+   * görür ve hangisine güveneceğini bilmez. Teknik görünüm (§9.3) bu kuralı
+   * esnetmez: yüzeyler yüzdeyi yine kendileri hesaplamaz, ortak modüldeki
+   * `technicalConfidence` üzerinden gösterir.
    */
   const yuzeyler = ["app/archive/document-review.tsx", "app/archive/entity-relations.tsx",
     "app/archive/workspace.tsx"];

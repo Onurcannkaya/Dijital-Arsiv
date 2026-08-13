@@ -9,7 +9,16 @@ export type ArchiveRole = "admin" | "archive_manager" | "reviewer" | "viewer";
  */
 export type ArchivePermission =
   | "document.read" | "document.download" | "document.upload"
-  | "document.review" | "document.archive" | "ocr.run" | "users.manage";
+  | "document.review" | "document.archive" | "ocr.run" | "users.manage"
+  /*
+   * design.md §9.3 kararı: teknik gösterimler (güven yüzdesi, kanıt
+   * koordinatı, SHA-256, model/profil sürümü) yetkiyle ERİŞİLİR, tercihle
+   * AÇILIR. Bu yetki erişim tarafıdır: kimlerin "Teknik görünüm" anahtarını
+   * görebileceğini belirler; açık/kapalı durumu kullanıcı tercihidir ve
+   * sunucuda tutulmaz. Doğrulayıcı ve görüntüleyici rollerine verilmez ki
+   * personel ekranının eylem dili (§6) sayılarla sulanmasın.
+   */
+  | "technical.view";
 export type ArchivePrincipal = { email:string; displayName:string; role:ArchiveRole; unit:string; permissions:ArchivePermission[] };
 
 type UserRow = { email:string; display_name:string; role:ArchiveRole; unit:string; active:number };
@@ -21,8 +30,8 @@ type UserRow = { email:string; display_name:string; role:ArchiveRole; unit:strin
  * doğrulayıcı belgeyi görüntüleyerek karşılaştırır.
  */
 const permissionMap: Record<ArchiveRole, ArchivePermission[]> = {
-  admin: ["document.read", "document.download", "document.upload", "document.review", "document.archive", "ocr.run", "users.manage"],
-  archive_manager: ["document.read", "document.download", "document.upload", "document.review", "document.archive", "ocr.run"],
+  admin: ["document.read", "document.download", "document.upload", "document.review", "document.archive", "ocr.run", "users.manage", "technical.view"],
+  archive_manager: ["document.read", "document.download", "document.upload", "document.review", "document.archive", "ocr.run", "technical.view"],
   reviewer: ["document.read", "document.review"],
   viewer: ["document.read"],
 };

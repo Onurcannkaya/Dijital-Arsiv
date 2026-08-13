@@ -10,7 +10,7 @@ import {
   FIELD_REJECTION_VOCABULARY_CODE, OTHER_REASON_CODE,
   RELATION_REJECTION_VOCABULARY_CODE, type RejectionReason,
 } from "../../lib/rejection-reasons";
-import { confidencePhrase } from "../../lib/confidence-language";
+import { confidencePhrase, technicalConfidence } from "../../lib/confidence-language";
 import { evidenceCropStyle, hasEvidenceBox } from "../../lib/evidence-crop";
 import { RelationBulkPanel } from "./relation-bulk-panel";
 
@@ -86,6 +86,22 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   const [activeTab,setActiveTab]=useState<"fields"|"relations"|"audit">("fields");
   /** §9.2: çok önerili belgede toplu karar paneli belge alanının üzerine kayar. */
   const [bulkOpen,setBulkOpen]=useState(false);
+  /*
+   * design.md §9.3 kararı: teknik gösterimler yetkiyle ERİŞİLİR, tercihle
+   * AÇILIR. Yetki anahtarın görünmesini sağlar; açık/kapalı durumu kişisel
+   * tercihtir ve yalnız bu tarayıcıda saklanır — kurumsal kayıt değildir.
+   */
+  const canTechnical=permissions.includes("technical.view");
+  const [techView,setTechView]=useState(()=>{
+    try { return typeof window!=="undefined"&&window.localStorage.getItem("arsiv-teknik-gorunum")==="acik"; }
+    catch { return false; }
+  });
+  const toggleTechView=()=>setTechView(current=>{
+    const next=!current;
+    try { window.localStorage.setItem("arsiv-teknik-gorunum",next?"acik":"kapali"); } catch { /* tercih tutulamazsa görünüm yine değişir */ }
+    return next;
+  });
+  const technical=canTechnical&&techView;
   const [fileSrc,setFileSrc]=useState("");
   /*
    * Önizleme hatası kendi durumunda tutulur. Ortak `error` kullanıldığında,
@@ -469,6 +485,11 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
                   {valueStatusLabels[value.verificationStatus]} · Sayfa {value.pageNumber}
                   {value.verifiedBy?` · ${value.verifiedBy}`:""}
                 </small>
+                {/* §9.3 teknik görünüm: ham ölçüm, kanıt koordinatı ve model —
+                    yalnız yetkili rolün açtığı görünümde. */}
+                {technical&&value.origin==="OCR"?<small className="tech-readout">
+                  {technicalConfidence(value.confidence)} · [{value.box.map(v=>Math.round(v)).join(", ")}] · {value.model}
+                </small>:null}
                 {canReview&&!archived&&group.multiValue?<div className="value-actions">
                   {rejected
                     ?<button type="button" onClick={event=>{event.preventDefault();setRejections(current=>({...current,[valueId]:false}));setRejectionDrafts(current=>{const next={...current};delete next[valueId];return next;});}} disabled={value.verificationStatus==="REJECTED"}><RotateCcw size={12}/> Geri al</button>
@@ -539,6 +560,12 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
           onClick={()=>setActiveTab(key)}>
           {label}{count?<b>{count}</b>:null}
         </button>)}
+      {/* §9.3: anahtar yalnız yetkili role görünür; durumu kişisel tercihtir. */}
+      {canTechnical?<button type="button" className={`tech-toggle ${techView?"on":""}`}
+        aria-pressed={techView} onClick={toggleTechView}
+        title="Güven yüzdesi, kanıt koordinatı, SHA-256 ve sürüm bilgilerini gösterir">
+        <Gauge size={13}/> Teknik görünüm{techView?" açık":""}
+      </button>:null}
     </nav>
     <div className="review-grid">
       <aside className="thumbs">{(detail.pages.length?detail.pages:[{pageNumber:1}]).map((page,index)=><button className={index===0?"active":""} key={page.pageNumber}><span>{page.pageNumber}</span><i/></button>)}</aside>
@@ -575,8 +602,11 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
           <span>
             <b>{detail.profile.name}</b>
             {/* Profil kodu ve sürümü teknik gösterimdir (design.md §4.3);
-                personel düzeninde belge türünün adı ve sahibi müdürlük yeter. */}
+                personel düzeninde belge türünün adı ve sahibi müdürlük yeter.
+                §9.3 teknik görünümde kod ve sürüm geri gelir. */}
             <small>{detail.profile.ownerDepartment} belge türü tanımı uygulanıyor</small>
+            {technical?<small className="tech-readout">{detail.profile.code} v{detail.profile.version}
+              {detail.profile.recordedVersion&&detail.profile.recordedVersion!==detail.profile.version?` · belgede v${detail.profile.recordedVersion}`:""}</small>:null}
           </span>
           <em className={`profile-status ${detail.profile.status.toLowerCase()}`}>{profileStatusLabels[detail.profile.status]??detail.profile.status}</em>
         </div>:null}
@@ -605,14 +635,15 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
             canReview={canReview}
             archived={archived}
             onOpenBulk={()=>setBulkOpen(true)}
+            technical={technical}
             onChanged={relations=>setDetail(current=>current?{...current,relations}:current)}
             onError={setError}
             onNotice={setNotice}
           />:null}
 
-          {activeTab==="relations"?<section className="objects"><header><ShieldCheck size={15}/><span><b>Nesne kayıtları</b><small>Asıl dosya ve türevler</small></span></header>{detail.objects.map(object=><article key={object.id}><b>{object.objectClass}</b><small>{Math.max(1,Math.round(object.byteSize/1024))} KB</small><small>{object.generator??"—"} · {object.legalHoldStatus==="HELD"?"Yasal bekletme":object.retentionStatus}</small></article>)}</section>:null}
+          {activeTab==="relations"?<section className="objects"><header><ShieldCheck size={15}/><span><b>Nesne kayıtları</b><small>Asıl dosya ve türevler</small></span></header>{detail.objects.map(object=><article key={object.id}><b>{object.objectClass}</b><small>{Math.max(1,Math.round(object.byteSize/1024))} KB</small><small>{object.generator??"—"} · {object.legalHoldStatus==="HELD"?"Yasal bekletme":object.retentionStatus}</small>{technical?<small className="tech-readout">SHA-256 {object.sha256.slice(0,16)}… · {object.mediaType}</small>:null}</article>)}</section>:null}
 
-          {activeTab==="audit"?<section className="audit-trail"><header><History size={15}/><span><b>Değiştirilemez işlem kaydı</b><small>Her işlem eklendiği anda kilitlenir</small></span><ShieldCheck size={15}/></header>{detail.audit.length?detail.audit.map(event=><article key={event.eventNumber}><i/><span><b>{auditLabels[event.action]||event.action}</b><small>{event.actor} · {new Date(event.createdAt).toLocaleString("tr-TR")}</small></span></article>):<p>Henüz personel işlemi kaydedilmedi.</p>}
+          {activeTab==="audit"?<section className="audit-trail"><header><History size={15}/><span><b>Değiştirilemez işlem kaydı</b><small>Her işlem eklendiği anda kilitlenir</small></span><ShieldCheck size={15}/></header>{detail.audit.length?detail.audit.map(event=><article key={event.eventNumber}><i/><span><b>{auditLabels[event.action]||event.action}</b><small>{event.actor} · {new Date(event.createdAt).toLocaleString("tr-TR")}</small>{technical?<small className="tech-readout">#{event.eventNumber} · {event.action} · {event.eventHash.slice(0,16)}…{event.previousHash?` ← ${event.previousHash.slice(0,8)}…`:""}</small>:null}</span></article>):<p>Henüz personel işlemi kaydedilmedi.</p>}
             {auditChain.length>1?<p className={`chain-state ${chainBroken?"broken":"intact"}`}>
               {chainBroken
                 ?<><AlertTriangle size={14}/> İşlem kaydı zinciri kopuk; işletim ekibine bildirin.</>
