@@ -209,7 +209,11 @@ Bu düzenlerde teknik gösterim (yüzde, kanıt koordinatı `[165,188,332,206]`,
 
 ## 9. Açık kararlar
 
-1. Kanıt kırpmasının kaynağı: asıl görüntüden anlık kırpma mı, ön üretilmiş küçük görsel mi (performans/depolama etkisi).
+1. ~~Kanıt kırpmasının kaynağı~~ — **karara bağlandı (2026-08-13): anlık CSS
+   kırpması.** Ayrı küçük görsel üretilmez; kırpma, personelin zaten gördüğü
+   güvenli görüntüleme türevinden `background-position/size` ile anlık kesilir
+   (`lib/evidence-crop.ts`). Ek depolama ve üretim hattı yoktur, WORM kasasına
+   yeni nesne girmez ve kanıt türevin kendisinden sapamaz.
 2. "68 parsel" listesinin toplu onay ekranı — ayrı ekran mı, kayan panel mi.
 3. Yönetici düzeninde (`1a`) teknik gösterimin yetkiye mi, kullanıcı tercihine mi bağlanacağı.
 4. Mobil tarama akışının bu dille eşleşmesi (henüz tasarlanmadı).
@@ -278,6 +282,16 @@ Bu şartname depoya alındı ve **renk + tipografi katmanı** uygulandı
   Yönetici düzenlerinde (`1a`/`1b`) bu gösterimler açık kalacak; o düzenler
   henüz kurulmadı.
 
+- §3.3–§3.4 kanıt katmanı tamamlandı: görev kartındaki her değer, belgede
+  okunduğu yerin kırpmasını girişin üstünde gösterir (`role="img"`, 66px
+  şerit); belge üzerindeki vurgu kutusu altın kenarlığa geçirildi ve bitişik
+  altın ad etiketi eklendi (yalnız alan adı — yüzde yok, §3.3). Kırpma
+  matematiği `lib/evidence-crop.ts` içinde saftır ve pencere-kutuyu-kesmez
+  sözleşmesi testle sabitlenmiştir (`tests/evidence-crop.test.ts`). Kanıt
+  kutusu olmayan değer kırpma göstermez — ilke 3 gereği kanıtı
+  gösterilemeyen değer görsel bağ da kurmaz.
+
 ### Bekliyor — karar gerektiriyor
 
-1. Şartnamenin kendi açık kararları (§9) kurumsal onay bekliyor.
+1. Şartnamenin kendi açık kararları (§9.2–§9.5) kurumsal onay bekliyor;
+   §9.1 karara bağlandı (anlık CSS kırpması).
