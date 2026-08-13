@@ -35,3 +35,16 @@ export function confidenceBadge(confidence: number): { label: string; needsRevie
   if (confidence >= 0.75) return { label: "Gözden geçirin", needsReview: true };
   return { label: "Kontrol edin", needsReview: true };
 }
+
+/**
+ * Teknik görünümün ham yüzde biçimi — design.md §9.3 kararı (2026-08-13).
+ *
+ * Yüzde yalnız `technical.view` yetkisi olan kullanıcının AÇTIĞI teknik
+ * görünümde belirir; personel dili varsayılan kalır. Biçimleme burada, ortak
+ * çeviri modülünde durur: yüzeyler güveni kendi başına sayıya çevirmez ve
+ * "personel arayüzü güven yüzdesi biçimlemez" güvencesi anlamını korur.
+ * Türkçe sayı biçimi kullanılır (§7): `%98,9`.
+ */
+export function technicalConfidence(confidence: number): string {
+  return `%${(confidence * 100).toFixed(1).replace(".", ",")}`;
+}

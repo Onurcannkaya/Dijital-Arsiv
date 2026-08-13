@@ -220,7 +220,12 @@ Bu düzenlerde teknik gösterim (yüzde, kanıt koordinatı `[165,188,332,206]`,
    kanıt kırpması ve kanıt metniyle gelir; toplu ret, seçime TEK ortak
    kontrollü gerekçeyle yazılır — farklı gerekçe gereken satır panelden
    çıkarılıp tekil akışla reddedilir.
-3. Yönetici düzeninde (`1a`) teknik gösterimin yetkiye mi, kullanıcı tercihine mi bağlanacağı.
+3. ~~Yönetici düzeninde teknik gösterimin bağlanacağı yer~~ — **karara
+   bağlandı (2026-08-13): yetki erişimi verir, tercih görünümü açar.**
+   `technical.view` yetkisi (yönetici + arşiv sorumlusu) "Teknik görünüm"
+   anahtarını erişilir kılar; açık/kapalı durumu kişisel tarayıcı tercihidir.
+   Doğrulayıcı ve görüntüleyici anahtarı hiç görmez — §6 eylem dili personel
+   ekranında bozulmaz. Tam `1a`/`1b` yoğun düzenleri ayrı iş olarak açık.
 4. Mobil tarama akışının bu dille eşleşmesi (henüz tasarlanmadı).
 5. Dosya planı ve saklama kuralı seçiminin doğrulama akışının hangi adımında istendiği.
 
@@ -304,7 +309,17 @@ Bu şartname depoya alındı ve **renk + tipografi katmanı** uygulandı
   TEK denetim olayı yazar (60 karar = 1 olay); panel fazlasını parçalara
   böler. Toplu ret seçime tek ortak gerekçeyle yazılır.
 
+- §9.3 teknik görünüm katmanı kuruldu: `technical.view` yetkisi olan roller
+  (yönetici, arşiv sorumlusu) inceleme ekranının sekme şeridinde "Teknik
+  görünüm" anahtarını görür. Açıldığında ham güven yüzdesi (Türkçe biçim,
+  `technicalConfidence` — biçimleme ortak çeviri modülünde, yüzeyler sayı
+  çevirmez), kanıt koordinatları, model adı, profil kodu/sürümü, nesne
+  SHA-256 kırpmaları ve denetim olayı karma zinciri geri gelir. Tercih
+  tarayıcıda saklanır; kurumsal kayıt değildir. §4.3'ün tam `1a`/`1b`
+  düzenleri henüz kurulmadı — bu katman onların işlevsel çekirdeğidir.
+
 ### Bekliyor — karar gerektiriyor
 
-1. Şartnamenin kendi açık kararları (§9.3–§9.5) kurumsal onay bekliyor;
-   §9.1 (anlık CSS kırpması) ve §9.2 (kayan panel) karara bağlandı.
+1. Şartnamenin kendi açık kararları (§9.4–§9.5) kurumsal onay bekliyor;
+   §9.1 (anlık CSS kırpması), §9.2 (kayan panel) ve §9.3 (yetki + tercih)
+   karara bağlandı. §4.3 tam yoğun düzenler (`1a`/`1b`) ayrı iş.
