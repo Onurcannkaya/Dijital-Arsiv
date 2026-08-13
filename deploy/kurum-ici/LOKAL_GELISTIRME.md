@@ -146,9 +146,13 @@ ucundan indirir (kapsam başına jeton, önek kilidi, yol geçişi reddi).
 kimlikle doğrudan bağlanır (ADR-014).
 
 ```bash
-# 1) Gerçek OCR servisi (fastapi+uvicorn+paddleocr kurulu olmalı)
+# 1) Gerçek OCR servisi (fastapi+uvicorn+paddleocr kurulu olmalı).
+#    OCR_PRELOAD_MODEL=true önemlidir: model yüklenir VE küçük bir ısınma
+#    çıkarımı koşar. İlk çıkarım oneDNN derlemesini öder (ölçüm: aynı görüntü
+#    soğuk süreçte 155 sn, ısınmışta 45 sn) ve ısınmadan gelen ilk gerçek
+#    belge, uygulamanın 120 sn'lik iş tavanını aşıp bir deneme hakkı yakar.
 cd services/ocr
-OCR_SERVICE_TOKEN=<jeton> OCR_FETCH_URL=http://localhost:3000/api/internal/objects PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True python -m uvicorn app.main:app --host 127.0.0.1 --port 8090
+OCR_SERVICE_TOKEN=<jeton> OCR_FETCH_URL=http://localhost:3000/api/internal/objects PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True OCR_PRELOAD_MODEL=true python -m uvicorn app.main:app --host 127.0.0.1 --port 8090
 
 # 2) İçerik tarama taklidi (clamav/qpdf yerelde yok; sihirli bayt + SHA
 #    denetimini GERÇEKTEN yapar, alındıya "gelistirme-stub" yazar)

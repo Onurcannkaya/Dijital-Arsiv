@@ -70,7 +70,9 @@ const server = createServer(async (request, response) => {
   };
   try {
     if (request.method === "GET" && request.url === "/health") {
-      return reply(200, { status: "ok", engine: "gelistirme-stub" });
+      // `scannerReady` sağlık denetiminin sözleşmesidir; taklit hazır olduğunu
+      // bildirir ama motor adı gerçeği söylemeye devam eder.
+      return reply(200, { status: "ok", engine: "gelistirme-stub", scannerReady: true });
     }
     if (request.method !== "POST" || !request.url?.startsWith("/v1/scan")) {
       return reply(404, { detail: "yok" });
