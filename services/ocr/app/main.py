@@ -197,14 +197,55 @@ class OcrObjectRequest(BaseModel):
     profile: dict[str, Any] = Field(default_factory=dict)
 
 
+def _verified_copy(reference: OcrObjectRequest, body: Any, destination: str) -> None:
+    """Kaynaktan bağımsız ortak güvence: boyut ve SHA-256 yeniden doğrulanır."""
+    digest = hashlib.sha256()
+    written = 0
+    try:
+        with open(destination, "wb") as output:
+            while True:
+                chunk = body.read(8 * 1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > reference.byteSize or written > MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="Nesne boyut sınırını aşıyor")
+                digest.update(chunk)
+                output.write(chunk)
+    finally:
+        body.close()
+    if written != reference.byteSize or digest.hexdigest() != reference.sha256:
+        raise HTTPException(status_code=422, detail="Nesne SHA-256 doğrulaması başarısız")
+
+
 def download_original(reference: OcrObjectRequest, destination: str) -> None:
     """Aslı sabit kovadan salt-okunur kimlikle ve sınırlı parçalarla indirir."""
+    if not reference.objectKey.startswith("originals/") or ".." in reference.objectKey.split("/"):
+        raise HTTPException(status_code=400, detail="Geçersiz asıl nesne anahtarı")
+
+    # YALNIZ YEREL GELİŞTİRME: Miniflare R2'nin S3 ucu yok; OCR_FETCH_URL
+    # tanımlıysa asıl, uygulamanın iç ucundan indirilir. Boyut ve SHA-256
+    # doğrulaması S3 yoluyla birebir aynıdır; üretimde bu değişken tanımlanmaz
+    # ve aşağıdaki S3 yolu tek yol olarak kalır (ADR-014).
+    fetch_url = os.getenv("OCR_FETCH_URL", "").strip()
+    if fetch_url:
+        from urllib import parse, request as urlrequest
+        query = parse.urlencode({"scope": "original", "key": reference.objectKey})
+        http_request = urlrequest.Request(
+            f"{fetch_url.rstrip('/')}?{query}",
+            headers={"Authorization": f"Bearer {os.getenv('OCR_SERVICE_TOKEN', '').strip()}"},
+        )
+        try:
+            response = urlrequest.urlopen(http_request, timeout=60)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="Asıl nesne yerel uçtan alınamadı") from exc
+        _verified_copy(reference, response, destination)
+        return
+
     bucket = os.getenv("OCR_ORIGINAL_BUCKET", "").strip()
     endpoint = os.getenv("OCR_S3_ENDPOINT_URL", "").strip() or None
     if not bucket:
         raise HTTPException(status_code=503, detail="OCR_ORIGINAL_BUCKET tanımlı değil")
-    if not reference.objectKey.startswith("originals/") or ".." in reference.objectKey.split("/"):
-        raise HTTPException(status_code=400, detail="Geçersiz asıl nesne anahtarı")
     try:
         import boto3
         client = boto3.client("s3", endpoint_url=endpoint)
@@ -212,24 +253,7 @@ def download_original(reference: OcrObjectRequest, destination: str) -> None:
         reported_size = int(response.get("ContentLength", -1))
         if reported_size != reference.byteSize:
             raise HTTPException(status_code=422, detail="Nesne boyutu yetkili kayıtla eşleşmiyor")
-        body = response["Body"]
-        digest = hashlib.sha256()
-        written = 0
-        try:
-            with open(destination, "wb") as output:
-                while True:
-                    chunk = body.read(8 * 1024 * 1024)
-                    if not chunk:
-                        break
-                    written += len(chunk)
-                    if written > reference.byteSize or written > MAX_BYTES:
-                        raise HTTPException(status_code=413, detail="Nesne boyut sınırını aşıyor")
-                    digest.update(chunk)
-                    output.write(chunk)
-        finally:
-            body.close()
-        if written != reference.byteSize or digest.hexdigest() != reference.sha256:
-            raise HTTPException(status_code=422, detail="Nesne SHA-256 doğrulaması başarısız")
+        _verified_copy(reference, response["Body"], destination)
     except HTTPException:
         raise
     except Exception as exc:

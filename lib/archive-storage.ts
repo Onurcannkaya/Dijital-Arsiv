@@ -89,6 +89,18 @@ export function getArchiveObjectStorage(bindings: Pick<ArchiveBindings, "ARCHIVE
   return storageObjectStorage(bindings.ARCHIVE_FILES);
 }
 
+/**
+ * Türev deposu. ADR-014 türevleri asıl kasadan AYRI yetki alanında tutar;
+ * bilet ve dosya sunumu da yalnız `DERIVATIVE_FILES` altındaki erişim
+ * türevlerine bağlanır. Bağ yoksa null döner; çağıran türevi atlar, asıl
+ * kasaya yazmaya düşmez.
+ */
+export function getDerivativeObjectStorage(
+  bindings: Pick<ArchiveBindings, "DERIVATIVE_FILES">,
+): ObjectStorage | null {
+  return bindings.DERIVATIVE_FILES ? storageObjectStorage(bindings.DERIVATIVE_FILES) : null;
+}
+
 /** Yetkili kayıttaki namespace'i dar okuma rolüne çevirir; bilinmeyen alan fail-closed'dur. */
 export function getObjectReaderForNamespace(
   bindings: Pick<ArchiveBindings, "ARCHIVE_FILES" | "DERIVATIVE_FILES">,

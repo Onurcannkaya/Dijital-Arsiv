@@ -58,14 +58,30 @@ function toObjectStat(object: R2Object): ObjectStat {
 }
 
 function returnedRange(object: R2Object): { bodySize: number; range: { offset: number; length: number } | null } {
+  /*
+   * Gerçek R2 aralıksız get'te `range` alanını hiç doldurmaz. Miniflare
+   * emülasyonu ise tam okumada bile bir aralık NESNESİ döndürür ve alanları
+   * tanımsız bırakır; körü körüne hesaplamak NaN üretir ve terfi ile dosya
+   * sunumundaki "tam gövde" doğrulamaları yerelde bu yüzden düşüyordu
+   * ("Promoted vault object cannot be read in full"). Sonlu olmayan değerler
+   * "istenmedi" sayılır ve nesnenin tamamını kapsayan aralık tam okumadır —
+   * iki kural da her iki ortamda anlamsal olarak doğrudur; kısmi okuma
+   * güvenceleri değişmez.
+   */
   const range = object.range;
   if (!range) return { bodySize: object.size, range: null };
-  if ("suffix" in range) {
+  if ("suffix" in range && Number.isFinite(range.suffix)) {
     const length = Math.min(Math.max(range.suffix, 0), object.size);
+    if (length === object.size) return { bodySize: object.size, range: null };
     return { bodySize: length, range: { offset: object.size - length, length } };
   }
-  const offset = Math.max(range.offset ?? 0, 0);
-  const length = Math.min(Math.max(range.length ?? object.size - offset, 0), Math.max(object.size - offset, 0));
+  const requested = range as { offset?: number; length?: number };
+  const offset = Number.isFinite(requested.offset) ? Math.max(requested.offset as number, 0) : 0;
+  const fallbackLength = Math.max(object.size - offset, 0);
+  const length = Number.isFinite(requested.length)
+    ? Math.min(Math.max(requested.length as number, 0), fallbackLength)
+    : fallbackLength;
+  if (offset === 0 && length === object.size) return { bodySize: object.size, range: null };
   return { bodySize: length, range: { offset, length } };
 }
 
