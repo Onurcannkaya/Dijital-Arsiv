@@ -128,7 +128,15 @@ export function UsersScreen() {
           const lastAdmin=user.role==="admin"&&user.active&&activeAdmins<=1;
           const roleLocked=self||lastAdmin||busyEmail===user.email;
           const accessLocked=self||lastAdmin||busyEmail===user.email;
-          const lockReason=self?"Kendi yetkinizi değiştiremezsiniz; devir başka bir yönetici tarafından yapılır."
+          /*
+           * Kilit yalnız KİLİTLENMEYİ önler: kendi rolünü düşürmek ve kendi
+           * erişimini kapatmak kapalıdır, çünkü ikisi de geri dönüşü başka bir
+           * yöneticiye bağlar. Kendi müdürlük kapsamını daraltmak bunlardan
+           * değildir — yönetim yetkisi durduğu için geri alınabilir ve serbest
+           * bırakılır. Mesaj bu yüzden "yetkinizi" değil, engellenen iki işlemi
+           * adlandırır; aksi halde açık bırakılan seçiciyle çelişir.
+           */
+          const lockReason=self?"Kendi rolünüzü düşüremez ve erişiminizi kapatamazsınız; devir başka bir yönetici tarafından yapılır."
             :lastAdmin?"Sistemde en az bir aktif yönetici kalmalıdır.":undefined;
           return <tr key={user.email}>
             <td><div className="user-cell"><span><UserRound size={17}/></span><b>{user.displayName}<small>{user.email}{self?" · siz":""}</small></b></div></td>
