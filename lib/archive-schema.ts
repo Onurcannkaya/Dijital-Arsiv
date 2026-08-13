@@ -44,7 +44,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 26;
+export const ARCHIVE_SCHEMA_VERSION = 27;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -224,6 +224,9 @@ const tableStatements: string[] = [
     corrected_value TEXT,
     corrected_by TEXT,
     corrected_at TEXT,
+    rejection_reason_code TEXT,
+    rejection_reason_label TEXT,
+    rejection_reason_note TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (verification_status IN ('SUGGESTED', 'CONFIRMED', 'CORRECTED', 'REJECTED')),
@@ -657,6 +660,27 @@ async function migrateOcrPageColumns(db: D1Database) {
     ["confirmed_text", "ALTER TABLE ocr_pages ADD COLUMN confirmed_text TEXT"],
     ["confirmed_by", "ALTER TABLE ocr_pages ADD COLUMN confirmed_by TEXT"],
     ["confirmed_at", "ALTER TABLE ocr_pages ADD COLUMN confirmed_at TEXT"],
+  ];
+  for (const [column, statement] of additions) {
+    if (!columns.has(column)) await db.prepare(statement).run();
+  }
+}
+
+/**
+ * Ret gerekçesi alan kaydının kendisine de yazılır.
+ *
+ * Gerekçe yalnız denetim zincirindeyken belgeye bakan personel onu göremiyor,
+ * "Reddedildi" ibaresini sebepsiz okuyordu. Etiket de saklanır: gerekçe
+ * sözlüğü kurumca düzenlenebilir olduğundan, bir kodun bugünkü karşılığı
+ * kararın verildiği andaki karşılığı olmayabilir.
+ */
+async function migrateFieldRejectionReasonColumns(db: D1Database) {
+  if (!(await tableExists(db, "extracted_fields"))) return;
+  const columns = await columnNames(db, "extracted_fields");
+  const additions: Array<[string, string]> = [
+    ["rejection_reason_code", "ALTER TABLE extracted_fields ADD COLUMN rejection_reason_code TEXT"],
+    ["rejection_reason_label", "ALTER TABLE extracted_fields ADD COLUMN rejection_reason_label TEXT"],
+    ["rejection_reason_note", "ALTER TABLE extracted_fields ADD COLUMN rejection_reason_note TEXT"],
   ];
   for (const [column, statement] of additions) {
     if (!columns.has(column)) await db.prepare(statement).run();
@@ -1319,6 +1343,8 @@ const structuralMigrations: MigrationStep[] = [
   { version: 24, run: widenAdminEventTargets },
   // 25 → 26: yönetilebilir sözlükler denetim kaydına kendi eylem/hedef adlarını yazar.
   { version: 26, run: relaxAdminEventConstraints },
+  // 26 → 27: ret gerekçesi alan kaydında da saklanır.
+  { version: 27, run: migrateFieldRejectionReasonColumns },
 ];
 
 /**

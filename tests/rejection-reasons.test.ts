@@ -197,3 +197,40 @@ test("belge detayı gerekçe listelerini arayüze taşır", async () => {
       SEED_RELATION_REJECTION_REASONS.map((reason) => reason.code));
   });
 });
+
+test("alan ret gerekçesi kararın yanında görünür ve geri alınınca temizlenir", async () => {
+  await withServer(async (server) => {
+    const patch = (body: unknown) => call(server, `/api/documents/${DOC}/fields`, "PATCH", body);
+    const field = async () => {
+      const response = await fetch(`${server.url}/api/documents/${DOC}`, { headers: IDENTITY });
+      const body = await response.json() as { fields: Array<{ name: string; verificationStatus: string;
+        rejection: { code: string; label: string; note: string | null } | null }> };
+      return body.fields.find((entry) => entry.name === "ada");
+    };
+
+    /*
+     * Gerekçe yalnız denetim zincirindeyse belgeye bakan personel "Reddedildi"
+     * ibaresini sebepsiz okur ve kararı yeniden vermeye çalışabilir.
+     */
+    assert.equal((await patch({ values: [{ id: "deger-1", action: "reject",
+      reasonCode: "NOT_IN_DOCUMENT", reasonNote: "Belgede ada satırı yok" }] })).status, 200);
+    const rejected = await field();
+    assert.equal(rejected?.verificationStatus, "REJECTED");
+    assert.equal(rejected?.rejection?.code, "NOT_IN_DOCUMENT");
+    assert.equal(rejected?.rejection?.label, "Belgede böyle bir bilgi yok");
+    assert.equal(rejected?.rejection?.note, "Belgede ada satırı yok");
+
+    // Onaya döndürülünce gerekçe canlı değerin üzerinde asılı kalmamalıdır.
+    assert.equal((await patch({ values: [{ id: "deger-1", action: "confirm" }] })).status, 200);
+    const confirmed = await field();
+    assert.equal(confirmed?.verificationStatus, "CONFIRMED");
+    assert.equal(confirmed?.rejection, null, "geri alınan ret gerekçesi alanda kaldı");
+
+    // Düzeltme de aynı şekilde temizler.
+    await patch({ values: [{ id: "deger-1", action: "reject", reasonCode: "MISREAD" }] });
+    assert.equal((await patch({ values: [{ id: "deger-1", action: "correct", value: "1285" }] })).status, 200);
+    const corrected = await field();
+    assert.equal(corrected?.verificationStatus, "CORRECTED");
+    assert.equal(corrected?.rejection, null);
+  });
+});

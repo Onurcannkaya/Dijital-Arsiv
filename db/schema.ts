@@ -230,6 +230,11 @@ export const extractedFields = sqliteTable("extracted_fields", {
   correctedValue: text("corrected_value"),
   correctedBy: text("corrected_by"),
   correctedAt: text("corrected_at"),
+  // Ret gerekçesi kararla birlikte saklanır; etiket de yazılır çünkü gerekçe
+  // sözlüğü kurumca düzenlenebilir.
+  rejectionReasonCode: text("rejection_reason_code"),
+  rejectionReasonLabel: text("rejection_reason_label"),
+  rejectionReasonNote: text("rejection_reason_note"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
