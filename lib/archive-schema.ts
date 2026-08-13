@@ -44,7 +44,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 25;
+export const ARCHIVE_SCHEMA_VERSION = 26;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -458,6 +458,13 @@ const tableStatements: string[] = [
    * değiştirdi. Kayıt yalnız eklenebilir; güncelleme ve silme tetikleyiciyle
    * reddedilir.
    */
+  /*
+   * `action` ve `target_kind` kısıtları sayım değil ŞEKİL denetler.
+   * Yönetilebilir sözlükler koddaki bir kayıt defterinden gelir ve her yeni
+   * liste için şema göçü gerektirmemelidir; enumerasyonu SQL'de tekrarlamak,
+   * kodla şemanın zamanla ayrışacağı ikinci bir yer açardı. Şekil denetimi
+   * yazım hatasını ve anlamsız eylemi yine de durdurur.
+   */
   `CREATE TABLE IF NOT EXISTS user_admin_events (
     id TEXT PRIMARY KEY NOT NULL,
     actor TEXT NOT NULL,
@@ -467,8 +474,8 @@ const tableStatements: string[] = [
     new_state TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     target_kind TEXT NOT NULL DEFAULT 'user',
-    CHECK (action IN ('user.created', 'user.updated', 'unit.created', 'unit.updated')),
-    CHECK (target_kind IN ('user', 'unit'))
+    CHECK (action LIKE '%.created' OR action LIKE '%.updated'),
+    CHECK (length(target_kind) BETWEEN 1 AND 64 AND target_kind NOT LIKE '% %')
   )`,
   "CREATE INDEX IF NOT EXISTS user_admin_events_target_idx ON user_admin_events (target_email, created_at)",
   "CREATE INDEX IF NOT EXISTS user_admin_events_created_idx ON user_admin_events (created_at)",
@@ -803,6 +810,33 @@ async function widenAdminEventTargets(db: D1Database) {
     SELECT id, actor, target_email, action, previous_state, new_state, created_at, 'user'
     FROM user_admin_events_v23`).run();
   await db.prepare("DROP TABLE user_admin_events_v23").run();
+}
+
+/**
+ * Yönetim denetim kaydındaki sabit eylem/hedef listesi şekil denetimine
+ * çevrilir; ret gerekçesi gibi yeni yönetilebilir sözlükler kendi adlarını
+ * yazabilsin diye. Kayıt silinemez/değiştirilemez olduğundan taşıma için
+ * tetikleyiciler geçici kaldırılır ve yeniden kurulur.
+ */
+async function relaxAdminEventConstraints(db: D1Database) {
+  if (!(await tableExists(db, "user_admin_events"))) {
+    await createUserAdminEventTable(db);
+    return;
+  }
+  const definition = await db.prepare(`SELECT sql FROM sqlite_master
+    WHERE type = 'table' AND name = 'user_admin_events'`).first<{ sql: string }>();
+  if (definition?.sql && !definition.sql.includes("action IN (")) return;
+  await db.prepare("DROP TRIGGER IF EXISTS user_admin_events_no_update").run();
+  await db.prepare("DROP TRIGGER IF EXISTS user_admin_events_no_delete").run();
+  await db.prepare("ALTER TABLE user_admin_events RENAME TO user_admin_events_v25").run();
+  for (const statement of tableStatements.filter((sql) => sql.includes("user_admin_events"))) {
+    await db.prepare(statement).run();
+  }
+  await db.prepare(`INSERT INTO user_admin_events
+      (id, actor, target_email, action, previous_state, new_state, created_at, target_kind)
+    SELECT id, actor, target_email, action, previous_state, new_state, created_at, target_kind
+    FROM user_admin_events_v25`).run();
+  await db.prepare("DROP TABLE user_admin_events_v25").run();
 }
 
 /** F1.9 sertleştirmesi: bilet belge+sınıf bağını ve kapalı amaç kodunu taşır. */
@@ -1283,6 +1317,8 @@ const structuralMigrations: MigrationStep[] = [
   { version: 23, run: createUserAdminEventTable },
   // 23 → 24: yönetim denetim kaydı müdürlük olaylarını da taşır.
   { version: 24, run: widenAdminEventTargets },
+  // 25 → 26: yönetilebilir sözlükler denetim kaydına kendi eylem/hedef adlarını yazar.
+  { version: 26, run: relaxAdminEventConstraints },
 ];
 
 /**

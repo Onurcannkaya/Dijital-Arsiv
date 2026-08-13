@@ -21,6 +21,8 @@
  * kılar; aksi halde listeden kaçış yolu haline gelir ve liste anlamsızlaşır.
  */
 
+import type { ManagedVocabulary } from "./vocabulary-directory.ts";
+
 export const FIELD_REJECTION_VOCABULARY_CODE = "FIELD_REJECTION_REASON";
 export const RELATION_REJECTION_VOCABULARY_CODE = "RELATION_REJECTION_REASON";
 export const OTHER_REASON_CODE = "OTHER";
@@ -78,4 +80,43 @@ export function validateRejection(
     return "\"Diğer\" gerekçesi seçildiğinde açıklama zorunludur.";
   }
   return { reasonCode: code, reasonLabel: reason.label, reasonNote: note || null };
+}
+
+/**
+ * Ret gerekçesi sözlüklerinin ayarlar ekranından yönetilebilir tanımı.
+ *
+ * Kurallar müdürlük listesiyle ortaktır (`vocabulary-directory.ts`): kaldırma
+ * değil pasifleştirme, ve son aktif terim korunur. İkincisi burada özellikle
+ * önemlidir — liste boşalırsa hiçbir ret kaydedilemez hale gelir, çünkü gerekçe
+ * zorunludur.
+ */
+export function rejectionReasonVocabulary(kind: "field" | "relation"): ManagedVocabulary {
+  const isField = kind === "field";
+  const noun = isField ? "Alan ret gerekçesi" : "İlişki ret gerekçesi";
+  return {
+    vocabularyCode: isField ? FIELD_REJECTION_VOCABULARY_CODE : RELATION_REJECTION_VOCABULARY_CODE,
+    targetKind: isField ? "field-rejection-reason" : "relation-rejection-reason",
+    actions: { created: "rejection-reason.created", updated: "rejection-reason.updated" },
+    errorCodes: { exists: "REASON_EXISTS", notFound: "REASON_NOT_FOUND", lastActive: "LAST_REASON" },
+    messages: {
+      vocabularyMissing: `${noun} sözlüğü kurulu değil; şema göçünü çalıştırın.`,
+      invalidLabel: `${noun} 1 ile 120 karakter arasında olmalıdır.`,
+      labelUnusable: `${noun} metninden geçerli bir kod üretilemedi.`,
+      exists: "Bu gerekçe zaten tanımlı.",
+      notFound: "Gerekçe bulunamadı.",
+      lastActive: "Listede en az bir aktif gerekçe kalmalıdır; aksi halde hiçbir ret kaydedilemez.",
+    },
+    /*
+     * Kullanım sayısı pasifleştirme kararını bilgilendirir. Denetim olayının
+     * ayrıntısı JSON olduğundan sayım metin eşleşmesiyle yapılır; tek olayda
+     * birden çok ret olabileceği için bu, gerekçenin kaç KARARDA geçtiğinin
+     * alt sınırıdır. Kesin muhasebe değil, "bu gerekçe kullanılıyor mu"
+     * sorusunun cevabıdır.
+     */
+    usageCounts: async (db, term) => {
+      const row = await db.prepare(`SELECT COUNT(*) AS count FROM audit_events
+        WHERE details_json LIKE ?`).bind(`%"reasonCode":"${term.code}"%`).first<{ count: number }>();
+      return [{ label: "ret kaydı", count: Number(row?.count ?? 0) }];
+    },
+  };
 }
