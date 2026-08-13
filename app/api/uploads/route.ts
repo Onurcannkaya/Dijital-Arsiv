@@ -53,7 +53,8 @@ export async function POST(request: Request) {
      */
     const declaredMediaType = String(body.mediaType ?? "").trim().toLowerCase();
     if (!isAcceptedMediaType(declaredMediaType)) {
-      return jsonError(`Desteklenmeyen belge biçimi. Kabul edilenler: ${ACCEPTED_FILE_EXTENSIONS.join(", ")}.`);
+      return jsonError(`Desteklenmeyen belge biçimi. Kabul edilenler: ${ACCEPTED_FILE_EXTENSIONS.join(", ")}.`,
+        400, "UNSUPPORTED_MEDIA_TYPE");
     }
     const idempotencyKey = request.headers.get("idempotency-key") ?? String(body.idempotencyKey ?? "");
     const storages = getIngestStorages(bindings);
