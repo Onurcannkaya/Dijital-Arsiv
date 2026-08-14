@@ -400,3 +400,38 @@
 .scan-submit:disabled{opacity:.55}
 .scan-note{display:flex;gap:8px;align-items:flex-start;margin:0;color:var(--ar-muted);font-size:12px;line-height:1.55}
 .scan-note svg{flex:none;margin-top:2px}
+
+/* Yoğun yönetici düzeni 1a (design.md §4.3). Kuyruk 222px, küçük resim 108px,
+   alan kolonu 398px; uygulama rayı 60px'e iner. Erişim technical.view + tercih. */
+body.dense-review{--ar-sidebar-w:60px}
+body.dense-review .brand>span,body.dense-review .sidebar nav p,body.dense-review .sidebar nav button span,body.dense-review .sidebar nav button b,body.dense-review .sidebar footer{display:none}
+body.dense-review .sidebar nav button{justify-content:center;padding:0}
+body.dense-review .brand{justify-content:center;padding:0}
+.review-grid.dense{grid-template-columns:222px 108px minmax(360px,1fr) 398px}
+.queue-panel{background:var(--navy-800);color:#fff;overflow:auto;padding:12px 8px}
+.queue-panel>p{margin:0 8px 10px;font-size:11px;letter-spacing:.1em;font-weight:700;color:var(--navy-300,#9fb1cf);text-transform:uppercase}
+.queue-panel ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.queue-panel button{width:100%;text-align:left;border:0;border-radius:6px;background:transparent;color:#dbe3f0;padding:8px 9px;display:flex;flex-direction:column;gap:3px}
+.queue-panel button:hover{background:rgba(255,255,255,.08)}
+.queue-panel button.active{background:var(--gold-600);color:#fff}
+.queue-panel button b{font:11px "IBM Plex Mono",Consolas,monospace}
+.queue-panel button small{font-size:11px;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.review-grid.dense .thumbs{width:auto;min-width:108px}
+/* Sıkışık alan kolonu: kırpma ve ipuçları gizlenir, satır yoğunluğu artar. */
+.review-grid.dense .evidence-fields{gap:4px}
+.review-grid.dense .evidence-fields .evidence-crop,.review-grid.dense .field-hint{display:none}
+.review-grid.dense .fields>label,.review-grid.dense .evidence-fields label{margin-top:6px}
+.review-grid.dense .fields input,.review-grid.dense .fields select{height:30px;font-size:12px}
+.review-grid.dense .quality,.review-grid.dense .profile-strip{margin:9px 12px;padding:8px}
+.review-grid.dense .evidence-fields{padding:0 12px}
+.dense-strip{flex:none;display:flex;gap:22px;align-items:flex-start;min-height:72px;padding:10px 18px;background:var(--navy-800);color:#fff;border-top:2px solid var(--gold-600);overflow-x:auto}
+.dense-strip b{display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap}
+.dense-strip-relations{display:flex;align-items:center;gap:7px;flex-wrap:wrap;flex:1}
+.relation-chip{font-style:normal;font-size:11px;padding:3px 8px;border-radius:10px;background:rgba(255,255,255,.12);white-space:nowrap}
+.relation-chip.verified{background:rgba(94,178,131,.3)}
+.relation-chip.rejected{background:rgba(214,106,106,.32);text-decoration:line-through}
+.relation-chip.suggested{border:1px dashed var(--gold-600)}
+.dense-strip-audit{display:flex;flex-direction:column;gap:3px;align-items:flex-end}
+.dense-strip-audit b.broken{color:#F2A6A6}
+.dense-strip-audit small{font:11.5px "IBM Plex Mono",Consolas,monospace;color:#c9d4e6;white-space:nowrap}
+.dense-toggle{margin-left:8px}
