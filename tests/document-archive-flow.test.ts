@@ -190,12 +190,13 @@ test("tasnifsiz arşivleme reddedilir; tasnif anlık görüntüyle yazılır", a
 
 test("hazır olmayan durumlar birbirinden ayrılır", async () => {
   await withServer(async (server) => {
-    // Kuyruktaki ve işlenen belge kendiliğinden ilerler; OCR'ı başarısız olan
-    // ilerlemez. Üçüne aynı cümleyi vermek memuru boşuna bekletir.
+    // Kuyruktaki ve işlenen belge kendiliğinden ilerler; okunması başarısız
+    // olan ilerlemez. Üçüne aynı cümleyi vermek memuru boşuna bekletir.
+    // Mesajlar §6 memur dilindedir: "OCR/kuyruk" değil, belgenin okunma hâli.
     const expected: Array<[status: string, pattern: RegExp]> = [
-      ["queued", /OCR kuyruğunda/],
-      ["processing", /OCR işlemi sürüyor/],
-      ["ocr_failed", /başarısız oldu.*yeniden işlenmelidir/],
+      ["queued", /henüz okunmadı/],
+      ["processing", /şu anda okunuyor/],
+      ["ocr_failed", /okunması başarısız.*yeniden okutulmalıdır/],
     ];
     for (const [status, pattern] of expected) {
       const id = await seedDocument(server, { id: `doc-${status}`, status });

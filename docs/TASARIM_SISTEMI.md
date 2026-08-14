@@ -403,6 +403,20 @@ Bu şartname depoya alındı ve **renk + tipografi katmanı** uygulandı
   Sunucunun anladığı süzgeçler arama özetinde altın-anahtarlı mono
   çiplerle geri gösterilir; arama kutusu yer tutucusu sözdizimini öğretir.
 
+- §6 dil geçişi doğrulama ekranının tamamına uygulandı (2026-08-14,
+  kullanıcı geri bildirimiyle): "OCR", "kuyruk", "işleme", "değer",
+  "varlık ilişkisi", "geçici kimlik" memur dilinden çıkarıldı — belge
+  "okunur", bilgiler "kontrol edilir", parseller resmî kayıtla "eşleşir".
+  "Kritik/çok değerli" rozetleri ile risk sınıfı ön eki ve profil yaşam
+  döngüsü rozeti ("Hipotez") teknik görünüme taşındı; memur kartta yalnız
+  alan adını, zorunluluk işaretini ve eylem cümlesini okur (kart anatomisi
+  artık §3.4'ün birebir kendisi). Arşivleme 409 mesajları da aynı dile
+  çevrildi. Başlığa DÖRT ADIMLIK İŞ ŞERİDİ kondu (Bilgileri kontrol edin →
+  Bağlantıları karara bağlayın → Metni onaylayın → Tasnifleyip arşivleyin):
+  biten adım yeşil onaylı, sıradaki lacivert; adım tıklanınca ilgili
+  sekmeye/kipe götürür, son adım tasnif diyaloğunu açar. "Arşivlemeden
+  önce:" gerekçe listesi kaybolmadı — arşiv adımının ipucunda durur.
+
 ### Bekliyor
 
 Şartnamenin bütün açık kararları (§9.1–§9.5), ekran şartnameleri

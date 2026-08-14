@@ -34,8 +34,10 @@ const sourceLabels: Record<string, string> = {
   GIS: "CBS", HUMAN: "Personel", OCR: "OCR önerisi", INTEGRATION: "Entegrasyon", SPATIAL: "Geometri",
 };
 const statusLabels: Record<string, string> = { SUGGESTED: "Öneri", VERIFIED: "Doğrulandı", REJECTED: "Reddedildi" };
+/* design.md §6: "geçici/yetkili kimlik" veri modeli dilidir; memura parselin
+ * resmî kayıtla eşleşip eşleşmediği söylenir. */
 const entityStatusLabels: Record<string, string> = {
-  PROVISIONAL: "Geçici kimlik", ACTIVE: "Yetkili kimlik", HISTORICAL: "Tarihsel", MERGED: "Birleştirildi",
+  PROVISIONAL: "Resmî kayıtla henüz eşleşmedi", ACTIVE: "Resmî kayıtla eşleşik", HISTORICAL: "Tarihsel kayıt", MERGED: "Birleştirildi",
 };
 
 type Props = {
@@ -135,8 +137,8 @@ export function EntityRelations({ documentId, relations, rejectionReasons, canRe
     <header>
       <MapPin size={15} />
       <span>
-        <b>Varlık ilişkileri</b>
-        <small>{relations.length ? `${relations.length} ilişki · ${pending.length} öneri kontrol bekliyor` : "Parsel ve adres ilişkisi henüz kurulmadı"}</small>
+        <b>Parsel ve adres bağlantıları</b>
+        <small>{relations.length ? `${relations.length} bağlantı · ${pending.length} öneri kontrol bekliyor` : "Parsel ve adres bağlantısı henüz kurulmadı"}</small>
       </span>
       <ShieldCheck size={15} />
     </header>
