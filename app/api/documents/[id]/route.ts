@@ -6,11 +6,13 @@ import { formatViolation, isMultiValueField } from "../../../../lib/field-policy
 import {
   FIELD_REJECTION_VOCABULARY_CODE, RELATION_REJECTION_VOCABULARY_CODE,
 } from "../../../../lib/rejection-reasons";
+import { FILE_PLAN_VOCABULARY_CODE, RETENTION_RULE_VOCABULARY_CODE } from "../../../../lib/file-plan";
 
 export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ id: string }> };
-type DocumentRow = { id:string; reference_no:string; original_name:string; media_type:string; byte_size:number; sha256:string; document_type:string; document_type_id:string|null; document_profile_version:string|null; unit:string; status:string; uploaded_by:string; created_at:string; updated_at:string };
+type DocumentRow = { id:string; reference_no:string; original_name:string; media_type:string; byte_size:number; sha256:string; document_type:string; document_type_id:string|null; document_profile_version:string|null; unit:string; status:string; uploaded_by:string; created_at:string; updated_at:string;
+  file_plan_code:string|null; file_plan_label:string|null; retention_rule_code:string|null; retention_rule_label:string|null };
 type FieldRow = { id:string; field_name:string; value_index:number; field_value:string; normalized_value:string|null; confidence:number; risk_level:string; page_number:number; bbox_json:string; evidence_text:string; model:string; verification_status:string; origin:string; verified_by:string|null; verified_at:string|null; corrected_value:string|null; corrected_by:string|null; corrected_at:string|null;
   rejection_reason_code:string|null; rejection_reason_label:string|null; rejection_reason_note:string|null };
 type PageRow = { page_number:number; width:number; height:number; raw_text:string; full_text:string; search_text:string; confirmed_text:string|null; confirmed_by:string|null; confirmed_at:string|null; words_json:string; average_confidence:number; model:string };
@@ -27,7 +29,8 @@ export async function GET(request: Request, context: RouteContext) {
   const principal = await authorizeRequest(request, bindings.DB, "document.read", bindings.ARCHIVE_ADMIN_EMAILS);
   if (principal instanceof Response) return principal;
   const row = await bindings.DB.prepare(`SELECT id, reference_no, original_name, media_type, byte_size, sha256,
-    document_type, document_type_id, document_profile_version, unit, status, uploaded_by, created_at, updated_at
+    document_type, document_type_id, document_profile_version, unit, status, uploaded_by, created_at, updated_at,
+    file_plan_code, file_plan_label, retention_rule_code, retention_rule_label
     FROM archive_documents WHERE id = ?`).bind(id).first<DocumentRow>();
   if (!row) return jsonError("Belge bulunamadı.", 404);
   if (!canAccessUnit(principal, row.unit)) return jsonError("Bu belge müdürlük kapsamınızın dışında.", 403);
@@ -68,6 +71,8 @@ export async function GET(request: Request, context: RouteContext) {
   const vocabularyCodes = [...new Set([
     ...profile.fields.map((field) => field.vocabularyCode).filter((code): code is string => Boolean(code)),
     FIELD_REJECTION_VOCABULARY_CODE, RELATION_REJECTION_VOCABULARY_CODE,
+    // §9.5: arşivleme diyaloğu tasnifi bu iki sözlükten seçtirir.
+    FILE_PLAN_VOCABULARY_CODE, RETENTION_RULE_VOCABULARY_CODE,
   ])];
   const vocabularies = Object.fromEntries(await Promise.all(vocabularyCodes.map(async (code) =>
     [code, await loadVocabularyTerms(bindings.DB, code)] as const)));
@@ -145,6 +150,10 @@ export async function GET(request: Request, context: RouteContext) {
       byteSize:row.byte_size, sha256:row.sha256, documentType:row.document_type, unit:row.unit,
       status:row.status, uploadedBy:row.uploaded_by, createdAt:row.created_at, updatedAt:row.updated_at,
       fileUrl:`/api/documents/${id}/file`,
+      // §9.5 tasnifi: arşivlenmemiş belgede null'dur; arşivde karar anının
+      // anlık görüntüsüdür (kod + etiket).
+      filePlan: row.file_plan_code ? { code: row.file_plan_code, label: row.file_plan_label ?? row.file_plan_code } : null,
+      retentionRule: row.retention_rule_code ? { code: row.retention_rule_code, label: row.retention_rule_label ?? row.retention_rule_code } : null,
     },
     profile: {
       code: profile.code, name: profile.name, version: profile.profileVersion,

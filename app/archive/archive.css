@@ -356,3 +356,19 @@
 .tech-toggle{margin-left:auto;display:flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid var(--border-base);border-radius:6px;background:var(--ar-surface-2);color:var(--ar-muted);font-size:12px;align-self:center}
 .tech-toggle.on{border-color:var(--navy-800);background:var(--navy-800);color:#fff}
 .tech-readout{display:block;margin-top:4px;color:var(--ar-violet);font:11.5px "IBM Plex Mono",Consolas,monospace;word-break:break-all}
+
+/* Arşivleme tasnif diyaloğu (design.md §9.5: arşivleme anında, zorunlu). */
+.archive-dialog-backdrop{position:fixed;inset:0;z-index:60;background:rgba(14,42,92,.38);display:grid;place-items:center}
+.archive-dialog{width:min(480px,92vw);background:var(--ar-surface);border:1px solid var(--ar-border);border-radius:10px;box-shadow:0 24px 60px rgba(14,42,92,.35);padding:18px 20px;display:flex;flex-direction:column;gap:13px}
+.archive-dialog>header{display:flex;gap:10px;align-items:center;color:var(--navy-800)}
+.archive-dialog>header span{display:flex;flex-direction:column;gap:2px}
+.archive-dialog>header b{font-size:13.5px}
+.archive-dialog>header small{font-size:12px;color:var(--ar-muted)}
+.archive-dialog>label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:var(--ar-text)}
+.archive-dialog select{height:36px;border:1.5px solid var(--gold-600);border-radius:6px;background:var(--ar-surface-2);color:var(--ar-text);padding:0 9px;font-size:12.5px}
+.archive-dialog>p{margin:0;font-size:12px;color:var(--ar-muted)}
+.archive-dialog>footer{display:flex;justify-content:flex-end;gap:9px}
+.archive-dialog>footer button{height:36px;padding:0 14px;border-radius:6px;border:1px solid var(--ar-border);background:var(--ar-surface-2);color:var(--ar-text);font-size:12.5px;display:flex;align-items:center;gap:7px}
+.archive-dialog>footer .approve{border:0;background:var(--navy-800);color:#fff}
+.archive-dialog>footer .approve:disabled{opacity:.55;cursor:not-allowed}
+.classification-line{display:block;margin-top:4px;font-size:12px;color:var(--ar-green)}

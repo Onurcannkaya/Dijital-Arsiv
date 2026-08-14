@@ -227,7 +227,13 @@ Bu düzenlerde teknik gösterim (yüzde, kanıt koordinatı `[165,188,332,206]`,
    Doğrulayıcı ve görüntüleyici anahtarı hiç görmez — §6 eylem dili personel
    ekranında bozulmaz. Tam `1a`/`1b` yoğun düzenleri ayrı iş olarak açık.
 4. Mobil tarama akışının bu dille eşleşmesi (henüz tasarlanmadı).
-5. Dosya planı ve saklama kuralı seçiminin doğrulama akışının hangi adımında istendiği.
+5. ~~Dosya planı ve saklama kuralı seçiminin isteneceği adım~~ — **karara
+   bağlandı (2026-08-14): arşivleme anında, zorunlu.** "Doğrula ve arşivle"
+   bir tasnif diyaloğu açar; dosya planı ve saklama kuralı kontrollü
+   sözlüklerden seçilmeden belge arşivlenemez, sunucu da kabul etmez. Kod +
+   etiket karar anının anlık görüntüsü olarak belgeye ve denetim izine
+   yazılır. Başlangıç listeleri TASLAKTIR ve ayarlardan yönetilir; kurumsal
+   plan onayı ADR-016 gereği üretim ön koşulu olmaya devam eder.
 
 ---
 
@@ -318,8 +324,17 @@ Bu şartname depoya alındı ve **renk + tipografi katmanı** uygulandı
   tarayıcıda saklanır; kurumsal kayıt değildir. §4.3'ün tam `1a`/`1b`
   düzenleri henüz kurulmadı — bu katman onların işlevsel çekirdeğidir.
 
+- §9.5 arşivleme tasnifi kuruldu: "Doğrula ve arşivle" tasnif diyaloğu açar
+  (dosya planı + saklama kuralı, ikisi de zorunlu); sunucu tasnifsiz veya
+  liste dışı kodla arşivlemeyi reddeder. Tasnif belge kaydına ve denetim
+  olayına kod + etiket anlık görüntüsüyle yazılır; arşivlenmiş belgenin
+  profil şeridinde okunur. `FILE_PLAN` ve `RETENTION_RULE` sözlükleri
+  ayarlardan yönetilir; başlangıç kayıtları taslaktır (ADR-016 onay şerhi
+  sözlük kaynağında durur). Diyalog, saklama süresi dolmasının otomatik imha
+  olmadığını da söyler (ADR-018).
+
 ### Bekliyor — karar gerektiriyor
 
-1. Şartnamenin kendi açık kararları (§9.4–§9.5) kurumsal onay bekliyor;
-   §9.1 (anlık CSS kırpması), §9.2 (kayan panel) ve §9.3 (yetki + tercih)
-   karara bağlandı. §4.3 tam yoğun düzenler (`1a`/`1b`) ayrı iş.
+1. Şartnamenin açık kararlarından yalnız §9.4 (mobil tarama akışı) kaldı;
+   §9.1, §9.2, §9.3 ve §9.5 karara bağlandı ve uygulandı. §4.3 tam yoğun
+   düzenler (`1a`/`1b`) ayrı iş.

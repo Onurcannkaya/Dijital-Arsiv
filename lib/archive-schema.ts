@@ -26,6 +26,7 @@
 import {
   FIELD_REJECTION_VOCABULARY_CODE, RELATION_REJECTION_VOCABULARY_CODE,
 } from "./rejection-reasons.ts";
+import { FILE_PLAN_VOCABULARY_CODE, RETENTION_RULE_VOCABULARY_CODE } from "./file-plan.ts";
 import {
   DEFAULT_DOCUMENT_TYPE_CODE, SEED_PROFILE_VERSION, extractionPolicyFor,
   seedDocumentTypes, seedFieldsFor, seedVocabularies,
@@ -44,7 +45,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 27;
+export const ARCHIVE_SCHEMA_VERSION = 28;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -99,6 +100,13 @@ const tableStatements: string[] = [
     document_profile_version TEXT,
     unit TEXT NOT NULL DEFAULT 'Belirlenmedi',
     status TEXT NOT NULL DEFAULT 'queued',
+    -- design.md §9.5: arşivleme tasnifi. Kod + etiket karar anının anlık
+    -- görüntüsüdür (ret gerekçesi deseni); sözlük sonradan değişse bile
+    -- arşivdeki tasnif okunur kalır. Arşivlenmemiş belgede boştur.
+    file_plan_code TEXT,
+    file_plan_label TEXT,
+    retention_rule_code TEXT,
+    retention_rule_label TEXT,
     uploaded_by TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -681,6 +689,24 @@ async function migrateFieldRejectionReasonColumns(db: D1Database) {
     ["rejection_reason_code", "ALTER TABLE extracted_fields ADD COLUMN rejection_reason_code TEXT"],
     ["rejection_reason_label", "ALTER TABLE extracted_fields ADD COLUMN rejection_reason_label TEXT"],
     ["rejection_reason_note", "ALTER TABLE extracted_fields ADD COLUMN rejection_reason_note TEXT"],
+  ];
+  for (const [column, statement] of additions) {
+    if (!columns.has(column)) await db.prepare(statement).run();
+  }
+}
+
+/**
+ * design.md §9.5: arşivleme tasnifi (dosya planı + saklama kuralı) belge
+ * kaydında kod ve etiket anlık görüntüsüyle saklanır.
+ */
+async function migrateArchiveClassificationColumns(db: D1Database) {
+  if (!(await tableExists(db, "archive_documents"))) return;
+  const columns = await columnNames(db, "archive_documents");
+  const additions: Array<[string, string]> = [
+    ["file_plan_code", "ALTER TABLE archive_documents ADD COLUMN file_plan_code TEXT"],
+    ["file_plan_label", "ALTER TABLE archive_documents ADD COLUMN file_plan_label TEXT"],
+    ["retention_rule_code", "ALTER TABLE archive_documents ADD COLUMN retention_rule_code TEXT"],
+    ["retention_rule_label", "ALTER TABLE archive_documents ADD COLUMN retention_rule_label TEXT"],
   ];
   for (const [column, statement] of additions) {
     if (!columns.has(column)) await db.prepare(statement).run();
@@ -1345,6 +1371,8 @@ const structuralMigrations: MigrationStep[] = [
   { version: 26, run: relaxAdminEventConstraints },
   // 26 → 27: ret gerekçesi alan kaydında da saklanır.
   { version: 27, run: migrateFieldRejectionReasonColumns },
+  // 27 → 28: arşivleme tasnifi (dosya planı + saklama kuralı) belge kaydına eklenir.
+  { version: 28, run: migrateArchiveClassificationColumns },
 ];
 
 /**
@@ -1367,6 +1395,8 @@ const dataMigrations: MigrationStep[] = [
   { version: 9, run: migrateIngestReceiptHistory },
   // 24 → 25: ret gerekçeleri kontrollü sözlüğe taşındı.
   { version: 25, run: seedRejectionReasonVocabularies },
+  // 27 → 28: dosya planı ve saklama kuralı sözlükleri (taslak) tohumlanır.
+  { version: 28, run: seedClassificationVocabularies },
 ];
 
 /**
@@ -1381,6 +1411,18 @@ async function seedRejectionReasonVocabularies(db: D1Database) {
   const vocabularies = seedVocabularies.filter((vocabulary) =>
     vocabulary.code === FIELD_REJECTION_VOCABULARY_CODE
     || vocabulary.code === RELATION_REJECTION_VOCABULARY_CODE);
+  await db.batch(vocabularyStatements(db, vocabularies));
+}
+
+/**
+ * Dosya planı ve saklama kuralı sözlükleri (design.md §9.5). Kayıtlar taslak
+ * olarak işaretlidir; kurumun onaylı planı ayarlardan işlenir ve
+ * `ON CONFLICT DO NOTHING` kurumun düzenlemesini geri almaz.
+ */
+async function seedClassificationVocabularies(db: D1Database) {
+  const vocabularies = seedVocabularies.filter((vocabulary) =>
+    vocabulary.code === FILE_PLAN_VOCABULARY_CODE
+    || vocabulary.code === RETENTION_RULE_VOCABULARY_CODE);
   await db.batch(vocabularyStatements(db, vocabularies));
 }
 
