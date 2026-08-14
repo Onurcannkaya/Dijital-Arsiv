@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  Archive, Bell, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Clock3,
+  Archive, Bell, Camera, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Clock3,
   FileCheck2, FileSearch, Files, FolderArchive, Gauge, History,
   LayoutDashboard, LoaderCircle, Menu, Moon, ScanLine, Search, Settings, ShieldCheck,
   Sun, TriangleAlert, Upload, UserRound, X,
@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DocumentReview } from "./document-review";
 import { StoredDocument, UploadDialog } from "./upload-dialog";
+import { MobileScan } from "./mobile-scan";
 import { UsersScreen } from "./users";
 import { ActivityScreen } from "./activity";
 import { SettingsScreen } from "./settings";
@@ -108,8 +109,12 @@ function Dashboard({rows,overview,health,open,onUpload,userName,canUpload}:{rows
   </>;
 }
 
-function List({rows,title,subtitle,open,onUpload,canUpload,query,onQuery,empty,hasMore,loadingMore,onLoadMore,unsearchable}:{rows:DocumentRow[],title:string,subtitle:string,open:(id:string)=>void,onUpload:()=>void,canUpload:boolean,query:string,onQuery:(value:string)=>void,empty:string,hasMore:boolean,loadingMore:boolean,onLoadMore:()=>void,unsearchable:boolean}) {
-  return <><section className="heading"><div><p className="eyebrow">BELGE YÖNETİMİ</p><h1>{title}</h1><span>{subtitle}</span></div>{canUpload?<button className="primary" onClick={onUpload}><Upload size={17}/> Belge ekle</button>:null}</section><section className="panel list"><div className="list-tools"><label><Search size={17}/><input value={query} onChange={event=>onQuery(event.target.value)} placeholder="Belge no, üst veri veya metin içinde ara..."/></label></div>{query.length>=2?<p className="search-summary">{unsearchable
+function List({rows,title,subtitle,open,onUpload,canUpload,onScan,query,onQuery,empty,hasMore,loadingMore,onLoadMore,unsearchable}:{rows:DocumentRow[],title:string,subtitle:string,open:(id:string)=>void,onUpload:()=>void,canUpload:boolean,onScan:()=>void,query:string,onQuery:(value:string)=>void,empty:string,hasMore:boolean,loadingMore:boolean,onLoadMore:()=>void,unsearchable:boolean}) {
+  return <><section className="heading"><div><p className="eyebrow">BELGE YÖNETİMİ</p><h1>{title}</h1><span>{subtitle}</span></div>{canUpload?<div className="heading-actions">
+    {/* §4.4: dar ekranda birincil giriş kameradır; geniş ekranda gizlenir. */}
+    <button className="primary scan-entry" onClick={onScan}><Camera size={17}/> Belge tara</button>
+    <button className="primary" onClick={onUpload}><Upload size={17}/> Belge ekle</button>
+  </div>:null}</section><section className="panel list"><div className="list-tools"><label><Search size={17}/><input value={query} onChange={event=>onQuery(event.target.value)} placeholder="Belge no, üst veri veya metin içinde ara..."/></label></div>{query.length>=2?<p className="search-summary">{unsearchable
       ?"Arama teriminde aranabilir karakter yok; en az bir harf ya da rakam girin."
       :`Onaylı OCR metni, alan değerleri ve doğrulanmış varlık ilişkilerinde ${rows.length} sonuç gösteriliyor${hasMore?" (daha fazlası var)":""}.`}</p>:null}<Table rows={rows} onOpen={open} empty={empty}/>
     {/* Sonuç kümesi sunucuda sayfalanır; liste sessizce kesilmez. */}
@@ -147,6 +152,8 @@ const viewStatuses: Record<View, string[]> = {
 export function ArchiveWorkspace(){
   const [view,setView]=useState<View>("dashboard"); const [dark,setDark]=useState(false); const [mobile,setMobile]=useState(false); const [query,setQuery]=useState(""); const [selectedId,setSelectedId]=useState<string|null>(null);
   const [uploadOpen,setUploadOpen]=useState(false); const [rows,setRows]=useState<DocumentRow[]>([]); const [toast,setToast]=useState(""); const [user,setUser]=useState<CurrentUser|null>(null);
+  /** §4.4 mobil tarama: tek görevlik yakalama akışı; dar ekranda görünür. */
+  const [scanOpen,setScanOpen]=useState(false);
   const [overview,setOverview]=useState<Overview|null>(null);
   const [health,setHealth]=useState<HealthChecks|null>(null);
   const [nextCursor,setNextCursor]=useState<string|null>(null);
@@ -265,8 +272,9 @@ export function ArchiveWorkspace(){
           :view==="review"?"Doğrulama bekleyen belge yok."
           :"Henüz arşivlenmiş belge yok."}
         open={openDocument} onUpload={()=>setUploadOpen(true)} canUpload={canUpload}
+        onScan={()=>setScanOpen(true)}
         query={query} onQuery={setQuery} unsearchable={unsearchable}
         hasMore={Boolean(nextCursor)} loadingMore={loadingMore} onLoadMore={loadMore}
       />}
-  </main></section><UploadDialog open={uploadOpen} onClose={()=>setUploadOpen(false)} onCreated={created}/>{toast&&<div className="toast" role="status"><CheckCircle2 size={17}/><span>{toast}</span><button onClick={()=>setToast("")} aria-label="Bildirimi kapat"><X size={15}/></button></div>}</div>;
+  </main></section><UploadDialog open={uploadOpen} onClose={()=>setUploadOpen(false)} onCreated={created}/><MobileScan open={scanOpen} onClose={()=>setScanOpen(false)}/>{toast&&<div className="toast" role="status"><CheckCircle2 size={17}/><span>{toast}</span><button onClick={()=>setToast("")} aria-label="Bildirimi kapat"><X size={15}/></button></div>}</div>;
 }
