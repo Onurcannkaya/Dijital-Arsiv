@@ -44,6 +44,8 @@ function fakeOcrService() {
         pages: [{ pageNumber: 1, width: 100, height: 100, rawText: "KARAR 538",
           fullText: "KARAR 538", averageConfidence: 0.95, words: [] }],
         fields: [],
+        // Tek sayfalık görüntü: dilim baştan sona kapanır, kalan sayfa yoktur.
+        pageCount: 1, pageFrom: 1, pageTo: 1, nextPage: null,
         accessDerivative: { mediaType: "image/jpeg", byteSize: jpeg.byteLength, base64: jpeg.toString("base64") },
       }));
     });

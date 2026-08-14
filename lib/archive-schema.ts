@@ -45,7 +45,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 28;
+export const ARCHIVE_SCHEMA_VERSION = 29;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -167,8 +167,11 @@ const tableStatements: string[] = [
     next_attempt_at TEXT,
     last_attempt_at TEXT,
     dead_lettered_at TEXT,
+    next_page INTEGER NOT NULL DEFAULT 1,
+    page_count INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (next_page >= 1)
   )`,
   "CREATE INDEX IF NOT EXISTS processing_jobs_status_created_idx ON processing_jobs (status, created_at)",
   "CREATE INDEX IF NOT EXISTS processing_jobs_schedule_idx ON processing_jobs (status, next_attempt_at, created_at)",
@@ -725,6 +728,36 @@ async function migrateProcessingJobOperationsColumns(db: D1Database) {
   for (const [column, statement] of additions) {
     if (!columns.has(column)) await db.prepare(statement).run();
   }
+}
+
+/**
+ * OCR iş birimi belgeden sayfa dilimine iner.
+ *
+ * Ölçüm: gerçek arşiv taramasında sayfa başına ~65 sn. Belgenin tamamını tek
+ * istekte işlemek 623 sayfalık bir dosyada 11 saat sürer ve istemci tavanı ne
+ * olursa olsun aşılır; iş her denemede baştan başlar ve hiç ilerlemez. İlerleme
+ * bu iki kolonda taşınır: `next_page` işlenecek ilk sayfa, `page_count`
+ * servisin bildirdiği toplam.
+ */
+async function migrateProcessingJobPageWindowColumns(db: D1Database) {
+  if (!(await tableExists(db, "processing_jobs"))) return;
+  const columns = await columnNames(db, "processing_jobs");
+  if (!columns.has("next_page")) {
+    await db.prepare("ALTER TABLE processing_jobs ADD COLUMN next_page INTEGER NOT NULL DEFAULT 1").run();
+  }
+  if (!columns.has("page_count")) {
+    await db.prepare("ALTER TABLE processing_jobs ADD COLUMN page_count INTEGER").run();
+  }
+  /*
+   * Yarı kalmış işler baştan başlar: eski sürümde hiçbir dilim yazılmadığı
+   * için `ocr_pages` boştur ve kısmi ilerleme yoktur. Kuyrukta bekleyen
+   * işlerin sayacı sıfırlanır ki zaman aşımına düşmüş denemeler yeni sayfa
+   * dilimi akışını baştan tüketebilsin.
+   */
+  await db.prepare(`UPDATE processing_jobs SET next_page = 1, page_count = NULL,
+      attempt = 0, next_attempt_at = NULL, dead_lettered_at = NULL,
+      error_message = NULL, status = 'queued', updated_at = CURRENT_TIMESTAMP
+    WHERE kind = 'ocr' AND status IN ('queued', 'processing', 'failed')`).run();
 }
 
 /** F1.3: dağıtık parça yüklemelerinde oturum başına en çok dört aktif istek. */
@@ -1397,6 +1430,8 @@ const dataMigrations: MigrationStep[] = [
   { version: 25, run: seedRejectionReasonVocabularies },
   // 27 → 28: dosya planı ve saklama kuralı sözlükleri (taslak) tohumlanır.
   { version: 28, run: seedClassificationVocabularies },
+  // 28 → 29: OCR iş birimi belgeden sayfa dilimine iner; ilerleme işte taşınır.
+  { version: 29, run: migrateProcessingJobPageWindowColumns },
 ];
 
 /**

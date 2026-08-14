@@ -164,6 +164,13 @@ export const processingJobs = sqliteTable("processing_jobs", {
   nextAttemptAt: text("next_attempt_at"),
   lastAttemptAt: text("last_attempt_at"),
   deadLetteredAt: text("dead_lettered_at"),
+  /**
+   * OCR iş birimi belge değil sayfa dilimidir: ilerleme burada taşınır.
+   * `nextPage` işlenecek ilk sayfa, `pageCount` servisin bildirdiği toplam
+   * (ilk dilim dönene kadar bilinmez).
+   */
+  nextPage: integer("next_page").notNull().default(1),
+  pageCount: integer("page_count"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [

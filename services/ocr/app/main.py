@@ -6,7 +6,7 @@ import os
 import tempfile
 import threading
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,31 @@ _engine: Any | None = None
 # Uç sync olduğundan FastAPI onu havuzda koşturur ve kilit yalnız çıkarımı
 # sıralar: sağlık ucu ve diğer istekler event loop'ta yanıt vermeye devam eder.
 _predict_lock = threading.Lock()
+
+"""İş birimi belge DEĞİL sayfa dilimidir (ADR-015 bölümleme desteğiyle aynı akıl).
+
+Ölçüm: gerçek arşiv taramasında sayfa başına ~65 sn (Windows CPU, ısınmış
+süreç). Belgenin tamamını tek istekte işlemek 623 sayfalık bir dosyada 11 saat
+demektir; istemcinin tavanı ne olursa olsun aşılır. Bu yüzden her istek
+SINIRLI bir sayfa penceresi işler ve kalan sayfayı `nextPage` ile bildirir.
+
+`OCR_REQUEST_BUDGET_SECONDS` istemcinin tavanından KISA tutulmalıdır: servis
+bütçesini aştığında elindeki sayfayı bitirip döner, böylece istemcinin çoktan
+vazgeçtiği bir çıkarım kilidi saatlerce tutmaz. Terk edilmiş koşuların
+kuyruğu zehirlemesi tam olarak bu sınırla engellenir.
+"""
+MAX_PAGES_PER_REQUEST = max(1, int(os.getenv("OCR_MAX_PAGES_PER_REQUEST", "8")))
+REQUEST_BUDGET_SECONDS = max(30.0, float(os.getenv("OCR_REQUEST_BUDGET_SECONDS", "240")))
+PDF_RENDER_DPI = max(72, int(os.getenv("OCR_PDF_RENDER_DPI", "200")))
+# Kilit başka bir belgede meşgulse hızlı 503: istemcinin bütçesini boş
+# beklemeyle tüketmek, işi kuyrukta bırakmaktan daha kötüdür.
+LOCK_WAIT_SECONDS = max(1.0, float(os.getenv("OCR_LOCK_WAIT_SECONDS", "15")))
+ORIGINAL_CACHE_BYTES = max(0, int(os.getenv("OCR_ORIGINAL_CACHE_BYTES", str(6 * 1024 * 1024 * 1024))))
+
+# Aynı belge için ikinci bir çıkarım başlatılmaz: yeniden deneme, süren koşunun
+# arkasına yeni bir indirme + yeni bir çıkarım eklemekle kuyruğu kilitliyordu.
+_active_documents: set[str] = set()
+_active_lock = threading.Lock()
 
 
 @asynccontextmanager
@@ -233,6 +258,137 @@ class OcrObjectRequest(BaseModel):
     byteSize: int = Field(gt=0, le=MAX_BYTES)
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     profile: dict[str, Any] = Field(default_factory=dict)
+    # Sayfa dilimi: 1 tabanlı ilk sayfa ve pencere üst sınırı. Belirtilmezse
+    # baştan başlanır ve sunucu penceresi uygulanır.
+    pageFrom: int = Field(default=1, ge=1)
+    maxPages: int | None = Field(default=None, ge=1)
+
+
+@contextmanager
+def single_flight(document_id: str):
+    """Aynı belge için eşzamanlı ikinci çıkarımı reddeder.
+
+    Zaman aşımına düşen bir istek servisi durdurmaz. Yeniden deneme aynı belge
+    için ikinci bir indirme ve ikinci bir çıkarım başlatırsa, tek uçuşlu Paddle
+    kilidi yüzünden kuyruktaki BÜTÜN belgeler bekler. İş hâlâ sürüyorsa çağıran
+    409 alır ve işi kuyrukta bırakır.
+    """
+    with _active_lock:
+        if document_id in _active_documents:
+            raise HTTPException(status_code=409, detail="Bu belge için OCR çıkarımı hâlihazırda sürüyor")
+        _active_documents.add(document_id)
+    try:
+        yield
+    finally:
+        with _active_lock:
+            _active_documents.discard(document_id)
+
+
+def _cache_directory() -> Path:
+    configured = os.getenv("OCR_ORIGINAL_CACHE_DIR", "").strip()
+    directory = Path(configured) if configured else Path(tempfile.gettempdir()) / "sivas-ocr-originals"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _prune_cache(directory: Path, keep: Path) -> None:
+    """Önbelleği bayt sınırında tutar; en eski dokunulan dosya ilk düşer."""
+    entries = []
+    total = 0
+    for path in directory.iterdir():
+        if not path.is_file():
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        total += stat.st_size
+        entries.append((stat.st_mtime, stat.st_size, path))
+    entries.sort()
+    for _, size, path in entries:
+        if total <= ORIGINAL_CACHE_BYTES:
+            break
+        if path == keep:
+            continue
+        try:
+            path.unlink()
+            total -= size
+        except OSError:
+            # Başka bir istek dosyayı açık tutuyorsa Windows silmeyi reddeder;
+            # sonraki turda yeniden denenir.
+            continue
+
+
+def cached_original(reference: OcrObjectRequest, suffix: str) -> str:
+    """Aslı servise özel önbellekten verir, yoksa doğrulayarak indirir.
+
+    Sayfa dilimleri aynı belgeyi tekrar tekrar işler. Önbellek olmadan her
+    dilim yüz megabaytlık aslı yeniden indirirdi: ölçümde aynı 389 MB dosyanın
+    dört kopyası geçici dizinde birikmişti. Dosya adı yetkili SHA-256'dır ve
+    içerik indirme sırasında doğrulanır; önbellek isabetinde boyut denetlenir.
+    """
+    directory = _cache_directory()
+    target = directory / f"{reference.sha256}{suffix}"
+    if target.exists() and target.stat().st_size == reference.byteSize:
+        os.utime(target, None)
+        return str(target)
+    with tempfile.NamedTemporaryFile(delete=False, dir=directory, suffix=suffix) as staging:
+        staging_path = staging.name
+    try:
+        download_original(reference, staging_path)
+        os.replace(staging_path, target)
+    except BaseException:
+        Path(staging_path).unlink(missing_ok=True)
+        raise
+    _prune_cache(directory, target)
+    return str(target)
+
+
+def render_pdf_page(document: Any, page_number: int) -> Any:
+    """PDF sayfasını çıkarım için BGR diziye çevirir (pdfium, 1 tabanlı sayfa)."""
+    import numpy as np
+
+    page = document[page_number - 1]
+    bitmap = page.render(scale=PDF_RENDER_DPI / 72)
+    array = bitmap.to_numpy()
+    if array.ndim == 3 and array.shape[2] >= 3:
+        # pdfium RGB verir; Paddle cv2 düzeninde (BGR) bekler.
+        array = array[:, :, 2::-1]
+    return np.ascontiguousarray(array)
+
+
+def predict_pages(document: Any, page_count: int, first_page: int, window: int, started: float) -> tuple[list[dict[str, Any]], int | None]:
+    """Sayfa penceresini işler; bütçe dolduğunda kalan ilk sayfayı bildirir.
+
+    Kilit pencerenin tamamı için BİR kez alınır: pencere kısa olduğundan bu
+    diğer belgeleri uzun süre bekletmez, sayfa başına yeniden kilitlenmek ise
+    dilimin ortasında uzun bir bekleme riski yaratır.
+    """
+    if not _predict_lock.acquire(timeout=LOCK_WAIT_SECONDS):
+        raise HTTPException(status_code=503, detail="OCR çıkarımı başka bir belgeyle meşgul; iş kuyrukta kalmalı")
+    pages: list[dict[str, Any]] = []
+    try:
+        for offset in range(window):
+            number = first_page + offset
+            if number > page_count:
+                break
+            image = render_pdf_page(document, number)
+            predictions = list(engine().predict(image))
+            page = page_from_result(predictions[0], number) if predictions else {
+                "pageNumber": number, "width": 0, "height": 0, "rawText": "",
+                "fullText": "", "averageConfidence": 0.0, "words": [],
+            }
+            page["height"], page["width"] = int(image.shape[0]), int(image.shape[1])
+            pages.append(page)
+            # Bütçe denetimi sayfa BİTTİKTEN sonra yapılır: yarım sayfa
+            # sonucu yoktur ve her istek en az bir sayfa ilerlemek zorundadır,
+            # aksi halde iş hiç ilerlemeden sonsuza dek yeniden kuyruğa girer.
+            if time.perf_counter() - started >= REQUEST_BUDGET_SECONDS:
+                break
+    finally:
+        _predict_lock.release()
+    served_to = first_page + len(pages) - 1
+    return pages, (served_to + 1 if served_to < page_count else None)
 
 
 def _verified_copy(reference: OcrObjectRequest, body: Any, destination: str) -> None:
@@ -320,42 +476,85 @@ def run_ocr(reference: OcrObjectRequest) -> dict[str, Any]:
     havuzunda koşar; sağlık ucu her zaman yanıt verir, çıkarım ise aşağıdaki
     kilitle tek uçuşa sıralanır (Paddle öngörücüsü iş parçacığı güvenli değildir
     ve eşzamanlı iki çıkarım CPU'yu ezip ikisini de zaman aşımına sürükler).
+
+    İş birimi belgenin tamamı değil bir SAYFA DİLİMİdir: yanıt işlenen aralığı
+    ve varsa kalan ilk sayfayı (`nextPage`) bildirir. Çağıran dilimleri
+    sırayla ister; hiçbir istek istemcinin tavanını aşacak kadar uzun sürmez.
     """
     document_profile = parse_profile(reference.profile)
     if reference.mediaType not in ALLOWED_TYPES:
         raise HTTPException(status_code=415, detail="Desteklenmeyen dosya türü")
     suffix = {"application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png", "image/tiff": ".tiff"}[reference.mediaType]
     started = time.perf_counter()
-    source_path: str | None = None
-    generated_path: str | None = None
+    base_model = os.getenv("PADDLEOCR_VERSION", "PP-OCRv5")
+    with single_flight(reference.documentId):
+        source_path = cached_original(reference, suffix)
+        if reference.mediaType == "application/pdf":
+            pages, next_page, page_count = ocr_pdf_window(reference, source_path, started)
+            return {
+                "engine": "PaddleOCR", "model": base_model,
+                "durationMs": int((time.perf_counter() - started) * 1000),
+                "documentId": reference.documentId,
+                "preprocessing": {"enhanced": False, "renderDpi": PDF_RENDER_DPI},
+                "profileVersion": document_profile.get("profileVersion"),
+                "vocabularyVersion": document_profile.get("vocabularyVersion"),
+                "accessDerivative": None,
+                "pageCount": page_count,
+                "pageFrom": reference.pageFrom,
+                "pageTo": reference.pageFrom + len(pages) - 1 if pages else reference.pageFrom - 1,
+                "nextPage": next_page,
+                "pages": pages, "fields": extract_fields(pages, document_profile),
+            }
+
+        generated_path: str | None = None
+        try:
+            processing_path, enhanced, image_width, image_height, quality, generated_path = prepare_image(source_path, reference.mediaType)
+            # `predict` üreteçtir; asıl hesap yineleme sırasında koşar. Kilit bu
+            # yüzden yalnız çağrıyı değil, tüketimi de kapsar.
+            if not _predict_lock.acquire(timeout=LOCK_WAIT_SECONDS):
+                raise HTTPException(status_code=503, detail="OCR çıkarımı başka bir belgeyle meşgul; iş kuyrukta kalmalı")
+            try:
+                predictions = list(engine().predict(processing_path))
+            finally:
+                _predict_lock.release()
+            pages = [page_from_result(item, index + 1) for index, item in enumerate(predictions)]
+            if len(pages) == 1 and image_width and image_height:
+                pages[0]["width"] = image_width
+                pages[0]["height"] = image_height
+            return {
+                "engine": "PaddleOCR",
+                "model": f"{base_model}+clahe-auto" if enhanced else base_model,
+                "durationMs": int((time.perf_counter() - started) * 1000),
+                "documentId": reference.documentId,
+                "preprocessing": {"enhanced": enhanced, **quality},
+                "profileVersion": document_profile.get("profileVersion"),
+                "vocabularyVersion": document_profile.get("vocabularyVersion"),
+                "accessDerivative": build_access_derivative(source_path, reference.mediaType),
+                # Görüntü tek sayfadır: dilimleme yoktur, kalan sayfa yoktur.
+                "pageCount": len(pages) or 1, "pageFrom": 1,
+                "pageTo": len(pages) or 1, "nextPage": None,
+                "pages": pages, "fields": extract_fields(pages, document_profile),
+            }
+        finally:
+            if generated_path:
+                Path(generated_path).unlink(missing_ok=True)
+
+
+def ocr_pdf_window(reference: OcrObjectRequest, source_path: str, started: float) -> tuple[list[dict[str, Any]], int | None, int]:
+    """PDF'in istenen sayfa dilimini işler ve (sayfalar, kalan ilk sayfa, toplam) döner."""
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temporary:
-            source_path = temporary.name
-        download_original(reference, source_path)
-        processing_path, enhanced, image_width, image_height, quality, generated_path = prepare_image(source_path, reference.mediaType)
-        # `predict` üreteçtir; asıl hesap yineleme sırasında koşar. Kilit bu
-        # yüzden yalnız çağrıyı değil, tüketimi de kapsar.
-        with _predict_lock:
-            predictions = list(engine().predict(processing_path))
-        pages = [page_from_result(item, index + 1) for index, item in enumerate(predictions)]
-        if len(pages) == 1 and image_width and image_height:
-            pages[0]["width"] = image_width
-            pages[0]["height"] = image_height
-        fields = extract_fields(pages, document_profile)
-        base_model = os.getenv("PADDLEOCR_VERSION", "PP-OCRv5")
-        model = f"{base_model}+clahe-auto" if enhanced else base_model
-        return {
-            "engine": "PaddleOCR", "model": model,
-            "durationMs": int((time.perf_counter() - started) * 1000),
-            "documentId": reference.documentId,
-            "preprocessing": {"enhanced": enhanced, **quality},
-            "profileVersion": document_profile.get("profileVersion"),
-            "vocabularyVersion": document_profile.get("vocabularyVersion"),
-            "accessDerivative": build_access_derivative(source_path, reference.mediaType),
-            "pages": pages, "fields": fields,
-        }
+        import pypdfium2
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail="pypdfium2 kurulmamış; PDF sayfası işlenemez") from exc
+    document = pypdfium2.PdfDocument(source_path)
+    try:
+        page_count = len(document)
+        if page_count < 1:
+            raise HTTPException(status_code=422, detail="Belgede işlenebilir sayfa yok")
+        if reference.pageFrom > page_count:
+            raise HTTPException(status_code=400, detail=f"İstenen sayfa {reference.pageFrom}, belge {page_count} sayfa")
+        window = min(reference.maxPages or MAX_PAGES_PER_REQUEST, MAX_PAGES_PER_REQUEST)
+        pages, next_page = predict_pages(document, page_count, reference.pageFrom, window, started)
+        return pages, next_page, page_count
     finally:
-        if generated_path:
-            Path(generated_path).unlink(missing_ok=True)
-        if source_path:
-            Path(source_path).unlink(missing_ok=True)
+        document.close()

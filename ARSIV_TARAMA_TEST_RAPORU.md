@@ -1,0 +1,291 @@
+# Gerçek Arşiv Tarama Testi — `D:\Arşiv` (14.08.2026)
+
+Kapsam: `D:\Arşiv` altındaki 8 PDF'in ölçülmesi, yerel hattın gerçek sayfalarla
+denenmesi ve "hâlâ hata alıyorum" şikâyetinin kök sebebinin bulunması.
+
+## 1. Arşivin gerçek ölçüsü
+
+| Dosya | Sayfa | Boyut | Metin katmanı | 150 dpi sayfa | Gömülü çözünürlük |
+|---|---:|---:|---|---:|---:|
+| Encümen Asıl / 1975 - 1 - 600 | 623 | 389,2 MB | var, **çöp** | 2,2 MP | ~150 dpi |
+| Encümen Asıl / 2021 1 - 75 | 459 | 241,7 MB | var, bozuk | 2,2 MP | ~200 dpi |
+| Encümen Asıl / 2021 1580 - 1635 | 397 | 71,1 MB | var, bozuk | 2,2 MP | ~200 dpi |
+| Encümen Suret / 1983 | 1640 | 909,3 MB | var, **çöp** | 2,2 MP | ~305 dpi |
+| Encümen Suret / 2019 1 - 1632 | 1646 | 303,8 MB | var, bozuk | 2,2 MP | ~200 dpi |
+| Encümen Suret / 2020 1 - 1716 | 1749 | 863,4 MB | var, bozuk | 2,2 MP | ~200 dpi |
+| Meclis / 1972 | 337 | 221,1 MB | çoğu sayfa **boş** | 1,2–2,1 MP | ~150 dpi |
+| Meclis / 2021 1 - 30 | 178 | 83,9 MB | var, **iyi** | 2,2 MP | ~200 dpi |
+| **Toplam** | **7.029** | **3,01 GiB** | | | |
+
+Hiçbiri şifreli değil, hiçbiri boyut (2 GiB) veya sayfa (2.000) sınırını aşmıyor.
+Sayfa megapikselleri 100 MP sınırının çok altında. Yani **kabul sınırları sorun değil.**
+
+Metin katmanı örnekleri (aynı belge, iki kaynak):
+
+- Gömülü katman (1983): `B•1llut1'1; 26.?.J.91J \uiJll1 _.._ •znleli F•ltleft "Uftrlllllllt•`
+- PaddleOCR (aynı sayfa): `Başkanlığın 24.5.1983 tarihli encümen'e havaleli, Muhasebe Müdürlüğünden verilen ayni tarihli yazı okundu:`
+
+Sonuç: gömülü metin katmanı tarihsel evrakta kullanılamaz, **OCR gereklidir ve
+kalitesi iyidir** (ölçülen ortalama güven %87–98).
+
+## 2. Kök sebep: OCR 120 saniye tavanı ile ~65 sn/sayfa maliyeti
+
+Servisin kendi ayarlarıyla (`services/ocr/app/main.py` `engine()` birebir) ölçüm,
+ısınmış süreçte, Windows CPU:
+
+| Örnek | Sayfa | Süre | Sayfa başı | Satır | Ortalama güven |
+|---|---:|---:|---:|---:|---:|
+| 1983 Encümen suret | 1 | 54,8 sn | 54,8 sn | 38 | %89,8 |
+| 1975 Encümen asıl | 1 | 75,1 sn | 75,1 sn | 101 | %87,2 |
+| 2021 Encümen asıl | 1 | 62,2 sn | 62,2 sn | 49 | %98,2 |
+| 2021 Meclis | 1 | 52,3 sn | 52,3 sn | 41 | %94,9 |
+| 1983, çok sayfalı | 3 | 194,2 sn | 64,7 sn | 182 | %87,1 |
+
+Maliyet sayfa sayısıyla doğrusal: **~65 sn/sayfa.**
+`app/api/jobs/process/route.ts:228` OCR isteğine `AbortSignal.timeout(120_000)`
+koyuyor. Bu tavan **1,8 sayfaya** karşılık geliyor: pratikte tek sayfadan fazlası
+hiç bitmiyor. Karşılaştırma için içerik taraması ve türev üretimi 10 dakika
+alıyor (`lib/content-scan.ts:4`, `lib/document-render.ts:17`); tavanı düşük olan
+tek adım, zinciri en pahalı adımdır.
+
+Aynı hızla tüm arşiv: 7.029 sayfa × 65 sn ≈ **127 saat** (tek uçuş, tek makine).
+Dosya başına: 1983 → 29,6 sa, 2019 → 29,7 sa, 2020 → 31,6 sa, 1975 → 11,2 sa.
+
+### Kullanıcının aldığı hata, veritabanındaki kaydıyla
+
+`processing_jobs` tablosunda, 12:21'de yüklenen 389 MB'lık 1975 dosyası için:
+
+```
+document_id: 4c9bc7c6-9aa5-4729-adcd-228b296222e4  (1975 - 1 - 600 Encümen Asıl.pdf)
+status: queued   attempt: 1/3
+error_message: OCR servisi zaman aşımına uğradı; iş kuyrukta kaldı ve yeniden denenecek.
+last_attempt_at: 2026-08-14 12:22:26
+```
+
+Yükleme, karantina, tarama ve terfi **başarılı** (oturum `ACCEPTED`, asıl nesne
+`ARCHIVE_FILES` içinde, 408.081.441 bayt). Zincir yalnız OCR'da kopuyor.
+
+## 3. Zaman aşımı servisi durdurmuyor — kuyruk zehirleniyor
+
+Bu, tavanın kendisinden daha ağır bir sorun.
+
+Uygulama 120 sn'de vazgeçtiğinde OCR servisi işi bırakmıyor: `run_ocr` senkron
+uçtur, çıkarım `_predict_lock` altında sürer ve HTTP isteğinin düşmesi çıkarımı
+iptal etmez. Terk edilen 623 sayfalık koşu kilidi **saatlerce** tutar.
+
+Ölçülen kanıt (kullanıcının 11:49'da başlattığı OCR süreci, PID 27576):
+
+- **4.381 saniye CPU** ve artmaya devam ediyor — servis, uygulamanın çoktan
+  vazgeçtiği işi hâlâ işliyordu.
+- `%TEMP%` içinde aynı dosyanın **4 ayrı 389,2 MB kopyası** (14:33, 14:37, 14:41,
+  15:22) — her deneme aslın tamamını diske indiriyor ve `finally` bloğu ancak
+  çıkarım dönerse siliyor. **Toplam 1.557 MB sızıntı.**
+- Ben **tek sayfalık** bir evrak yüklediğimde (doğrudan ölçümde 62 sn süren aynı
+  sayfa) uygulama yine 120,1 sn'de `503` verdi: iş, terk edilmiş koşunun
+  arkasında kilidi bekliyordu.
+- Servisi yeniden başlattıktan sonra **aynı belge 52,1 saniyede tamamlandı.**
+
+Yani: bir kez toplu dosya denendiğinde, OCR kuyruğu **servis yeniden başlatılana
+kadar her belge için** bozuk kalıyor. Kullanıcının "hâlâ hata alıyorum"
+gözlemi tam olarak budur.
+
+Üretimde bunun karşılığı: OCR cron'u işi 3 kez dener; her deneme yüzlerce MB'ı
+yeniden indirir ve yeni bir çoklu saatlik çıkarım başlatır; tek uçuşlu kilit
+yüzünden kurumun tüm OCR kuyruğu durur.
+
+## 4. Bir dosya = yüzlerce ayrı karar (mimari uyuşmazlık)
+
+Metin katmanından tespit edilen karar başlığı sayısı:
+
+| Dosya | Sayfa | Tespit edilen karar başlığı |
+|---|---:|---:|
+| 2020 1 - 1716 Encümen Suret | 1749 | 1.252 |
+| 2019 1 - 1632 Encümen Suret | 1646 | 880 |
+| 1975 - 1 - 600 Encümen Asıl | 623 | 487 |
+| 1983 Encümen Suret | 1640 | 131 |
+| 2021 1 - 75 Encümen Asıl | 459 | 88 |
+| 2021 1 - 30 Meclis Kararı | 178 | 61 |
+
+(Eski dosyalarda tespit düşük çıkıyor çünkü gömülü metin katmanı bozuk; gerçek
+karar sayısı dosya adındaki aralıklarla uyumlu ve daha yüksek.)
+
+Uygulama modeli ise **1 yükleme = 1 `archive_documents` kaydı** (`lib/ingest-promotion.ts:292`);
+sayfa aralığına bölme adımı yok. Sonucu `planFields`
+(`app/api/jobs/process/route.ts:55`) belirliyor: tek değerli alanlarda
+**en yüksek güvenli tek aday** kazanıyor. 1.632 kararlı bir dosyada belge tarihi,
+belge türü ve müdürlük için tek bir değer seçilir; geri kalan 1.631 kararın
+değerleri sessizce düşer. Bu, hata vermeyen ama **yanlış veri üreten** yol —
+zaman aşımından daha tehlikelidir.
+
+## 5. Tek kararlık evrakla uçtan uca test: hat çalışıyor
+
+Kontrol testi olarak "2021 1580 - 1635 Encümen Asıl" dosyasının 1. sayfası tek
+sayfalık PDF olarak gerçek API'den geçirildi (`/api/uploads` → parça → complete →
+`/api/admin/scan` → `/api/jobs/process`):
+
+```
+processed: true   pages: 1   durationMs: 52087
+profileCode: ENCUMEN_KARARI   fieldValues: 6   suggestedRelations: 1
+accessDerivative: false
+```
+
+Doğru çıkanlar:
+
+| Alan | Değer | Güven |
+|---|---|---:|
+| document_date | 31.12.2021 | %99,74 |
+| unit | Emlak ve İstimlak Müdürlüğü | %99,74 |
+| ada | 152 | %97,71 |
+| parcel | 44 | %97,71 |
+
+Varlık ilişkisi `152 ada 44 parsel` (PARCEL, PROVISIONAL) kuruldu, belge `review`
+durumuna alındı, sayfa ortalama güveni %98,16. Yükleme→karantina→tarama→terfi→OCR
+zinciri, girdi **tek bir karar** olduğunda uçtan uca çalışıyor.
+
+## 6. Aynı testte ortaya çıkan alan çıkarma hataları
+
+1. **Karar numarası hiç yakalanmıyor.** OCR `SAYI: 1635` ifadesini doğru okudu
+   ama `ENCUMEN_KARARI` profilinde karar numarası alanı **yok** (profil alanları:
+   document_type, unit, document_date, neighborhood, ada, parcel, addressee).
+   Encümen arşivinde memurun ilk aradığı bilgi budur; ayrıca toplu dosyayı
+   kararlara bölmenin de anahtarı odur.
+
+2. **Mahalle yanlış değer üretti:** `İn İlimiz Merkez Bahtiyarbostan`
+   (doğrusu `Bahtiyarbostan`). `MAHALLE` deseni `MAHALLESİ`den önceki bütün
+   büyük harf dizisini yutuyor. Alan `risk=LOW` olduğu için personel
+   doğrulaması zorunlu değil — yanlış mahalle sessizce arşive girer.
+
+3. **Tarih deseni tarihsel biçimleri kaçırıyor.** `TARIH` yalnız sıfır dolgulu
+   `GG.AA.YYYY` eşliyor:
+
+   | Biçim | Kaynak | Sonuç |
+   |---|---|---|
+   | `24.5.1983` | 1983 Encümen suret | kaçırdı |
+   | `26.7.1983` | 1983 Encümen suret | kaçırdı |
+   | `11/3/1975` | 1975 Encümen asıl | kaçırdı |
+   | `14/3/975` | 1975 Encümen asıl | kaçırdı |
+   | `31/12/2021` | 2021 Encümen asıl | eşleşti |
+
+   Yani 1972/1975/1983 külliyatında belge tarihi çıkarımı **%0**.
+
+4. **Çoklu ada/parsel kaçıyor.** `152 ada 42-43-44 nolu parseller` hiç
+   eşleşmiyor; test sayfasında yalnız `152/44` yakalandı, oysa metin 42-43-44 ve
+   -A-/-B-/-C- parsellerini de içeriyor. Tevhit/ifraz kararlarının tipik
+   biçimi bu. Desen satır bazlı çalıştığı için satır sonunda bölünen
+   `152 ada` / `44 nolu parselden` çifti de kaybediliyor.
+
+5. **Belge türü yanlış etiketlendi:** "Encümen **Asıl**" dosyasından gelen sayfa
+   `Encümen karar sureti` olarak işaretlendi. Asıl/suret ayrımı mevcut tespit
+   işaretleriyle yapılamıyor.
+
+6. **PDF'lerde görüntü iyileştirme hiç uygulanmıyor.** `prepare_image`
+   (`services/ocr/app/main.py:193`) `content_type.startswith("image/")` değilse
+   hemen dönüyor; CLAHE + keskinleştirme yalnız JPEG/PNG yüklemelerinde
+   çalışıyor. Soluk 1975/1983 taramaları bu iyileştirmenin asıl hedefiydi.
+
+7. **PDF için görüntüleme türevi üretilmiyor.** `build_access_derivative` de
+   yalnız görüntülerde çalışıyor (`accessDerivative: false`), `document-render`
+   servisi ise yerelde hiç başlatılmıyor (`scripts/dev-stack.mjs` yalnız OCR +
+   tarama taklidini kaldırıyor) ve `.dev.vars` içinde
+   `DOCUMENT_RENDER_SERVICE_URL`, `DOCUMENT_RENDER_SERVICE_TOKEN`,
+   `DOCUMENT_RENDER_IMAGE_DIGEST` yok — uygulama açılışta bunu uyarı olarak
+   yazıyor. Sonuç: yerelde PDF belgenin önizlemesi hiç oluşmaz.
+
+## 7. Uygulanan düzeltmeler (1 ve 2)
+
+İlk iki madde uygulandı ve gerçek arşiv dosyasıyla doğrulandı; ayrıntı §9'da.
+
+1. **OCR iş birimi sayfa dilimine indi.** Servis artık belgenin tamamını değil
+   sınırlı bir sayfa penceresini işler ve kalan ilk sayfayı `nextPage` ile
+   bildirir; uygulama ilerlemeyi `processing_jobs.next_page` / `page_count`
+   içinde taşır ve iş kaldığı yerden sürer. Sayfa numaraları belge genelinde
+   mutlaktır. Tavan 120 sn'den 5 dakikaya çıkarıldı (içerik taraması ve türev
+   üretimiyle aynı mertebe, Cron diliminin 8 dakikalık bütçesinin içinde).
+2. **Terk edilen çıkarım artık kuyruğu kilitlemiyor.** Üç ayrı sınır:
+   servis kendi bütçesini (`OCR_REQUEST_BUDGET_SECONDS`, öntanımlı 240 sn)
+   istemci tavanından kısa tutup elindeki sayfayı bitirince döner; aynı belge
+   için ikinci çıkarım 409 ile reddedilir (uygulama bunu arıza saymaz, deneme
+   bütçesini harcamaz); kilit başka belgeyle meşgulse istek hızlı 503 verir ve
+   istemcinin bütçesini boş beklemeyle tüketmez. Asıl dosya artık SHA-256 ile
+   adlandırılan, bayt sınırlı bir önbellekten okunur: dilimler aynı belgeyi
+   yeniden indirmez.
+
+## 8. Kalan öneriler (öncelik sırasıyla)
+
+1. **Toplu tarama dosyaları için ayırma adımı.** Karar başlığı + karar numarası
+   ile sayfa aralıklarına böl, her karar için ayrı belge kaydı üret. Bunun
+   önkoşulu karar numarası alanının profile eklenmesidir.
+4. **Desen düzeltmeleri:** tek haneli gün/ay ve 3 haneli yıl için tarih deseni;
+   mahalle adını kontrollü sözlükle eşleyip en fazla 1–2 kelime geriye bakma;
+   çoklu parsel listelerini (`42-43-44`) ve satır sınırını aşan ada/parsel
+   çiftlerini yakalama.
+5. **PDF sayfalarını görüntüye render edip CLAHE yolundan geçir**, ya da
+   iyileştirmeyi PDF sayfaları için de uygula.
+6. **Yerel yığına `document-render`'ı ekle** ve eksik `DOCUMENT_RENDER_*`
+   değişkenlerini `.dev.vars`'a koy; yoksa PDF önizleme yerelde hiç test edilemez.
+
+## 9. Düzeltmelerin gerçek dosyada doğrulanması
+
+Doğrulama, eskiden **her denemede zaman aşımına düşen** dosyayla yapıldı:
+`1975 - 1 - 600 Encümen Asıl.pdf`, 408.081.441 bayt, 623 sayfa.
+
+| Dilim | Yanıt | Süre | İşlenen sayfa | `nextPage` | Alan | Profil |
+|---|---|---:|---|---:|---:|---|
+| 1 | `200 processed:true completed:false` | 248,2 sn | 1–5 | 6 | 2 | TASNIF_BEKLIYOR |
+| 2 | `200 processed:true completed:false` | 260,7 sn | 6–10 | 11 | 6 | ENCUMEN_KARARI |
+| 3 | `200 processed:true completed:false` | 292,6 sn | 11–16 | 17 | 2 | ENCUMEN_KARARI |
+
+Doğrulanan davranışlar:
+
+- Belgenin sayfa sayısı (**623**) ilk dilimde doğru bildirildi ve işte saklandı.
+- İş her dilimden sonra `queued` ve `attempt = 0` kaldı: ilerleyen dilim deneme
+  bütçesini tüketmiyor.
+- Devam dilimi önceki sayfaları **silmedi**: `ocr_pages` içinde 1–16 arası 16
+  sayfa birikti (sayfa metinleri 1.107–2.129 karakter, ortalama güven
+  %83,8–%94,7).
+- Belge yarıda `review` durumuna **geçmedi**; hâlâ `queued`. Eksik metinli bir
+  belge doğrulamaya açılmıyor.
+- Çok değerli alanlar dilimler arasında birikti ve `value_index` bitişik kaldı
+  (ada/parsel: 932/64 → sayfa 3, 288/2 ve 286/45 → sayfa 7).
+- Belge türü ikinci dilimde tespit edildi ve profil TASNIF_BEKLIYOR'dan
+  ENCUMEN_KARARI'ya geçti.
+- Asıl dosya önbellekte **tek kopya** (389,2 MB): dilimler dosyayı yeniden
+  indirmiyor. Düzeltmeden önce aynı dosyanın dört kopyası birikmişti.
+- Dilim sürerken gelen ikinci istek `200 processed:false` ve
+  "Belgenin OCR işlemi hâlihazırda sürüyor." mesajıyla döndü; iş bozulmadı.
+
+**Hız değişmedi, davranış değişti.** Sayfa başına maliyet hâlâ ~50 sn: 623
+sayfalık bu dosya toplam ~8,6 saat sürekli işlem demektir. Düzeltme işi
+hızlandırmaz; **başarısız olmak yerine ilerlemesini** sağlar. Arşivin tamamı
+(7.029 sayfa) bu hızda ~98 saattir ve bu, tek makine/tek uçuş sınırının
+sonucudur — kısaltmak için ayrı bir karar gerekir (daha fazla çalışan, GPU veya
+metin katmanı iyi olan modern dosyalarda OCR'ı atlamak).
+
+Regresyon koruması: `tests/ocr-page-window.test.ts` (6 davranış testi, gerçek
+rota + gerçek şema + SQLite) ve `services/ocr/tests/test_page_window.py`
+(10 test: pencere sınırı, bütçe, mutlak sayfa numarası, tek uçuş koruması).
+`npm run verify` 440 testle temiz geçiyor.
+
+## 10. Test sırasında ortamda yapılanlar
+
+- Tıkanmış OCR süreci durduruldu; servis düzeltmelerden sonra yeni kodla,
+  ısınmış olarak yeniden başlatıldı (`:8090`, `modelReady: true`). Kullanıcının
+  `:3000` üzerindeki geliştirme sunucusuna ve `:8091` tarama taklidine
+  dokunulmadı. `npm run dev:hizmetler` yığınının kendi OCR alt süreci ölü;
+  yığını Ctrl+C ile kapatıp yeniden başlatmak temiz durumu geri getirir.
+- Yerel geliştirme şeması 28'den **29**'a göç etti (yeni `next_page` /
+  `page_count` kolonları). Göç, yarım kalmış OCR işlerini sıfırlar.
+- Yerel geliştirme veritabanına bir test belgesi eklendi:
+  `ARS-2026-C42F7DFC` / `ornek-2021-encumen.pdf` (`review` durumunda, arayüzden
+  incelenebilir).
+- Eski koddan kalan, `%TEMP%` içindeki 1.557 MB'lık sızmış geçici PDF
+  **silinmedi** (yeni kod artık bunları üretmiyor); temizlik için:
+
+  ```bash
+  Get-ChildItem $env:TEMP -Filter "tmp*.pdf" | Where-Object Length -gt 100MB | Remove-Item
+  ```
+
+- 1975 belgesinin işi **16/623 sayfada, `queued`** durumda duruyor ve kaldığı
+  yerden sürecek. Yerelde OCR cron'u ateşlenmediği için kendiliğinden
+  ilerlemez; `POST /api/jobs/process?documentId=…` her çağrıldığında bir dilim
+  daha işler.

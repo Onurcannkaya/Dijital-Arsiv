@@ -52,6 +52,19 @@ export type OcrServiceResult = {
   profileVersion: string | null;
   vocabularyVersion: string | null;
   accessDerivative: AccessDerivative | null;
+  /**
+   * Sayfa dilimi muhasebesi.
+   *
+   * Servis belgenin tamamını değil sınırlı bir sayfa penceresini işler
+   * (ölçüm: sayfa başına ~65 sn; 623 sayfalık dosya tek istekte 11 saat).
+   * `pageCount` belgenin toplamı, `nextPage` işlenecek ilk sayfadır; `null`
+   * ise belge bitmiştir. Sayfa numaraları belge genelinde MUTLAKTIR: çağıran
+   * dilimleri birleştirirken yeniden numaralandırmaz.
+   */
+  pageCount: number;
+  pageFrom: number;
+  pageTo: number;
+  nextPage: number | null;
   pages: OcrPage[];
   fields: ExtractedField[];
 };
@@ -138,6 +151,8 @@ export function parseOcrServiceResult(value: unknown): OcrServiceResult {
     };
   });
 
+  const window = parsePageWindow(data, pages);
+
   return {
     engine: data.engine,
     model: data.model,
@@ -145,7 +160,50 @@ export function parseOcrServiceResult(value: unknown): OcrServiceResult {
     profileVersion: typeof data.profileVersion === "string" ? data.profileVersion : null,
     vocabularyVersion: typeof data.vocabularyVersion === "string" ? data.vocabularyVersion : null,
     accessDerivative: parseAccessDerivative(data.accessDerivative),
+    ...window,
     pages,
     fields,
   };
+}
+
+function isCount(value: unknown): value is number {
+  return isNumber(value) && Number.isInteger(value) && value >= 1;
+}
+
+/**
+ * Sayfa dilimi muhasebesini DOĞRULAR; eksikse varsayılan üretmez.
+ *
+ * Gevşek bir çözümleme burada veri kaybı demektir: `nextPage` düşen bir yanıt,
+ * 1.749 sayfalık bir belgeyi ilk sekiz sayfasından sonra "tamamlandı" saydırır
+ * ve kalan sayfalar hiç okunmadan belge incelemeye açılır. Bu yüzden dilim
+ * sınırları ile dönen sayfa sayısı birbirini tutmak zorundadır.
+ */
+function parsePageWindow(data: Record<string, unknown>, pages: OcrPage[]) {
+  if (!isCount(data.pageCount) || !isCount(data.pageFrom)) {
+    throw new Error("OCR sayfa dilimi bilgisi eksik (pageCount / pageFrom).");
+  }
+  const pageCount = data.pageCount;
+  const pageFrom = data.pageFrom;
+  // Hiç sayfa işlenemediyse `pageTo` bilerek `pageFrom - 1` olur.
+  if (!isNumber(data.pageTo) || !Number.isInteger(data.pageTo) || data.pageTo !== pageFrom + pages.length - 1) {
+    throw new Error("OCR dilim sınırı dönen sayfa sayısıyla uyuşmuyor.");
+  }
+  const pageTo = data.pageTo;
+  if (pageTo > pageCount) throw new Error("OCR dilimi belgenin sayfa sayısını aşıyor.");
+  for (const page of pages) {
+    if (page.pageNumber < pageFrom || page.pageNumber > pageTo) {
+      throw new Error(`OCR sayfa numarası ${page.pageNumber} bildirilen dilimin dışında.`);
+    }
+  }
+  const nextPage = data.nextPage === null || data.nextPage === undefined ? null : data.nextPage;
+  if (nextPage === null) {
+    // Belge bitmediği hâlde "kalan sayfa yok" demek, okunmamış sayfaları
+    // sessizce düşürür; bu hata gizlenmemelidir.
+    if (pageTo < pageCount) throw new Error("OCR kalan sayfaları bildirmedi; dilim eksik tamamlandı.");
+    return { pageCount, pageFrom, pageTo, nextPage: null };
+  }
+  if (!isCount(nextPage) || nextPage !== pageTo + 1 || nextPage > pageCount) {
+    throw new Error("OCR kalan ilk sayfa değeri geçersiz.");
+  }
+  return { pageCount, pageFrom, pageTo, nextPage };
 }
