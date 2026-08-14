@@ -3,6 +3,7 @@
 import { CheckCircle2, Database, FileText, Fingerprint, LoaderCircle, Upload, X } from "lucide-react";
 import { DragEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { ACCEPTED_FILE_EXTENSIONS } from "../../lib/ingest-contract";
+import { uploadSecurely } from "./upload-core";
 
 export type StoredDocument = {
   id: string;
@@ -43,12 +44,6 @@ type UnitOption = { code: string; label: string };
 const DEFAULT_TYPE_NAME = "Tasnif bekliyor";
 const DEFAULT_UNIT_LABEL = "Belirlenmedi";
 
-const PART_BYTES = 16 * 1024 * 1024;
-
-async function sha256Hex(blob: Blob) {
-  const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
 function formatBytes(bytes: number) {
   // 1 KB'ın altı bayt olarak gösterilir: boş bir dosya "1 KB" görünürse
   // kullanıcı içeriği varmış sanır.
@@ -119,45 +114,8 @@ export function UploadDialog({ open, onClose, onCreated }: UploadDialogProps) {
     try {
       const idempotencyKey = idempotencyRef.current ?? crypto.randomUUID();
       idempotencyRef.current = idempotencyKey;
-      setMessage("Güvenli yükleme oturumu hazırlanıyor…");
-      const opened = await fetch("/api/uploads", {
-        method: "POST",
-        headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
-        body: JSON.stringify({
-          originalName: file.name,
-          documentType,
-          unit,
-          byteSize: file.size,
-          mediaType: file.type || "application/octet-stream",
-        }),
-      });
-      const openedPayload = await opened.json() as { session?: { id: string; missingParts: number[]; expectedPartCount: number }; error?: string };
-      if (!opened.ok || !openedPayload.session) throw new Error(openedPayload.error || "Yükleme oturumu açılamadı.");
-      const session = openedPayload.session;
-      let uploaded = session.expectedPartCount - session.missingParts.length;
-      for (let offset = 0; offset < session.missingParts.length; offset += 4) {
-        const group = session.missingParts.slice(offset, offset + 4);
-        await Promise.all(group.map(async (partNumber) => {
-          const singlePart = session.expectedPartCount === 1;
-          const start = singlePart ? 0 : (partNumber - 1) * PART_BYTES;
-          const end = singlePart ? file.size : Math.min(start + PART_BYTES, file.size);
-          const part = file.slice(start, end);
-          const checksum = await sha256Hex(part);
-          const response = await fetch(`/api/uploads/${session.id}/parts`, {
-            method: "PUT",
-            headers: { "x-part-number": String(partNumber), "x-content-sha256": checksum },
-            body: part,
-          });
-          const payload = await response.json() as { error?: string };
-          if (!response.ok) throw new Error(payload.error || `${partNumber}. parça yüklenemedi.`);
-          uploaded += 1;
-          setMessage(`${uploaded}/${session.expectedPartCount} parça doğrulandı…`);
-        }));
-      }
-      setMessage("Parçalar tamamlandı; nesne karantina alanına aktarılıyor…");
-      const completed = await fetch(`/api/uploads/${session.id}/complete`, { method: "POST" });
-      const completedPayload = await completed.json() as { session?: { status: string }; error?: string };
-      if (!completed.ok || !completedPayload.session) throw new Error(completedPayload.error || "Yükleme tamamlanamadı.");
+      // Zincir ortak modüldedir; mobil tarama akışıyla aynı yol (§4.4).
+      await uploadSecurely({ file, documentType, unit, idempotencyKey, onProgress: setMessage });
       setPhase("done");
       setMessage("Belge karantinaya alındı; tür ve zararlı içerik taraması bekleniyor.");
       // Belge kaydı F1.5 terfisinde oluşur; karantina aşamasında listeye sahte bir

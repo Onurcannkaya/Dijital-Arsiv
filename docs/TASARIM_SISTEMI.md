@@ -159,6 +159,39 @@ Anahtar kelimeler altın (`--gold-700`), değerler birincil metin, ikisi de mono
 `1b`: tek görev odaklı; sol 430px alan akışı, sağda sekmeli belge + kanıt kırpması + soy zinciri.
 Bu düzenlerde teknik gösterim (yüzde, kanıt koordinatı `[165,188,332,206]`, model sürümü, `SHA-256`, profil sürümü, ADR referansı) **açık** kalır; personel düzeninde kapalı.
 
+### 4.4 Mobil tarama (`3a`) — saha yakalama
+
+**Amaç:** sahadaki memur telefon kamerasıyla tek sayfalık belgeyi güvenli
+kabul hattına bırakır. **Doğrulama ve arşivleme masaüstünde kalır** — küçük
+ekranda alan kanıtı karşılaştırmak yanlış onay üretir; akış bunu açıkça
+söyler ("doğrulama ve arşivleme masaüstünde yapılır").
+
+**Yapı:** tam ekran, tek görev, tek sütun (≤520px), dört adım aynı ekranda
+akar: **Çek → Kontrol et → Tanımla → Yükle.**
+
+1. **Çek:** büyük altın kesikli hedef "Belgeyi çek" (arka kamera,
+   `capture=environment`); ikincil yol "Galeriden seç" (kamera izni yoksa da
+   akış çalışır). Dokunma hedefleri ≥44px (§7).
+2. **Kontrol et:** fotoğraf tam genişlik önizlenir; istemci kalite denetimi
+   (`lib/scan-quality.ts`) düşük çözünürlüğü, karanlığı ve parlamayı ayrı
+   ayrı adlandırır. Uyarı **altın karttır ve engel değildir**: tek nüsha kötü
+   ışıkta da çekilmek zorunda kalabilir, OCR ön işleme kurtarmayı dener.
+   Dil §6 kuralına uyar — ölçüm değil eylem cümlesi ("ışığı artırıp yeniden
+   çekin"). "Yeniden çek" her an açıktır.
+3. **Tanımla:** belge türü + ilgili müdürlük (kontrollü listeler); tür
+   bilinmiyorsa "Tasnif bekliyor" dürüst varsayılandır.
+4. **Yükle:** "Güvenli yükle" masaüstüyle ORTAK kabul zincirinden geçer
+   (`upload-core.ts`: oturum → SHA-256'lı parçalar → karantina). Sonuç dili
+   dürüsttür: "Belge karantinaya alındı… denetimden geçince Gelen Evrak'ta
+   görünecek" — henüz belge kaydı yoktur ve akış varmış gibi davranmaz.
+
+**Çok sayfa (bilinçli V1 sınırı):** mobil akış tek fotoğraf = tek JPEG'dir.
+Akış, çok sayfalı belge için tarayıcı + PDF yolunu gösterir. İstemcide çok
+fotoğraftan PDF birleştirme ayrı bir iş olarak değerlendirilebilir.
+
+**Giriş noktası:** liste başlığındaki "Belge tara" (kamera simgesi), yalnız
+dar ekranda (≤800px) görünür; geniş ekranda birincil yol yükleme diyaloğudur.
+
 ---
 
 ## 5. Durumlar
@@ -226,7 +259,11 @@ Bu düzenlerde teknik gösterim (yüzde, kanıt koordinatı `[165,188,332,206]`,
    anahtarını erişilir kılar; açık/kapalı durumu kişisel tarayıcı tercihidir.
    Doğrulayıcı ve görüntüleyici anahtarı hiç görmez — §6 eylem dili personel
    ekranında bozulmaz. Tam `1a`/`1b` yoğun düzenleri ayrı iş olarak açık.
-4. Mobil tarama akışının bu dille eşleşmesi (henüz tasarlanmadı).
+4. ~~Mobil tarama akışının bu dille eşleşmesi~~ — **tasarlandı ve kuruldu
+   (2026-08-14): §4.4.** Tek görevlik saha yakalama akışı (Çek → Kontrol et
+   → Tanımla → Yükle); kalite uyarıları eylem cümlesiyle ve engellemeden,
+   yükleme masaüstüyle ortak kabul zincirinden. V1 tek sayfa; çok sayfa
+   tarayıcı + PDF yoluna yönlendirilir. Doğrulama masaüstünde kalır.
 5. ~~Dosya planı ve saklama kuralı seçiminin isteneceği adım~~ — **karara
    bağlandı (2026-08-14): arşivleme anında, zorunlu.** "Doğrula ve arşivle"
    bir tasnif diyaloğu açar; dosya planı ve saklama kuralı kontrollü
@@ -333,8 +370,15 @@ Bu şartname depoya alındı ve **renk + tipografi katmanı** uygulandı
   sözlük kaynağında durur). Diyalog, saklama süresi dolmasının otomatik imha
   olmadığını da söyler (ADR-018).
 
-### Bekliyor — karar gerektiriyor
+- §4.4/§9.4 mobil tarama akışı kuruldu: dar ekranda "Belge tara" girişi tam
+  ekran tek görev akışını açar (kamera + galeri, kalite denetimi
+  `lib/scan-quality.ts`, tür/müdürlük, ortak kabul zinciri
+  `upload-core.ts`). Masaüstü yükleme diyaloğu da aynı ortak zinciri
+  kullanacak biçimde sadeleştirildi; `tests/f13-upload-route` iki yüzeyin de
+  ortak yolu kullandığını kaynak düzeyinde denetler.
 
-1. Şartnamenin açık kararlarından yalnız §9.4 (mobil tarama akışı) kaldı;
-   §9.1, §9.2, §9.3 ve §9.5 karara bağlandı ve uygulandı. §4.3 tam yoğun
-   düzenler (`1a`/`1b`) ayrı iş.
+### Bekliyor
+
+1. Şartnamenin bütün açık kararları (§9.1–§9.5) karara bağlandı ve
+   uygulandı. Kalan tek büyük parça §4.3 tam yoğun düzenler (`1a`/`1b`) —
+   ayrı iş; işlevsel çekirdeği (teknik görünüm) hazır.

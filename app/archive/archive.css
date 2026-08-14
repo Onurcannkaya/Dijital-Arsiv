@@ -372,3 +372,31 @@
 .archive-dialog>footer .approve{border:0;background:var(--navy-800);color:#fff}
 .archive-dialog>footer .approve:disabled{opacity:.55;cursor:not-allowed}
 .classification-line{display:block;margin-top:4px;font-size:12px;color:var(--ar-green)}
+
+/* Mobil tarama akışı (design.md §4.4). Tek görev, tek sütun; dokunma
+   hedefleri ≥44px (§7). "Belge tara" girişi yalnız dar ekranda görünür. */
+.heading-actions{display:flex;gap:9px}
+.scan-entry{display:none}
+@media(max-width:800px){.scan-entry{display:flex}}
+.mobile-scan{position:fixed;inset:0;z-index:70;display:flex;flex-direction:column;background:var(--ar-bg)}
+.mobile-scan>header{flex:none;height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:var(--ar-surface);border-bottom:1px solid var(--ar-border)}
+.mobile-scan>header span{display:flex;align-items:center;gap:9px;color:var(--navy-800)}
+.mobile-scan>header b{font-size:14px}
+.mobile-scan>header button{width:44px;height:44px;display:grid;place-items:center;border:0;background:none;color:var(--ar-muted)}
+.mobile-scan-body{flex:1;overflow:auto;padding:18px 16px 28px;display:flex;flex-direction:column;gap:12px;max-width:520px;margin:0 auto;width:100%}
+.scan-capture{min-height:96px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:2px dashed var(--gold-600);border-radius:12px;background:color-mix(in srgb,var(--gold-600) 7%,transparent);color:var(--ar-text);font-size:14px;font-weight:600}
+.scan-gallery{min-height:44px;display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--ar-border);border-radius:8px;background:var(--ar-surface-2);color:var(--ar-text);font-size:12.5px}
+.scan-preview{width:100%;border-radius:9px;border:1px solid var(--ar-border);background:#fff;box-shadow:0 6px 22px rgba(15,23,42,.14)}
+.scan-warning{display:flex;gap:9px;align-items:flex-start;margin:0;padding:10px 12px;border-radius:8px;background:color-mix(in srgb,var(--gold-600) 12%,transparent);border:1px solid var(--gold-600);color:var(--ar-text);font-size:12.5px;line-height:1.5}
+.scan-warning svg{flex:none;margin-top:1px;color:var(--gold-600)}
+.scan-retake{min-height:44px;display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--ar-border);border-radius:8px;background:var(--ar-surface-2);color:var(--ar-text);font-size:12.5px}
+.scan-fields{display:flex;flex-direction:column;gap:10px}
+.scan-fields label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:var(--ar-text)}
+.scan-fields select{min-height:44px;border:1px solid var(--ar-border);border-radius:8px;background:var(--ar-surface-2);color:var(--ar-text);padding:0 10px;font-size:13px}
+.scan-message{display:flex;gap:9px;align-items:flex-start;margin:0;padding:11px 12px;border-radius:8px;font-size:12.5px;line-height:1.5;background:var(--ar-blue-soft);color:var(--ar-blue)}
+.scan-message.done{background:var(--ar-green-soft);color:var(--ar-green)}
+.scan-message.error{background:var(--ar-red-soft);color:var(--ar-red)}
+.scan-submit{min-height:48px;display:flex;align-items:center;justify-content:center;gap:9px;border:0;border-radius:8px;background:var(--navy-800);color:#fff;font-size:14px;font-weight:600;box-shadow:0 2px 8px rgba(14,42,92,.18)}
+.scan-submit:disabled{opacity:.55}
+.scan-note{display:flex;gap:8px;align-items:flex-start;margin:0;color:var(--ar-muted);font-size:12px;line-height:1.55}
+.scan-note svg{flex:none;margin-top:2px}
