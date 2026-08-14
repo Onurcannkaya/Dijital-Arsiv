@@ -85,7 +85,36 @@ export async function GET(request: Request) {
     const principal = await authorizeRequest(request, bindings.DB, "document.upload", bindings.ARCHIVE_ADMIN_EMAILS);
     if (principal instanceof Response) return principal;
     const id = new URL(request.url).searchParams.get("id");
-    if (!id) return jsonError("Yükleme oturumu kimliği gereklidir.");
+    /*
+     * Kimliksiz istek, KENDİ yüklemelerinin son durumunu listeler. Belge
+     * kaydı ancak tarama + terfi sonrası doğar (F1.5); o ana kadar yükleme
+     * hiçbir listede görünmüyordu ve "belge karantinaya alındı" diyen memur
+     * sonrasında kaybolmuş bir dosyaya bakıyordu. Mükerrer ve ret gibi
+     * terminal sonuçlar da burada görünür — dosyanın NEDEN listeye
+     * girmediği söylenmeden yükleme akışı dürüst sayılmaz.
+     */
+    if (!id) {
+      const sessions = await bindings.DB.prepare(`SELECT id, original_name, requested_document_type,
+          status, duplicate_of_document_id, failure_code, created_at, updated_at
+        FROM upload_sessions WHERE user_id = ? AND status <> 'ACCEPTED'
+        ORDER BY updated_at DESC LIMIT 20`)
+        .bind(principal.email)
+        .all<{ id: string; original_name: string; requested_document_type: string; status: string;
+          duplicate_of_document_id: string | null; failure_code: string | null;
+          created_at: string; updated_at: string }>();
+      return Response.json({
+        sessions: sessions.results.map((row) => ({
+          id: row.id,
+          originalName: row.original_name,
+          documentType: row.requested_document_type,
+          status: row.status,
+          duplicateOfDocumentId: row.duplicate_of_document_id,
+          failureCode: row.failure_code,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        })),
+      });
+    }
     const storages = getIngestStorages(bindings);
     const session = await getUploadSession({
       db: bindings.DB,

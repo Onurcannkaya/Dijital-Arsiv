@@ -441,3 +441,16 @@ body.dense-review .brand{justify-content:center;padding:0}
 .quick-filters{display:inline-flex;gap:7px;margin-left:10px;flex-wrap:wrap;vertical-align:middle}
 .quick-filters code{font:11.5px "IBM Plex Mono",Consolas,monospace;padding:3px 8px;border:1px solid var(--border-base);border-radius:5px;background:var(--ar-surface-2);color:var(--ar-text)}
 .quick-filters code b{color:var(--gold-700,var(--gold-600));font-weight:600}
+
+/* Bekleyen yüklemeler şeridi: kabul hattındaki dosya kaybolmaz, aşaması ve
+   terminal sonucun nedeni görünür. */
+.pending-uploads{margin-bottom:16px}
+.pending-uploads ul{list-style:none;margin:0;padding:8px 20px 14px;display:flex;flex-direction:column;gap:6px}
+.pending-uploads li{display:flex;align-items:center;gap:12px;padding:9px 12px;border:1px solid var(--ar-border);border-radius:7px;background:var(--ar-surface-2);font-size:12.5px}
+.pending-uploads li b{font-size:12.5px}
+.pending-uploads li span{color:var(--ar-muted);flex:1}
+.pending-uploads li small{color:var(--ar-muted);font-size:12px;white-space:nowrap}
+.pending-uploads li.pending-quarantined,.pending-uploads li.pending-scanning,.pending-uploads li.pending-promoting{border-left:3px solid var(--amber-600)}
+.pending-uploads li.pending-duplicate{border-left:3px solid var(--gold-600)}
+.pending-uploads li.pending-rejected,.pending-uploads li.pending-failed{border-left:3px solid var(--ar-red)}
+.pending-uploads li button{height:30px;padding:0 10px;font-size:12px}

@@ -20,6 +20,18 @@ type DocumentRow = { id:string; referenceNo?:string; title:string; unit:string; 
 type CurrentUser = { email:string; displayName:string; role:string; roleLabel:string; unit:string; permissions:string[] };
 /** §3.10 hızlı sorgu: sunucunun sorgudan çıkardığı hedefli süzgeçler. */
 type QuickFilter = { key:string; label:string; value:string };
+/** Kabul hattında bekleyen (henüz belgeye dönüşmemiş) yükleme oturumu. */
+type PendingSession = { id:string; originalName:string; documentType:string; status:string;
+  duplicateOfDocumentId:string|null; failureCode:string|null; createdAt:string; updatedAt:string };
+
+/** Oturum durumunun memur dili; terminal sonuçlar nedeniyle birlikte okunur. */
+const sessionStatusLabels: Record<string,string> = {
+  CREATED:"Yükleme başlatıldı, dosya bekleniyor", UPLOADING:"Yükleme yarım kaldı",
+  QUARANTINED:"Tarama bekliyor", SCANNING:"Taranıyor",
+  VERIFIED:"Tarama temiz; kasa aktarımı sırada", PROMOTING:"Kasaya aktarılıyor",
+  REJECTED:"Reddedildi", DUPLICATE:"Mükerrer — bu belge zaten arşivde",
+  EXPIRED:"Süresi doldu; yeniden yükleyin", FAILED:"Başarısız",
+};
 type HealthChecks = Record<string,{ok:boolean}>;
 type Overview = {
   scope:string;
@@ -126,6 +138,34 @@ function List({rows,title,subtitle,open,onUpload,canUpload,onScan,query,onQuery,
   </section></>;
 }
 
+/**
+ * Kabul hattında bekleyen yüklemeler şeridi.
+ *
+ * Yerelde ve kesintili ortamlarda tarama turu gecikebilir; memur dosyasının
+ * KAYBOLMADIĞINI, hangi aşamada beklediğini ve terminal sonucun nedenini
+ * burada görür. Mükerrer sonuç, var olan belgeye bağlantı verir — aynı
+ * dosyayı üçüncü kez yüklemenin önüne geçen bilgi budur.
+ */
+function PendingUploads({sessions,canAdvance,advancing,onAdvance,onOpenDocument}:{sessions:PendingSession[],canAdvance:boolean,advancing:boolean,onAdvance:()=>void,onOpenDocument:(id:string)=>void}) {
+  if(!sessions.length) return null;
+  const bekleyen=sessions.filter(s=>["QUARANTINED","SCANNING","VERIFIED","PROMOTING"].includes(s.status)).length;
+  return <section className="panel pending-uploads">
+    <header><div><h2>Bekleyen yüklemeler</h2><p>Tarama ve terfiden geçen dosya Gelen Evrak listesine düşer; sonuçlanan denemeler nedeniyle görünür.</p></div>
+      {canAdvance&&bekleyen?<button className="outline" onClick={onAdvance} disabled={advancing}>
+        {advancing?<LoaderCircle className="spin" size={15}/>:<ScanLine size={15}/>} Taramayı ilerlet
+      </button>:null}
+    </header>
+    <ul>{sessions.map(session=><li key={session.id} className={`pending-${session.status.toLowerCase()}`}>
+      <b>{session.originalName}</b>
+      <span>{sessionStatusLabels[session.status]??session.status}
+        {session.failureCode?` · ${session.failureCode}`:""}</span>
+      {session.status==="DUPLICATE"&&session.duplicateOfDocumentId
+        ?<button className="outline" onClick={()=>onOpenDocument(session.duplicateOfDocumentId!)}>Mevcut belgeyi aç</button>
+        :<small>{new Date(session.updatedAt.replace(" ","T")+(session.updatedAt.endsWith("Z")?"":"Z")).toLocaleString("tr-TR")}</small>}
+    </li>)}</ul>
+  </section>;
+}
+
 function toDocumentRow(document: StoredDocument): DocumentRow {
   // Ada ve parsel çok değerli alanlardır; sunucu değerleri ` / ` ile birleştirir.
   const parcel=[document.ada,document.parcel].filter(Boolean).join(" · ")||"—";
@@ -223,7 +263,34 @@ export function ArchiveWorkspace(){
       setHealth(status?.checks??null);
     } catch { /* Ağ hatasında mevcut görünüm korunur. */ }
   },[]);
-  const refresh=useCallback(async()=>{await Promise.all([loadContext(),loadList()])},[loadContext,loadList]);
+  /*
+   * Bekleyen yüklemeler: belge kaydı tarama+terfi sonrası doğar (F1.5); o ana
+   * kadar yükleme hiçbir listede görünmüyordu ve memur "karantinaya alındı"
+   * mesajından sonra kaybolmuş bir dosyaya bakıyordu. Şerit, kendi
+   * yüklemelerinin son durumunu ve terminal sonuçların NEDENİNİ gösterir.
+   */
+  const [pendingSessions,setPendingSessions]=useState<PendingSession[]>([]);
+  const [advancingScan,setAdvancingScan]=useState(false);
+  const loadPending=useCallback(async()=>{
+    try {
+      const response=await fetch("/api/uploads");
+      const payload=await response.json() as {sessions?:PendingSession[]};
+      if(response.ok) setPendingSessions(payload.sessions??[]);
+    } catch { /* Ağ hatasında mevcut şerit korunur. */ }
+  },[]);
+  /** Yerelde cron ateşlenmez; tarama+terfi turu buradan elle ilerletilir. */
+  const advanceScan=async()=>{
+    setAdvancingScan(true);
+    try {
+      // İlk tur taramayı, ikinci tur terfiyi işler; ikisi de idempotenttir.
+      await fetch("/api/admin/scan",{method:"POST"});
+      await new Promise(resolve=>setTimeout(resolve,1500));
+      await fetch("/api/admin/scan",{method:"POST"});
+      await Promise.all([loadPending(),loadList(),loadContext()]);
+    } catch { /* Tur ilerletilemezse şerit eski durumu göstermeye devam eder. */ }
+    finally { setAdvancingScan(false); }
+  };
+  const refresh=useCallback(async()=>{await Promise.all([loadContext(),loadList(),loadPending()])},[loadContext,loadList,loadPending]);
   // Oturum ve operasyon özeti liste sorgusundan bağımsızdır; arama yazılırken
   // tekrar yüklenmez ve eski liste yanıtı yeni sonucu ezemez.
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -235,6 +302,12 @@ export function ArchiveWorkspace(){
     const timer=setTimeout(()=>{void loadList(controller.signal).catch(()=>undefined)},searching?250:0);
     return()=>{clearTimeout(timer);controller.abort()};
   },[loadList,searching]);
+
+  // Bekleyen yüklemeler Gelen Evrak açıkken ve yükleme diyaloğu kapanınca tazelenir.
+  useEffect(()=>{
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if(view==="inbox"&&!uploadOpen) void loadPending();
+  },[view,uploadOpen,loadPending]);
 
   const loadMore=async()=>{
     if(!nextCursor||loadingMore) return;
@@ -271,7 +344,13 @@ export function ArchiveWorkspace(){
       :view==="activity"?<ActivityScreen onOpenDocument={openDocument}/>
       :view==="settings"?<SettingsScreen/>
       :view==="dashboard"?<Dashboard rows={rows.slice(0,5)} overview={overview} health={health} open={openDocument} onUpload={()=>setUploadOpen(true)} userName={user?.displayName??""} canUpload={canUpload}/>
-      :<List
+      :<>{view==="inbox"?<PendingUploads
+        sessions={pendingSessions}
+        canAdvance={canManageUsers}
+        advancing={advancingScan}
+        onAdvance={()=>{void advanceScan()}}
+        onOpenDocument={openDocument}
+      />:null}<List
         rows={rows}
         title={view==="inbox"?"Gelen Evrak":view==="review"?"Doğrulama":"Dijital Arşiv"}
         subtitle={view==="inbox"?"Yeni belgeleri, OCR durumunu ve hataları yönetin."
@@ -284,6 +363,6 @@ export function ArchiveWorkspace(){
         onScan={()=>setScanOpen(true)}
         query={query} onQuery={setQuery} unsearchable={unsearchable} quickFilters={quickFilters}
         hasMore={Boolean(nextCursor)} loadingMore={loadingMore} onLoadMore={loadMore}
-      />}
+      /></>}
   </main></section><UploadDialog open={uploadOpen} onClose={()=>setUploadOpen(false)} onCreated={created}/><MobileScan open={scanOpen} onClose={()=>setScanOpen(false)}/>{toast&&<div className="toast" role="status"><CheckCircle2 size={17}/><span>{toast}</span><button onClick={()=>setToast("")} aria-label="Bildirimi kapat"><X size={15}/></button></div>}</div>;
 }
