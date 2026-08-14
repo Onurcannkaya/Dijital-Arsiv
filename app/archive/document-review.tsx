@@ -61,7 +61,7 @@ const profileStatusLabels: Record<string,string> = {
 };
 const valueStatusLabels: Record<VerificationStatus,string> = { SUGGESTED:"Öneri", CONFIRMED:"Onaylı", CORRECTED:"Düzeltildi", REJECTED:"Reddedildi" };
 
-export function DocumentReview({ documentId, onBack, permissions }: { documentId:string; onBack:()=>void; permissions:string[] }) {
+export function DocumentReview({ documentId, onBack, onOpenDocument, permissions }: { documentId:string; onBack:()=>void; onOpenDocument?:(id:string)=>void; permissions:string[] }) {
   const [detail,setDetail]=useState<DetailPayload|null>(null);
   const [drafts,setDrafts]=useState<Record<string,string>>({});
   const [rejections,setRejections]=useState<Record<string,boolean>>({});
@@ -106,7 +106,43 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     try { window.localStorage.setItem("arsiv-teknik-gorunum",next?"acik":"kapali"); } catch { /* tercih tutulamazsa görünüm yine değişir */ }
     return next;
   });
-  const technical=canTechnical&&techView;
+  /*
+   * design.md §4.3 (1a): yoğun düzen — kalıcı kuyruk paneli, sıkışık alan
+   * kolonu, alt ilişki/denetim şeridi. Erişim teknik görünümle aynı kapıdan
+   * (technical.view + tercih) geçer; §4.3 gereği yoğun düzen teknik
+   * gösterimleri de AÇAR. 1b ayrıca kurulmaz: ayırt edici özellikleri
+   * (kanıt kırpması, sekmeli belge, soy zinciri) zenginleşmiş 2a'da mevcuttur.
+   */
+  const [denseView,setDenseView]=useState(()=>{
+    try { return typeof window!=="undefined"&&window.localStorage.getItem("arsiv-yogun-duzen")==="acik"; }
+    catch { return false; }
+  });
+  const toggleDenseView=()=>setDenseView(current=>{
+    const next=!current;
+    try { window.localStorage.setItem("arsiv-yogun-duzen",next?"acik":"kapali"); } catch { /* tercih tutulamazsa kip yine değişir */ }
+    return next;
+  });
+  const dense=canTechnical&&denseView;
+  const technical=canTechnical&&(techView||dense);
+  /** Yoğun kipte uygulama rayı 60px'e iner (gövde sınıfıyla, §4.3). */
+  useEffect(()=>{
+    if(typeof document==="undefined") return;
+    document.body.classList.toggle("dense-review",dense);
+    return ()=>document.body.classList.remove("dense-review");
+  },[dense]);
+  /** Kuyruk paneli: doğrulama bekleyen belgeler arasında geri dönmeden geçiş. */
+  const [queue,setQueue]=useState<Array<{id:string;referenceNo:string;documentType:string;status:string}>>([]);
+  useEffect(()=>{
+    if(!dense) return;
+    let active=true;
+    fetch("/api/documents?status=review,ready&limit=30")
+      .then(async response=>{
+        const payload=await response.json() as {documents?:Array<{id:string;referenceNo:string;documentType:string;status:string}>};
+        if(response.ok&&active) setQueue(payload.documents??[]);
+      })
+      .catch(()=>undefined);
+    return ()=>{ active=false; };
+  },[dense,documentId]);
   const [fileSrc,setFileSrc]=useState("");
   /*
    * Önizleme hatası kendi durumunda tutulur. Ortak `error` kullanıldığında,
@@ -606,13 +642,31 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
           {label}{count?<b>{count}</b>:null}
         </button>)}
       {/* §9.3: anahtar yalnız yetkili role görünür; durumu kişisel tercihtir. */}
-      {canTechnical?<button type="button" className={`tech-toggle ${techView?"on":""}`}
-        aria-pressed={techView} onClick={toggleTechView}
-        title="Güven yüzdesi, kanıt koordinatı, SHA-256 ve sürüm bilgilerini gösterir">
-        <Gauge size={13}/> Teknik görünüm{techView?" açık":""}
+      {canTechnical?<button type="button" className={`tech-toggle ${techView||dense?"on":""}`}
+        aria-pressed={techView||dense} onClick={toggleTechView} disabled={dense}
+        title={dense?"Yoğun düzen teknik gösterimleri zaten açar (§4.3).":"Güven yüzdesi, kanıt koordinatı, SHA-256 ve sürüm bilgilerini gösterir"}>
+        <Gauge size={13}/> Teknik görünüm{techView||dense?" açık":""}
+      </button>:null}
+      {/* §4.3 (1a): yoğun düzen — uzman kipi; kuyruk paneli ve alt şerit. */}
+      {canTechnical?<button type="button" className={`tech-toggle dense-toggle ${dense?"on":""}`}
+        aria-pressed={dense} onClick={toggleDenseView}
+        title="Kuyruk paneli, sıkışık alan kolonu ve alt ilişki/denetim şeridiyle uzman düzeni">
+        <History size={13}/> Yoğun düzen{dense?" açık":""}
       </button>:null}
     </nav>
-    <div className="review-grid">
+    <div className={`review-grid ${dense?"dense":""}`}>
+      {/* §4.3 (1a): koyu kuyruk paneli — belgeden belgeye listeye dönmeden geçiş. */}
+      {dense?<aside className="queue-panel" aria-label="Doğrulama kuyruğu">
+        <p>Doğrulama kuyruğu · {queue.length}</p>
+        <ul>{queue.map(item=><li key={item.id}>
+          <button type="button" className={item.id===documentId?"active":""}
+            onClick={()=>{if(item.id!==documentId) onOpenDocument?.(item.id);}}
+            disabled={item.id!==documentId&&!onOpenDocument}>
+            <b>{item.referenceNo}</b>
+            <small>{item.documentType}</small>
+          </button>
+        </li>)}</ul>
+      </aside>:null}
       <aside className="thumbs">{(detail.pages.length?detail.pages:[{pageNumber:1}]).map((page,index)=><button className={index===0?"active":""} key={page.pageNumber}><span>{page.pageNumber}</span><i/></button>)}</aside>
       <section className="document">
         <div className="document-tools"><span>{detail.document.originalName}</span>{canDownload?<button className="download-original" onClick={()=>{void downloadOriginal()}} type="button"><Download size={14}/> Aslını indir</button>:null}<div className="preview-switch"><button className={previewMode==="image"?"active":""} onClick={()=>setPreviewMode("image")} aria-label="Belge görüntüsü"><ImageIcon size={15}/> Görüntü</button><button className={previewMode==="text"?"active":""} onClick={()=>setPreviewMode("text")} disabled={!detail.pages.length} aria-label="Okunabilir OCR metni"><FileText size={15}/> Okunabilir metin</button></div></div>
@@ -701,5 +755,26 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
         </>:<div className="empty-ocr"><FileClock size={28}/><b>OCR sonucu bekleniyor</b><p>Asıl dosya güvenli kasada. Yerel OCR servisi çalıştığında metin ve alan kanıtları burada görünecek.</p>{canProcess?<button className="primary" onClick={process} disabled={processing}>{processing?<LoaderCircle className="spin" size={16}/>:<Play size={16}/>} Kuyruğu işle</button>:null}</div>}
       </aside>
     </div>
+    {/* §4.3 (1a): alt ilişki/denetim şeridi — özet her an gözün önünde;
+        kararlar yine sekmelerden (ve toplu panelden) verilir. */}
+    {dense?<footer className="dense-strip">
+      <div className="dense-strip-relations">
+        <b>İlişkiler · {detail.relations.length}</b>
+        {detail.relations.slice(0,8).map(relation=><em key={relation.id}
+          className={`relation-chip ${relation.verificationStatus.toLowerCase()}`}>
+          {relation.displayLabel}
+        </em>)}
+        {detail.relations.length>8?<small>+{detail.relations.length-8}</small>:null}
+      </div>
+      <div className="dense-strip-audit">
+        <b className={chainBroken?"broken":""}>
+          {chainBroken?<AlertTriangle size={13}/>:<ShieldCheck size={13}/>}
+          {detail.audit.length} olay · zincir {chainBroken?"KOPUK":"kopuksuz"}
+        </b>
+        {detail.audit.slice(0,3).map(event=><small key={event.eventNumber}>
+          #{event.eventNumber} {auditLabels[event.action]||event.action} · {event.actor}
+        </small>)}
+      </div>
+    </footer>:null}
   </div>;
 }

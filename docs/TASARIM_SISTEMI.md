@@ -159,6 +159,15 @@ Anahtar kelimeler altın (`--gold-700`), değerler birincil metin, ikisi de mono
 `1b`: tek görev odaklı; sol 430px alan akışı, sağda sekmeli belge + kanıt kırpması + soy zinciri.
 Bu düzenlerde teknik gösterim (yüzde, kanıt koordinatı `[165,188,332,206]`, model sürümü, `SHA-256`, profil sürümü, ADR referansı) **açık** kalır; personel düzeninde kapalı.
 
+**Uygulama kararı (2026-08-14):** `1a`, inceleme ekranının AÇILIP KAPANAN
+yoğun kipidir — ayrı bir ekran değil. Erişim §9.3 ile aynı kapıdan geçer
+(`technical.view` + tercih) ve kip açıkken teknik gösterimler kendiliğinden
+açılır. `1b` AYRICA KURULMAZ: ayırt edici özellikleri (kanıt kırpması,
+sekmeli belge, soy zinciri) §9 çalışmalarıyla `2a`ya taşındı; `2a` bugün
+`1b`nin tarif ettiği tek görev odaklı düzenin kendisidir. İki paralel
+inceleme bileşeni bakım riski üretirdi; kip yaklaşımı tek bileşen üzerinde
+yaşar.
+
 ### 4.4 Mobil tarama (`3a`) — saha yakalama
 
 **Amaç:** sahadaki memur telefon kamerasıyla tek sayfalık belgeyi güvenli
@@ -377,8 +386,17 @@ Bu şartname depoya alındı ve **renk + tipografi katmanı** uygulandı
   kullanacak biçimde sadeleştirildi; `tests/f13-upload-route` iki yüzeyin de
   ortak yolu kullandığını kaynak düzeyinde denetler.
 
+- §4.3 yoğun düzen kuruldu: "Yoğun düzen" anahtarı (technical.view + tercih)
+  inceleme ekranını 1a kipine geçirir — koyu kuyruk paneli (222px, belgeden
+  belgeye listeye dönmeden geçiş), 108px küçük resim kolonu, 398px sıkışık
+  alan kolonu (kırpma/ipucu gizli, satır yoğun), alt ilişki/denetim şeridi
+  (ilişki çipleri + zincir durumu + son olaylar) ve 60px'e inen uygulama
+  rayı. Teknik gösterimler kipte zorunlu açık. 1b ayrıca kurulmadı —
+  zenginleşmiş 2a onu karşılıyor (§4.3 uygulama kararı).
+
 ### Bekliyor
 
-1. Şartnamenin bütün açık kararları (§9.1–§9.5) karara bağlandı ve
-   uygulandı. Kalan tek büyük parça §4.3 tam yoğun düzenler (`1a`/`1b`) —
-   ayrı iş; işlevsel çekirdeği (teknik görünüm) hazır.
+Şartnamenin bütün açık kararları (§9.1–§9.5) ve ekran şartnameleri
+(§4.1–§4.4) karara bağlandı ve uygulandı. Bekleyen tasarım işi kalmadı;
+sözlüklerdeki taslak kayıtların kurumsal onayı (ADR-016) tasarım değil
+işletim/kurum sürecidir.
