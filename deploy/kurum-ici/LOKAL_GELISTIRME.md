@@ -27,7 +27,9 @@ Sağlık:
 curl -s http://127.0.0.1:8788/api/health
 ```
 
-`database` ve `objectStorage` yeşil, `schema` v22 olmalı. `ocr` ve
+`database` ve `objectStorage` yeşil, `schema` güncel sürümde olmalı
+(yetkili kaynak `lib/archive-schema.ts` içindeki `ARCHIVE_SCHEMA_VERSION`).
+`ocr` ve
 `contentScan` `false` döner — bunlar ayrı Python servisleridir ve lokalde
 çalışmaz; bu yüzden genel durum `degraded`'dir. Bu beklenen durumdur:
 yükleme → tamamlama → QUARANTINED zinciri bu servisler olmadan tam çalışır;
@@ -75,7 +77,8 @@ curl -X POST -H "authorization: Bearer $(grep '^ARCHIVE_MIGRATION_TOKEN=' .dev.v
   http://localhost:3000/api/admin/migrate
 ```
 
-Beklenen: `{"applied":true,"fromVersion":0,"toVersion":22}`. Ardından
+Beklenen: `{"applied":true,"fromVersion":0,"toVersion":<ARCHIVE_SCHEMA_VERSION>}`
+(sayı `lib/archive-schema.ts` ile birlikte ilerler; sabit yazılmaz). Ardından
 `http://localhost:3000/archive` çalışma alanını açar; yerel pilot kimliği
 otomatik yönetici olarak tanınır.
 
