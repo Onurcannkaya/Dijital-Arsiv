@@ -37,10 +37,12 @@ export async function POST(request: Request, context: RouteContext) {
      * bilmesi gerekir; "henüz hazır değil" demek onu bir daha gelip bakmaya
      * gönderir, oysa kayıt kendi başına ilerlemeyecektir.
      */
+    // §6 memur dili: bu mesajlar ekranda memura okunur; "OCR/kuyruk/işleme"
+    // yerine belgenin okunma hâli anlatılır.
     const reason: Record<string, string> = {
-      queued: "Belge OCR kuyruğunda; metin çıkarımı tamamlanmadan arşivlenemez.",
-      processing: "Belgenin OCR işlemi sürüyor; tamamlanmadan arşivlenemez.",
-      ocr_failed: "Belgenin OCR işlemi başarısız oldu; arşivlemeden önce yeniden işlenmelidir.",
+      queued: "Belge henüz okunmadı; okuma tamamlanmadan arşivlenemez.",
+      processing: "Belge şu anda okunuyor; okuma bitmeden arşivlenemez.",
+      ocr_failed: "Belgenin okunması başarısız oldu; arşivlemeden önce yeniden okutulmalıdır.",
     };
     return jsonError(reason[document.status] ?? "Belge henüz arşivlemeye hazır değil.", 409);
   }

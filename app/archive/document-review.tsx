@@ -53,13 +53,19 @@ type ValueOperation = { id:string; action:"confirm"|"correct"|"reject"; value?:s
   reasonCode?:string; reasonNote?:string };
 type RejectionDraft = { code:string; note:string };
 
-const statusLabels: Record<string,string> = { queued:"OCR kuyruğunda", processing:"OCR işleniyor", review:"Doğrulama bekliyor", ready:"Doğrulamaya hazır", archived:"Arşivlendi", ocr_failed:"OCR hatası" };
+/*
+ * design.md §6: memur dili. "OCR", "kuyruk", "işleme" makine terimleridir;
+ * memurun gördüğü durum, belgenin OKUNMA hâlidir.
+ */
+const statusLabels: Record<string,string> = { queued:"Okunmayı bekliyor", processing:"Belge okunuyor", review:"Doğrulama bekliyor", ready:"Doğrulamaya hazır", archived:"Arşivlendi", ocr_failed:"Okuma başarısız" };
 const riskLabels: Record<string,string> = { LOW:"Düşük risk", MEDIUM:"Orta risk", HIGH:"Yüksek risk", CRITICAL:"Kritik" };
 const profileStatusLabels: Record<string,string> = {
   HYPOTHESIS:"Hipotez", DISCOVERED:"Gözlendi", VALIDATED:"Doğrulandı",
   PILOT:"Pilot", ACTIVE:"Yürürlükte", RETIRED:"Kapatıldı",
 };
-const valueStatusLabels: Record<VerificationStatus,string> = { SUGGESTED:"Öneri", CONFIRMED:"Onaylı", CORRECTED:"Düzeltildi", REJECTED:"Reddedildi" };
+/* Karar durumu memurun kendi eylemiyle anlatılır: "Öneri" makinenin
+ * bakışıdır, "Kontrol edilmedi" memurun yapılacak işidir. */
+const valueStatusLabels: Record<VerificationStatus,string> = { SUGGESTED:"Kontrol edilmedi", CONFIRMED:"Kontrol edildi", CORRECTED:"Düzeltildi", REJECTED:"Reddedildi" };
 
 export function DocumentReview({ documentId, onBack, onOpenDocument, permissions }: { documentId:string; onBack:()=>void; onOpenDocument?:(id:string)=>void; permissions:string[] }) {
   const [detail,setDetail]=useState<DetailPayload|null>(null);
@@ -421,15 +427,34 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
    * anlatmaz; eksikler burada sayılıp başlıkta gösterilir.
    */
   const archiveBlockers=[
-    pendingValues>0?`${pendingValues} alan değeri kontrol bekliyor`:null,
-    pendingRelations>0?`${pendingRelations} varlık ilişkisi onay bekliyor`:null,
-    malformed.length?`${malformed.length} değer biçim kuralına uymuyor (${[...new Set(malformed.map(value=>value.label))].join(", ")})`:null,
+    pendingValues>0?`${pendingValues} bilgi kontrol bekliyor`:null,
+    pendingRelations>0?`${pendingRelations} parsel/adres bağlantısı karar bekliyor`:null,
+    malformed.length?`${malformed.length} bilgi biçim kuralına uymuyor (${[...new Set(malformed.map(value=>value.label))].join(", ")})`:null,
     incompleteRejections.length?`${incompleteRejections.length} ret gerekçesi seçilmedi`:null,
-    missingRequired.length?`zorunlu alanda doğrulanmış değer yok (${missingRequired.map(group=>group.label).join(", ")})`:null,
-    textPending?"OCR metni onaylanmadı":null,
+    missingRequired.length?`zorunlu alanda doğrulanmış bilgi yok (${missingRequired.map(group=>group.label).join(", ")})`:null,
+    textPending?"belge metni onaylanmadı":null,
     hasFieldChanges||hasAdditions?"kaydedilmemiş alan düzenlemesi var":null,
     hasTextChanges?"kaydedilmemiş metin düzenlemesi var":null,
   ].filter(Boolean) as string[];
+
+  /*
+   * design.md §6 "kilit her zaman gerekçeli" + kullanıcı geri bildirimi:
+   * memurun ekrana ilk bakışta göreceği şey, işin dört adımlık sırasıdır —
+   * neyin bittiği, sıranın nerede olduğu. "Arşivlemeden önce: ..." gerekçe
+   * listesi doğruydu ama iş sırası anlatmıyordu; memur alanları bitirip
+   * bağlantı ve metin adımlarının varlığını kendisi keşfetmek zorundaydı.
+   * Adımlar tıklanınca ilgili yere götürür.
+   */
+  const fieldsStepDone=pendingValues===0&&!hasFieldChanges&&!hasAdditions
+    &&!malformed.length&&!missingRequired.length&&!incompleteRejections.length;
+  const relationsStepDone=pendingRelations===0;
+  const textStepDone=!textPending&&!hasTextChanges;
+  const reviewSteps:[label:string,done:boolean,go:()=>void][]=[
+    ["Bilgileri kontrol edin",fieldsStepDone,()=>setActiveTab("fields")],
+    ["Bağlantıları karara bağlayın",relationsStepDone,()=>setActiveTab("relations")],
+    ["Metni onaylayın",textStepDone,()=>{setActiveTab("fields");setPreviewMode("text");}],
+    ["Tasnifleyip arşivleyin",archived,()=>{if(!archiveBlocked&&canArchive){setError("");setArchiveDialog(true);}}],
+  ];
 
   /*
    * design.md ilke 2: makinenin doğru okuduğu alanlar katlanır, öne çıkmaz.
@@ -485,9 +510,13 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
               {pending?<i className="task-medallion">{taskNumber}</i>:null}
               <b>{group.label}</b>
               <span>
-                {group.critical?<em className="tag-critical">kritik</em>:null}
+                {/* design.md §3.4 kart anatomisi rozet kalabalığı içermez;
+                    "kritik" ve "çok değerli" iç politika terimleridir ve
+                    yalnız teknik görünümde kalır. Memura gereken tek işaret
+                    alanın zorunlu olduğudur. */}
+                {technical&&group.critical?<em className="tag-critical">kritik</em>:null}
                 {group.required?<em className="tag-required">zorunlu</em>:null}
-                {group.multiValue?<em className="tag-multi">çok değerli</em>:null}
+                {technical&&group.multiValue?<em className="tag-multi">çok değerli</em>:null}
               </span>
             </div>
             {group.formatHint?<p className="field-hint">{group.formatHint}</p>:null}
@@ -501,7 +530,11 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
               >
                 <span>
                   <b>{group.multiValue?`${group.label} ${value.valueIndex+1}`:group.label}</b>
-                  <em className={`risk-${value.riskLevel.toLowerCase()}`}>{riskLabels[value.riskLevel]} · {confidencePhrase(value.confidence,value.origin)}</em>
+                  {/* §3.4: memur yalnız düz Türkçe eylem cümlesini okur; risk
+                      sınıfı iç ölçüdür ve teknik görünümde öne gelir. Renk,
+                      risk sınıfından türemeye devam eder — görsel uyarı kalır,
+                      sözel jargon kalkar. */}
+                  <em className={`risk-${value.riskLevel.toLowerCase()}`}>{technical?`${riskLabels[value.riskLevel]} · `:""}{confidencePhrase(value.confidence,value.origin)}</em>
                 </span>
                 {/* design.md §3.4: iddia kanıtıyla yan yana durur — değerin
                     belgede okunduğu yerin kırpması, girişin hemen üstünde.
@@ -586,7 +619,7 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
       <button onClick={onBack}><ArrowLeft size={15}/> Belge listesi</button>
       <span><span className={`status ${archived||detail.document.status==="ready"?"success":detail.document.status==="processing"?"info":"warning"}`}><i/>{statusLabels[detail.document.status]||detail.document.status}</span><b>{detail.document.referenceNo}</b></span>
       <div>{needsOcr?
-        canProcess?<button className="approve" onClick={process} disabled={processing}>{processing?<LoaderCircle className="spin" size={16}/>:<Play size={16}/>} OCR işlemini çalıştır</button>:<span className="archived-lock restricted"><LockKeyhole size={15}/> OCR yetkisi gerekli</span>:
+        canProcess?<button className="approve" onClick={process} disabled={processing}>{processing?<LoaderCircle className="spin" size={16}/>:<Play size={16}/>} Belgeyi okut</button>:<span className="archived-lock restricted"><LockKeyhole size={15}/> Belgeyi okutma yetkisi gerekli</span>:
         archived?<span className="archived-lock"><LockKeyhole size={15}/> Salt okunur</span>:
         <>{canReview?<button className="outline save-fields" onClick={saveFields} disabled={saving||incompleteRejections.length>0||(!pendingValues&&!hasFieldChanges&&!hasAdditions)} title={incompleteRejections.length?"Reddedilen her değer için gerekçe seçilmelidir.":undefined}>{saving?<LoaderCircle className="spin" size={15}/>:<Save size={15}/>} {pendingValues?"Alanları onayla":"Düzeltmeleri kaydet"}</button>:null}{canArchive?<button className="approve" onClick={()=>{setError("");setArchiveDialog(true);}} disabled={saving||savingText||archiveBlocked} title={archiveBlockers.length?`Arşivlemeden önce tamamlanmalı: ${archiveBlockers.join(", ")}.`:undefined}><CheckCircle2 size={17}/> Doğrula ve arşivle</button>:null}{!canReview&&!canArchive?<span className="archived-lock restricted"><LockKeyhole size={15}/> Görüntüleme yetkisi</span>:null}</>}
       </div>
@@ -596,9 +629,21 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
           <span><b>{ocrJobNote}</b>{ocrJob.errorMessage?<small>Son hata: {ocrJob.errorMessage}</small>:null}</span>
         </p>
         :null}
-      {canArchive&&!archived&&!needsOcr&&archiveBlockers.length
-        ?<p className="archive-blockers"><AlertTriangle size={14}/> Arşivlemeden önce: {archiveBlockers.join(" · ")}</p>
-        :null}
+      {/* Dört adımlık iş sırası: memur neyin bittiğini ve sıranın nerede
+          olduğunu ilk bakışta görür; adım tıklanınca ilgili yere götürür.
+          Gerekçe listesi kaybolmaz — arşiv adımının ipucunda durur. */}
+      {canReview&&!archived&&!needsOcr?<ol className="review-steps" aria-label="Doğrulama adımları">
+        {reviewSteps.map(([label,done,go],index)=>{
+          const current=!done&&reviewSteps.slice(0,index).every(([,previousDone])=>previousDone);
+          return <li key={label}>
+            <button type="button" className={done?"done":current?"current":""}
+              onClick={go}
+              title={index===3&&archiveBlockers.length?`Önce tamamlanmalı: ${archiveBlockers.join(", ")}.`:undefined}>
+              <i>{done?<CheckCircle2 size={14}/>:index+1}</i> {label}
+            </button>
+          </li>;
+        })}
+      </ol>:null}
     </div>
     {error?<div className="inline-error"><AlertTriangle size={16}/>{error}</div>:null}
     {notice?<div className="inline-notice"><CheckCircle2 size={16}/>{notice}</div>:null}
@@ -695,7 +740,7 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
         />:null}
       </section>
       <aside className="fields">
-        <header><Sparkles size={18}/><span><b>OCR alan kanıtları</b><small>{detail.fields.length?`${detail.fields.length} değer · ${detail.fieldGroups.length} alan`:"Henüz OCR sonucu yok"}</small></span></header>
+        <header><Sparkles size={18}/><span><b>Belgeden okunan bilgiler</b><small>{detail.fields.length?`${detail.fields.length} bilgi · ${detail.fieldGroups.length} alan`:"Belge henüz okunmadı"}</small></span></header>
         {activeTab==="fields"?<div className="profile-strip">
           <FileCog size={15}/>
           <span>
@@ -703,22 +748,24 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
             {/* Profil kodu ve sürümü teknik gösterimdir (design.md §4.3);
                 personel düzeninde belge türünün adı ve sahibi müdürlük yeter.
                 §9.3 teknik görünümde kod ve sürüm geri gelir. */}
-            <small>{detail.profile.ownerDepartment} belge türü tanımı uygulanıyor</small>
+            <small>Bu belge türünde beklenen alanlar aşağıda listelendi</small>
             {technical?<small className="tech-readout">{detail.profile.code} v{detail.profile.version}
               {detail.profile.recordedVersion&&detail.profile.recordedVersion!==detail.profile.version?` · belgede v${detail.profile.recordedVersion}`:""}</small>:null}
             {/* §9.5: arşivlenmiş belgenin tasnifi karar anının anlık görüntüsüdür. */}
             {detail.document.filePlan?<small className="classification-line">
               {detail.document.filePlan.label} · {detail.document.retentionRule?.label??""}</small>:null}
           </span>
-          <em className={`profile-status ${detail.profile.status.toLowerCase()}`}>{profileStatusLabels[detail.profile.status]??detail.profile.status}</em>
+          {/* "Hipotez/Gözlendi" profil yaşam döngüsü terimidir; memura bir şey
+              söylemez, teknik görünümde kalır. */}
+          {technical?<em className={`profile-status ${detail.profile.status.toLowerCase()}`}>{profileStatusLabels[detail.profile.status]??detail.profile.status}</em>:null}
         </div>:null}
         {detail.fields.length?<>
-          {activeTab==="fields"?<div className={`quality ${pendingValues?"":"quality-good"}`}><Gauge size={17}/><span><b>{archived?"Personel tarafından arşivlendi":pendingValues?`${pendingValues} değer personel kontrolü bekliyor`:"Bütün değerler personel tarafından karara bağlandı"}</b><small>Güven, risk seviyesi, kanıt konumu ve doğrulayan birlikte saklanır.</small></span></div>:null}
-          {activeTab==="fields"&&emptyRequired.length?<div className="empty-required"><AlertTriangle size={15}/><span>{emptyRequired.map(value=>value.label).join(", ")} OCR tarafından bulunamadı; onaylamak için değeri girin.</span></div>:null}
+          {activeTab==="fields"?<div className={`quality ${pendingValues?"":"quality-good"}`}><Gauge size={17}/><span><b>{archived?"Personel tarafından arşivlendi":pendingValues?`${pendingValues} bilgi kontrolünüzü bekliyor`:"Bütün bilgiler karara bağlandı"}</b>{/* §6: saklama tekniği değil yapılacak iş anlatılır. */}<small>{archived?"Kayıt salt okunur; düzeltme yeni sürüm açar.":"Her bilgiyi belgedeki yazıyla karşılaştırın; yanlışsa üzerine doğrusunu yazın."}</small></span></div>:null}
+          {activeTab==="fields"&&emptyRequired.length?<div className="empty-required"><AlertTriangle size={15}/><span>{emptyRequired.map(value=>value.label).join(", ")} belgede okunamadı; belgeden bakıp elle girin.</span></div>:null}
 
           {activeTab==="fields"?<>
           {/* design.md §4.1: kolon tek bir soru sorar — "şimdi ne yapmam gerekiyor". */}
-          {pendingGroups.length?<p className="task-heading">{pendingValues} değer onayınızı bekliyor</p>:null}
+          {pendingGroups.length?<p className="task-heading">{pendingValues} bilgi onayınızı bekliyor</p>:null}
           <div className="evidence-fields">{orderedGroups.filter(entry=>entry.pending).map(renderGroup)}</div>
 
           {/* design.md §3.5: doğru okunan alanlar katlanır, öne çıkmaz. */}
@@ -767,7 +814,7 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
               Belgenin yoğunluğuna göre bu işlem bir dakikayı bulabilir; ekranı açık bırakmanız yeterli.</p>
             <div className="ocr-skeletons" aria-hidden="true"><i/><i/><i/><i/></div>
           </div>
-          :<div className="empty-ocr"><FileClock size={28}/><b>OCR sonucu bekleniyor</b><p>Asıl dosya güvenli kasada. Metin çıkarımı tamamlandığında metin ve alan kanıtları burada görünecek.</p>{canProcess?<button className="primary" onClick={process}><Play size={16}/> Kuyruğu işle</button>:null}</div>}
+          :<div className="empty-ocr"><FileClock size={28}/><b>Belge henüz okunmadı</b><p>Asıl dosya güvenli kasada. Belge okunduğunda yazılar ve alan bilgileri burada görünecek.</p>{canProcess?<button className="primary" onClick={process}><Play size={16}/> Belgeyi okut</button>:null}</div>}
       </aside>
     </div>
     {/* §4.3 (1a): alt ilişki/denetim şeridi — özet her an gözün önünde;
