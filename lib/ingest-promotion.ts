@@ -107,6 +107,15 @@ async function ensurePendingJob(dependencies: PromotionDependencies) {
         AND s.status IN ('ACCEPTED', 'DUPLICATE')
     )`).bind(clock(dependencies).toISOString()).run();
 
+  /*
+   * SHA koruması yalnız SÜREN işi engel sayar. Amaç, eşzamanlı iki aynı-SHA
+   * oturumunun ikisinin birden kasaya yazmasını önlemektir; iş QUEUED ya da
+   * PROMOTING iken ikinci oturum bekler. TAMAMLANMIŞ iş engel DEĞİLDİR —
+   * eskiden sayılıyordu ve aynı dosyayı ilk kopya kasaya girdikten sonra
+   * yeniden yükleyen oturum aday bile olamıyor, mükerrer denetimine hiç
+   * ulaşamadan sonsuza dek VERIFIED durumunda asılı kalıyordu. Aday olur
+   * olmaz aşağıdaki mükerrer denetimi onu DUPLICATE olarak dürüstçe kapatır.
+   */
   const pending = await dependencies.db.prepare(`SELECT s.id AS upload_session_id,
       r.id AS ingest_receipt_id, r.sha256
     FROM upload_sessions s
@@ -115,7 +124,8 @@ async function ensurePendingJob(dependencies: PromotionDependencies) {
     WHERE s.status = 'VERIFIED' AND own_job.id IS NULL
       AND NOT EXISTS (
         SELECT 1 FROM promotion_jobs active_job
-        WHERE active_job.sha256 = r.sha256 AND active_job.status <> 'FAILED'
+        WHERE active_job.sha256 = r.sha256
+          AND active_job.status NOT IN ('FAILED', 'COMPLETED')
       )
     ORDER BY s.updated_at LIMIT 1`)
     .first<{ upload_session_id: string; ingest_receipt_id: string; sha256: string }>();

@@ -148,26 +148,36 @@ ucundan indirir (kapsam başına jeton, önek kilidi, yol geçişi reddi).
 Üretimde ve kabul koşusunda tanımlanmaz; servisler MinIO'ya salt-okunur
 kimlikle doğrudan bağlanır (ADR-014).
 
+Hepsi tek komutla kalkar:
+
 ```bash
-# 1) Gerçek OCR servisi (fastapi+uvicorn+paddleocr kurulu olmalı).
-#    OCR_PRELOAD_MODEL=true önemlidir: model yüklenir VE küçük bir ısınma
-#    çıkarımı koşar. İlk çıkarım oneDNN derlemesini öder (ölçüm: aynı görüntü
-#    soğuk süreçte 155 sn, ısınmışta 45 sn) ve ısınmadan gelen ilk gerçek
-#    belge, uygulamanın 120 sn'lik iş tavanını aşıp bir deneme hakkı yakar.
+npm run dev:hizmetler
+```
+
+Betik (`scripts/dev-stack.mjs`) üç işi birden yapar: gerçek OCR servisini
+ısınma dahil başlatır (`OCR_PRELOAD_MODEL=true` — ilk çıkarım oneDNN
+derlemesini öder; ölçüm: aynı görüntü soğukta 155 sn, ısınmışta 45 sn),
+içerik tarama taklidini başlatır ve cron'un yerel karşılığı olarak 20 sn'de
+bir tarama/terfi turu vurur. Jetonlar `.dev.vars`tan okunur.
+
+Elle kurmak isteyene aynı işin açık hali:
+
+```bash
+# 1) Gerçek OCR servisi (fastapi+uvicorn+paddleocr kurulu olmalı)
 cd services/ocr
 OCR_SERVICE_TOKEN=<jeton> OCR_FETCH_URL=http://localhost:3000/api/internal/objects PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True OCR_PRELOAD_MODEL=true python -m uvicorn app.main:app --host 127.0.0.1 --port 8090
 
 # 2) İçerik tarama taklidi (clamav/qpdf yerelde yok; sihirli bayt + SHA
 #    denetimini GERÇEKTEN yapar, alındıya "gelistirme-stub" yazar)
 CONTENT_SCAN_SERVICE_TOKEN=<jeton> INTERNAL_FETCH_URL=http://localhost:3000/api/internal/objects node scripts/dev-content-scan.mjs
+
+# 3) Tarama+terfi turu (vurucu yerine elle)
+curl -X POST http://localhost:3000/api/admin/scan
 ```
 
-Cron yerelde ateşlenmez; tarama+terfi turu elle ilerletilir (arayüzdeki
-yönetici kimliğiyle):
-
-```bash
-curl -X POST http://localhost:3000/api/admin/scan   # tarama + terfi turu
-```
+Gelen Evrak'taki **Bekleyen yüklemeler** şeridi, henüz belgeye dönüşmemiş
+yüklemeleri aşamasıyla gösterir (tarama bekliyor / mükerrer / reddedildi);
+yönetici oradaki **"Taramayı ilerlet"** düğmesiyle turu elle de vurabilir.
 
 Belge `queued` durumuna geçince inceleme ekranındaki **"OCR işlemini
 çalıştır"** düğmesi gerçek PaddleOCR'ı koşturur (ilk çağrıda model yüklenir,

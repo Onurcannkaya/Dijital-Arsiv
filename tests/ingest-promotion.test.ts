@@ -292,6 +292,43 @@ test("post-write full SHA mismatch keeps document and OCR records out of the dat
   }
 });
 
+test("ilk kopya kasaya girdikten sonra gelen aynı-SHA oturumu mükerrer olarak kapanır", async () => {
+  const db = createSqliteD1();
+  const quarantine = new Map<string, Stored>();
+  const vault = new Map<string, Stored>();
+  try {
+    await applyArchiveMigrations(db);
+    /*
+     * Gerçek kullanıcı senaryosu: aynı dosya iki kez ART ARDA yüklenir.
+     * İlk oturum normal terfiyle kasaya girer ve terfi işi COMPLETED kalır.
+     * SHA koruması bir dönem COMPLETED işi de engel sayıyordu; ikinci oturum
+     * aday olamıyor, mükerrer denetimine hiç ulaşamıyor ve sonsuza dek
+     * VERIFIED durumunda asılı kalıyordu — memurun gördüğü "takıldı" buydu.
+     */
+    const bytes = encoder.encode("ayni dosya iki kez");
+    seedVerifiedSession(db, quarantine, "ilk-kopya", bytes);
+    const writer = new MemoryVaultWriter(new MemoryReader(quarantine), vault);
+    const deps = dependencies(db, quarantine, vault, writer);
+    const first = await processNextPromotionJob(deps);
+    assert.equal(first.result, "ACCEPTED");
+    const documentId = (db.raw.prepare("SELECT id FROM archive_documents").get() as { id: string }).id;
+
+    seedVerifiedSession(db, quarantine, "ikinci-kopya", bytes);
+    const second = await processNextPromotionJob(deps);
+    assert.equal(second.result, "DUPLICATE", "ikinci kopya mükerrer olarak kapanmalı, askıda kalmamalı");
+    assert.equal(second.duplicateOfDocumentId, documentId);
+    const session = db.raw.prepare("SELECT status, duplicate_of_document_id FROM upload_sessions WHERE id = 'ikinci-kopya'")
+      .get() as { status: string; duplicate_of_document_id: string };
+    assert.equal(session.status, "DUPLICATE");
+    assert.equal(session.duplicate_of_document_id, documentId);
+    // Kasaya ikinci bir asıl yazılmaz; mükerrer, mevcut belgeye bağlanır.
+    assert.equal(vault.size, 1);
+    assert.equal(db.raw.prepare("SELECT COUNT(*) AS count FROM archive_documents").get()!.count, 1);
+  } finally {
+    db.close();
+  }
+});
+
 test("accepted SHA duplicate closes the session without a new original or OCR job", async () => {
   const db = createSqliteD1();
   const quarantine = new Map<string, Stored>();
