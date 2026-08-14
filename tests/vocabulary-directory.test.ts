@@ -94,11 +94,16 @@ const addRelation = async (server: NodeServer) => {
 test("ayarlar ekranı yönetilebilir sözlükleri sunar", async () => {
   await withServer(async (server) => {
     const listed = (await settings(server, "GET")).body.vocabularies ?? [];
+    // §9.5 ile dosya planı ve saklama kuralları da yönetilebilir sözlük oldu.
     assert.deepEqual(listed.map((entry) => entry.key).sort(),
-      ["field-rejection-reason", "relation-rejection-reason"]);
+      ["field-rejection-reason", "file-plan", "relation-rejection-reason", "retention-rule"]);
     const relation = listed.find((entry) => entry.key === VOCABULARY);
     assert.ok(relation?.terms.some((term) => term.code === "WRONG_ENTITY"), "başlangıç kümesi görünmüyor");
     assert.ok(relation?.terms.every((term) => term.active), "tohum terimleri pasif geldi");
+    // Tasnif sözlükleri taslak tohumlarıyla gelir; boş liste arşivlemeyi kilitlerdi.
+    const filePlan = listed.find((entry) => entry.key === "file-plan");
+    assert.ok(filePlan?.terms.length, "dosya planı taslak tohumu yok");
+    assert.ok(listed.find((entry) => entry.key === "retention-rule")?.terms.length, "saklama kuralı taslak tohumu yok");
   });
 });
 
