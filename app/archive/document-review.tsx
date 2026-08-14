@@ -752,7 +752,22 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
                 :<><ShieldCheck size={14}/> İşlem kaydı zinciri kopuksuz — kayıtlar eklendiği günden beri değişmedi.</>}
             </p>:null}
           </section>:null}
-        </>:<div className="empty-ocr"><FileClock size={28}/><b>OCR sonucu bekleniyor</b><p>Asıl dosya güvenli kasada. Yerel OCR servisi çalıştığında metin ve alan kanıtları burada görünecek.</p>{canProcess?<button className="primary" onClick={process} disabled={processing}>{processing?<LoaderCircle className="spin" size={16}/>:<Play size={16}/>} Kuyruğu işle</button>:null}</div>}
+        </>:processing
+          /*
+           * design.md §5 "Yükleniyor / OCR sürüyor": çıkarım sürerken ekran
+           * BEKLİYOR demez, OKUYOR der. Metin çıkarımı isteğin içinde koşar ve
+           * belgeye göre bir dakikayı bulabilir; o süre boyunca "servis
+           * çalıştığında görünecek" cümlesi ekranda kalırsa memur işin hiç
+           * başlamadığını sanır ve haklı olarak "takıldı" der.
+           */
+          ?<div className="empty-ocr reading" role="status" aria-live="polite">
+            <LoaderCircle className="spin" size={26}/>
+            <b>Belge okunuyor</b>
+            <p>Yazılar çıkarılıyor, alan kanıtları ve görüntüleme kopyası hazırlanıyor.
+              Belgenin yoğunluğuna göre bu işlem bir dakikayı bulabilir; ekranı açık bırakmanız yeterli.</p>
+            <div className="ocr-skeletons" aria-hidden="true"><i/><i/><i/><i/></div>
+          </div>
+          :<div className="empty-ocr"><FileClock size={28}/><b>OCR sonucu bekleniyor</b><p>Asıl dosya güvenli kasada. Metin çıkarımı tamamlandığında metin ve alan kanıtları burada görünecek.</p>{canProcess?<button className="primary" onClick={process}><Play size={16}/> Kuyruğu işle</button>:null}</div>}
       </aside>
     </div>
     {/* §4.3 (1a): alt ilişki/denetim şeridi — özet her an gözün önünde;

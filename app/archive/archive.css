@@ -458,3 +458,15 @@ body.dense-review .brand{justify-content:center;padding:0}
 .pending-uploads li.pending-duplicate{border-left:3px solid var(--gold-600)}
 .pending-uploads li.pending-rejected,.pending-uploads li.pending-failed{border-left:3px solid var(--ar-red)}
 .pending-uploads li button{height:30px;padding:0 10px;font-size:12px}
+
+/* OCR sürerken okuma durumu (design.md §5): ekran "bekliyor" değil "okuyor"
+   der; iskelet satırları işin sürdüğünü sessizce anlatır. */
+.empty-ocr.reading{color:var(--ar-text)}
+.empty-ocr.reading svg{color:var(--ar-violet)}
+.empty-ocr.reading b{margin-top:12px;font-size:13px}
+.empty-ocr.reading p{max-width:320px;margin:8px 0 0;font-size:12px;line-height:1.55;color:var(--ar-muted)}
+.ocr-skeletons{width:100%;margin-top:20px;display:flex;flex-direction:column;gap:9px}
+.ocr-skeletons i{display:block;height:34px;border-radius:7px;background:linear-gradient(90deg,var(--ar-surface-2) 25%,var(--ar-border) 37%,var(--ar-surface-2) 63%);background-size:400% 100%;animation:skeleton-sweep 1.5s ease-in-out infinite}
+@keyframes skeleton-sweep{from{background-position:100% 50%}to{background-position:0 50%}}
+/* Hareket duyarlılığı: sürekli akan iskelet ve dönen simge bastırılır. */
+@media(prefers-reduced-motion:reduce){.ocr-skeletons i{animation:none}.spin{animation:none}}
