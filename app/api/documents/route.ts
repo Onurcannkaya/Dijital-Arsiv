@@ -2,6 +2,7 @@ import { authorizeRequest } from "../../../lib/authorization";
 import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../lib/archive-storage";
 import { failure } from "../../../lib/errors";
 import { escapeLike, normalizeSearch } from "../../../lib/text-search";
+import { QUICK_QUERY_LABELS, parseQuickQuery, type QuickQueryKey } from "../../../lib/quick-query";
 
 export const dynamic = "force-dynamic";
 
@@ -107,27 +108,84 @@ export async function GET(request: Request) {
     const query = parameters.get("q")?.trim().slice(0, 160) ?? "";
     const page = readPageRequest(parameters);
     if (typeof page === "string") return jsonError(page);
-    const normalizedTokens = normalizeSearch(query).split(/\s+/).filter(Boolean).slice(0, 8);
-    const rawTokens = query.split(/\s+/).filter(Boolean).slice(0, 8);
+    /*
+     * Hızlı sorgu dili (design.md §3.10): `ada:1284` gibi anahtarlı parçalar
+     * hedefli süzgeç olur, kalanı serbest metin aramasında kalır. Serbest
+     * metin "1284" tam metinde de eşleşip kalabalık sonuç verir; anahtarlı
+     * biçim yalnız ilgili alana bakar.
+     */
+    const parsed = parseQuickQuery(query);
+    const quick = parsed.filters;
+    const normalizedTokens = normalizeSearch(parsed.freeText).split(/\s+/).filter(Boolean).slice(0, 8);
+    const rawTokens = parsed.freeText.split(/\s+/).filter(Boolean).slice(0, 8);
     const contentPattern = normalizedTokens.length ? `%${normalizedTokens.map(escapeLike).join("%")}%` : "";
+    const quickFilters = (Object.entries(quick) as Array<[QuickQueryKey, string]>)
+      .map(([key, value]) => ({ key, label: QUICK_QUERY_LABELS[key], value }));
 
     /*
      * Yalnız noktalama içeren bir sorgu (`...`, `%%`, `--`) normalleştirmede
      * boşalır. O durumda döngü hiç çalışmaz, hiçbir süzgeç eklenmez ve liste
      * SÜZÜLMEMİŞ haliyle döner; arayüz de bunu "sonuç" diye sunar. Memur
      * aradığını bulduğunu sanar, oysa hiçbir şey eşleşmemiştir. Aranabilir
-     * karakter yoksa eşleşme de yoktur; sebebi arayüze bildirilir.
+     * karakter yoksa eşleşme de yoktur; sebebi arayüze bildirilir. Yalnız
+     * anahtarlı süzgeçten oluşan sorgu (`ada:1284`) aranabilirdir.
      */
-    if (query.length > 0 && normalizedTokens.length === 0) {
+    if (parsed.freeText.length > 0 && normalizedTokens.length === 0) {
       return Response.json({
         documents: [],
         query,
         unsearchableQuery: true,
+        quickFilters,
         page: { limit: page.limit, statuses: page.statuses, hasMore: false, nextCursor: null },
       });
     }
     const filters = ["(? = '*' OR d.unit = ?)"];
     const bindingsList: unknown[] = [principal.unit, principal.unit];
+
+    // §3.10 hedefli süzgeçler: her anahtar tek bir alan ailesine bakar.
+    if (quick.ref) {
+      filters.push("d.reference_no LIKE ? ESCAPE '\\'");
+      bindingsList.push(`%${escapeLike(quick.ref)}%`);
+    }
+    if (quick.tur) {
+      filters.push("d.document_type LIKE ? ESCAPE '\\'");
+      bindingsList.push(`%${escapeLike(quick.tur)}%`);
+    }
+    if (quick.mudurluk) {
+      filters.push("d.unit LIKE ? ESCAPE '\\'");
+      bindingsList.push(`%${escapeLike(quick.mudurluk)}%`);
+    }
+    if (quick.mahalle) {
+      filters.push(`EXISTS (SELECT 1 FROM extracted_fields f WHERE f.document_id = d.id
+        AND f.field_name = 'neighborhood' AND f.verification_status <> 'REJECTED'
+        AND (COALESCE(f.corrected_value, f.field_value) LIKE ? ESCAPE '\\'
+          OR COALESCE(f.normalized_value, '') LIKE ? ESCAPE '\\'))`);
+      bindingsList.push(`%${escapeLike(quick.mahalle)}%`, `%${escapeLike(normalizeSearch(quick.mahalle))}%`);
+    }
+    /*
+     * Ada/parsel TAM eşleşir: `ada:12` yazan memur 12'yi ister, 112 ve 121'i
+     * değil. Hem alan değeri hem doğrulanmış parsel ilişkisi taranır — ilişki
+     * kurulmuş belge, alan değeri farklı yazılmış olsa da bulunur.
+     */
+    for (const [key, column] of [["ada", "block_no"], ["parsel", "parcel_no"]] as const) {
+      const value = quick[key];
+      if (!value) continue;
+      filters.push(`(EXISTS (SELECT 1 FROM extracted_fields f WHERE f.document_id = d.id
+          AND f.field_name = ? AND f.verification_status <> 'REJECTED'
+          AND COALESCE(f.corrected_value, f.field_value) = ?)
+        OR EXISTS (SELECT 1 FROM document_entity_relations r
+          INNER JOIN parcel_entities p ON p.entity_id = r.entity_id
+          WHERE r.document_id = d.id AND r.verification_status = 'VERIFIED' AND p.${column} = ?))`);
+      bindingsList.push(key === "ada" ? "ada" : "parcel", value, value);
+    }
+    if (quick.yil) {
+      // Belge tarihi alanı GG.AA.YYYY biçimindedir; yoksa kayıt yılı esas alınır.
+      filters.push(`(EXISTS (SELECT 1 FROM extracted_fields f WHERE f.document_id = d.id
+          AND f.field_name = 'document_date' AND f.verification_status <> 'REJECTED'
+          AND COALESCE(f.corrected_value, f.field_value) LIKE ? ESCAPE '\\')
+        OR substr(d.created_at, 1, 4) = ?)`);
+      bindingsList.push(`%.${escapeLike(quick.yil)}`, quick.yil);
+    }
 
     normalizedTokens.forEach((normalizedToken, index) => {
       const rawToken = rawTokens[index] ?? normalizedToken;
@@ -187,6 +245,7 @@ export async function GET(request: Request) {
     return Response.json({
       documents: rows.map(publicDocument),
       query,
+      quickFilters,
       page: {
         limit: page.limit,
         statuses: page.statuses,

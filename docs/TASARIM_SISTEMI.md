@@ -394,9 +394,18 @@ Bu şartname depoya alındı ve **renk + tipografi katmanı** uygulandı
   rayı. Teknik gösterimler kipte zorunlu açık. 1b ayrıca kurulmadı —
   zenginleşmiş 2a onu karşılıyor (§4.3 uygulama kararı).
 
+- §3.10 hızlı sorgu dili kuruldu: `mahalle: ada: parsel: tur: mudurluk:
+  yil: ref:` anahtarları hedefli süzgece dönüşür (`lib/quick-query.ts` +
+  belgeler rotası), kalan serbest metin mevcut aramada kalır. Türkçe
+  yazımlar (`tür:`, `yıl:`, `müdürlük:`) kabul edilir; çok kelimeli değer
+  tırnaklıdır; bilinmeyen anahtar sessizce yutulmaz, serbest metin sayılır.
+  Ada/parsel TAM eşleşir (alan değeri ya da doğrulanmış parsel ilişkisi).
+  Sunucunun anladığı süzgeçler arama özetinde altın-anahtarlı mono
+  çiplerle geri gösterilir; arama kutusu yer tutucusu sözdizimini öğretir.
+
 ### Bekliyor
 
-Şartnamenin bütün açık kararları (§9.1–§9.5) ve ekran şartnameleri
-(§4.1–§4.4) karara bağlandı ve uygulandı. Bekleyen tasarım işi kalmadı;
-sözlüklerdeki taslak kayıtların kurumsal onayı (ADR-016) tasarım değil
-işletim/kurum sürecidir.
+Şartnamenin bütün açık kararları (§9.1–§9.5), ekran şartnameleri
+(§4.1–§4.4) ve §3.10 sorgu dili karara bağlandı ve uygulandı. Bekleyen
+tasarım işi kalmadı; sözlüklerdeki taslak kayıtların kurumsal onayı
+(ADR-016) tasarım değil işletim/kurum sürecidir.
