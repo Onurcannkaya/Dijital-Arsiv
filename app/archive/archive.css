@@ -435,3 +435,9 @@ body.dense-review .brand{justify-content:center;padding:0}
 .dense-strip-audit b.broken{color:#F2A6A6}
 .dense-strip-audit small{font:11.5px "IBM Plex Mono",Consolas,monospace;color:#c9d4e6;white-space:nowrap}
 .dense-toggle{margin-left:8px}
+
+/* Hızlı sorgu süzgeç özeti (design.md §3.10): anahtar altın, değer birincil
+   metin, ikisi de mono. Sunucunun anladığı süzgeç memura geri gösterilir. */
+.quick-filters{display:inline-flex;gap:7px;margin-left:10px;flex-wrap:wrap;vertical-align:middle}
+.quick-filters code{font:11.5px "IBM Plex Mono",Consolas,monospace;padding:3px 8px;border:1px solid var(--border-base);border-radius:5px;background:var(--ar-surface-2);color:var(--ar-text)}
+.quick-filters code b{color:var(--gold-700,var(--gold-600));font-weight:600}

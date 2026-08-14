@@ -18,6 +18,8 @@ import { confidenceBadge } from "../../lib/confidence-language";
 type View = "dashboard" | "inbox" | "review" | "archive" | "users" | "activity" | "settings";
 type DocumentRow = { id:string; referenceNo?:string; title:string; unit:string; place:string; parcel:string; status:string; rawStatus:string; confidence:number; contentMatch?:boolean; pending?:number; relations?:number };
 type CurrentUser = { email:string; displayName:string; role:string; roleLabel:string; unit:string; permissions:string[] };
+/** §3.10 hızlı sorgu: sunucunun sorgudan çıkardığı hedefli süzgeçler. */
+type QuickFilter = { key:string; label:string; value:string };
 type HealthChecks = Record<string,{ok:boolean}>;
 type Overview = {
   scope:string;
@@ -109,14 +111,16 @@ function Dashboard({rows,overview,health,open,onUpload,userName,canUpload}:{rows
   </>;
 }
 
-function List({rows,title,subtitle,open,onUpload,canUpload,onScan,query,onQuery,empty,hasMore,loadingMore,onLoadMore,unsearchable}:{rows:DocumentRow[],title:string,subtitle:string,open:(id:string)=>void,onUpload:()=>void,canUpload:boolean,onScan:()=>void,query:string,onQuery:(value:string)=>void,empty:string,hasMore:boolean,loadingMore:boolean,onLoadMore:()=>void,unsearchable:boolean}) {
+function List({rows,title,subtitle,open,onUpload,canUpload,onScan,query,onQuery,empty,hasMore,loadingMore,onLoadMore,unsearchable,quickFilters}:{rows:DocumentRow[],title:string,subtitle:string,open:(id:string)=>void,onUpload:()=>void,canUpload:boolean,onScan:()=>void,query:string,onQuery:(value:string)=>void,empty:string,hasMore:boolean,loadingMore:boolean,onLoadMore:()=>void,unsearchable:boolean,quickFilters:QuickFilter[]}) {
   return <><section className="heading"><div><p className="eyebrow">BELGE YÖNETİMİ</p><h1>{title}</h1><span>{subtitle}</span></div>{canUpload?<div className="heading-actions">
     {/* §4.4: dar ekranda birincil giriş kameradır; geniş ekranda gizlenir. */}
     <button className="primary scan-entry" onClick={onScan}><Camera size={17}/> Belge tara</button>
     <button className="primary" onClick={onUpload}><Upload size={17}/> Belge ekle</button>
-  </div>:null}</section><section className="panel list"><div className="list-tools"><label><Search size={17}/><input value={query} onChange={event=>onQuery(event.target.value)} placeholder="Belge no, üst veri veya metin içinde ara..."/></label></div>{query.length>=2?<p className="search-summary">{unsearchable
+  </div>:null}</section><section className="panel list"><div className="list-tools"><label><Search size={17}/><input value={query} onChange={event=>onQuery(event.target.value)} placeholder="Ara... (ipucu: ada:32 parsel:2 mahalle:Kandemir tur:Encümen yil:1996 ref:ARS)"/></label></div>{query.length>=2?<p className="search-summary">{unsearchable
       ?"Arama teriminde aranabilir karakter yok; en az bir harf ya da rakam girin."
-      :`Onaylı OCR metni, alan değerleri ve doğrulanmış varlık ilişkilerinde ${rows.length} sonuç gösteriliyor${hasMore?" (daha fazlası var)":""}.`}</p>:null}<Table rows={rows} onOpen={open} empty={empty}/>
+      :`Onaylı OCR metni, alan değerleri ve doğrulanmış varlık ilişkilerinde ${rows.length} sonuç gösteriliyor${hasMore?" (daha fazlası var)":""}.`}
+      {/* §3.10: sunucunun sorgudan çıkardığı süzgeçler açıkça gösterilir. */}
+      {!unsearchable&&quickFilters.length?<span className="quick-filters">{quickFilters.map(filter=><code key={filter.key}><b>{filter.label}</b> = {filter.value}</code>)}</span>:null}</p>:null}<Table rows={rows} onOpen={open} empty={empty}/>
     {/* Sonuç kümesi sunucuda sayfalanır; liste sessizce kesilmez. */}
     {hasMore?<div className="list-more"><button className="outline" onClick={onLoadMore} disabled={loadingMore}>{loadingMore?<LoaderCircle className="spin" size={15}/>:<ChevronDown size={15}/>} Daha fazla göster</button></div>:null}
   </section></>;
@@ -157,6 +161,7 @@ export function ArchiveWorkspace(){
   const [overview,setOverview]=useState<Overview|null>(null);
   const [health,setHealth]=useState<HealthChecks|null>(null);
   const [nextCursor,setNextCursor]=useState<string|null>(null);
+  const [quickFilters,setQuickFilters]=useState<QuickFilter[]>([]);
   const [unsearchable,setUnsearchable]=useState(false);
   const [loadingMore,setLoadingMore]=useState(false);
   const searchRef=useRef<HTMLInputElement|null>(null);
@@ -194,11 +199,15 @@ export function ArchiveWorkspace(){
 
   const loadList=useCallback(async(signal?:AbortSignal)=>{
     const response=await fetch(buildQuery(),{signal});
-    const payload=await response.json() as {documents?:StoredDocument[];unsearchableQuery?:boolean;page?:{nextCursor:string|null}};
+    const payload=await response.json() as {documents?:StoredDocument[];unsearchableQuery?:boolean;
+      quickFilters?:QuickFilter[];page?:{nextCursor:string|null}};
     if(!response.ok) return;
     setRows((payload.documents??[]).map(toDocumentRow));
     setNextCursor(payload.page?.nextCursor??null);
     setUnsearchable(Boolean(payload.unsearchableQuery));
+    // §3.10: sunucunun anladığı süzgeçler ekranda doğrulanır; memur yazdığının
+    // süzgece dönüştüğünü görmezse dilin çalıştığına güvenemez.
+    setQuickFilters(payload.quickFilters??[]);
   },[buildQuery]);
 
   const loadContext=useCallback(async()=>{
@@ -273,7 +282,7 @@ export function ArchiveWorkspace(){
           :"Henüz arşivlenmiş belge yok."}
         open={openDocument} onUpload={()=>setUploadOpen(true)} canUpload={canUpload}
         onScan={()=>setScanOpen(true)}
-        query={query} onQuery={setQuery} unsearchable={unsearchable}
+        query={query} onQuery={setQuery} unsearchable={unsearchable} quickFilters={quickFilters}
         hasMore={Boolean(nextCursor)} loadingMore={loadingMore} onLoadMore={loadMore}
       />}
   </main></section><UploadDialog open={uploadOpen} onClose={()=>setUploadOpen(false)} onCreated={created}/><MobileScan open={scanOpen} onClose={()=>setScanOpen(false)}/>{toast&&<div className="toast" role="status"><CheckCircle2 size={17}/><span>{toast}</span><button onClick={()=>setToast("")} aria-label="Bildirimi kapat"><X size={15}/></button></div>}</div>;
