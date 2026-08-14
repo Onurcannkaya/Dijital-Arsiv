@@ -7,6 +7,7 @@ import {
 import { failure } from "../../../lib/errors";
 import { UnitDirectoryError, createUnit, listUnits, setUnitActive } from "../../../lib/unit-directory";
 import { rejectionReasonVocabulary } from "../../../lib/rejection-reasons";
+import { classificationVocabulary } from "../../../lib/file-plan";
 import { createTerm, listTerms, setTermActive } from "../../../lib/vocabulary-directory";
 
 /**
@@ -28,6 +29,18 @@ const MANAGED_VOCABULARIES = [
     name: "Varlık ilişkisi ret gerekçeleri",
     description: "Ada/parsel veya adres ilişkisi reddedilirken seçilir; denetim izine kodla ve etiketle yazılır.",
     vocabulary: rejectionReasonVocabulary("relation"),
+  },
+  {
+    key: "file-plan",
+    name: "Dosya planı",
+    description: "Arşivleme anında zorunlu tasnif (design.md §9.5). Başlangıç kayıtları TASLAKTIR; kurumsal Standart Dosya Planı onaylanınca buradan güncellenir (ADR-016).",
+    vocabulary: classificationVocabulary("file-plan"),
+  },
+  {
+    key: "retention-rule",
+    name: "Saklama kuralları",
+    description: "Arşivleme anında zorunlu saklama sınıfı. Süre dolması otomatik imha değildir; tasfiye ayrı ve kurullu bir süreçtir (ADR-016/ADR-018).",
+    vocabulary: classificationVocabulary("retention-rule"),
   },
 ] as const;
 

@@ -3,6 +3,10 @@ import { authorizeRequest, canAccessUnit } from "../../../../../lib/authorizatio
 import { requireArchiveSchema, getArchiveBindings, jsonError } from "../../../../../lib/archive-storage";
 import { resolveDocumentProfile } from "../../../../../lib/document-profile";
 import { MISSING_VALUE, formatViolation, requiredFields, verificationRequiredFields } from "../../../../../lib/field-policy";
+import {
+  FILE_PLAN_VOCABULARY_CODE, RETENTION_RULE_VOCABULARY_CODE, validateClassification,
+} from "../../../../../lib/file-plan";
+import { loadVocabularyTerms } from "../../../../../lib/document-profile";
 
 export const dynamic = "force-dynamic";
 
@@ -109,6 +113,22 @@ export async function POST(request: Request, context: RouteContext) {
     return jsonError("Kontrol bekleyen varlık ilişkileri karara bağlanmadan belge arşivlenemez.", 409);
   }
 
+  /*
+   * design.md §9.5 kararı: arşivleme tasnifi ZORUNLUDUR ve arşivleme anında
+   * istenir. Arşiv kaydı WORM'a girdikten sonra tasniflenemez; dosya planı ve
+   * saklama kuralı olmadan giren belge saklama hesabının dışında kalır
+   * (ADR-016: saklama bitişi onaylı plandan hesaplanır). Kod + etiket karar
+   * anının anlık görüntüsü olarak yazılır — sözlük sonradan değişse bile
+   * tasnif okunur kalır.
+   */
+  const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+  const [filePlanTerms, retentionTerms] = await Promise.all([
+    loadVocabularyTerms(DB, FILE_PLAN_VOCABULARY_CODE),
+    loadVocabularyTerms(DB, RETENTION_RULE_VOCABULARY_CODE),
+  ]);
+  const classification = validateClassification(body, filePlanTerms, retentionTerms);
+  if (typeof classification === "string") return jsonError(classification, 409);
+
   const audit = await prepareAuditEvent(DB, {
     documentId: id,
     actor: principal.email,
@@ -121,15 +141,23 @@ export async function POST(request: Request, context: RouteContext) {
       profileStatus: profile.profileStatus,
       requiredFields: requiredFields(profile).map((field) => field.fieldCode),
       sourceSha256: document.sha256,
+      filePlan: { code: classification.filePlanCode, label: classification.filePlanLabel },
+      retentionRule: { code: classification.retentionRuleCode, label: classification.retentionRuleLabel },
     },
   });
   await DB.batch([
-    DB.prepare("UPDATE archive_documents SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(id),
+    DB.prepare(`UPDATE archive_documents SET status = 'archived',
+        file_plan_code = ?, file_plan_label = ?, retention_rule_code = ?, retention_rule_label = ?,
+        updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .bind(classification.filePlanCode, classification.filePlanLabel,
+        classification.retentionRuleCode, classification.retentionRuleLabel, id),
     audit.statement,
   ]);
   return Response.json({
     archived: true, documentId: id, auditEvent: audit.eventNumber, eventHash: audit.eventHash,
     profile: { code: profile.code, version: profile.profileVersion },
     verifiedRelations: Number(relationSummary?.verified ?? 0),
+    filePlan: { code: classification.filePlanCode, label: classification.filePlanLabel },
+    retentionRule: { code: classification.retentionRuleCode, label: classification.retentionRuleLabel },
   });
 }

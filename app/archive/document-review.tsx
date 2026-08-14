@@ -10,6 +10,7 @@ import {
   FIELD_REJECTION_VOCABULARY_CODE, OTHER_REASON_CODE,
   RELATION_REJECTION_VOCABULARY_CODE, type RejectionReason,
 } from "../../lib/rejection-reasons";
+import { FILE_PLAN_VOCABULARY_CODE, RETENTION_RULE_VOCABULARY_CODE } from "../../lib/file-plan";
 import { confidencePhrase, technicalConfidence } from "../../lib/confidence-language";
 import { evidenceCropStyle, hasEvidenceBox } from "../../lib/evidence-crop";
 import { RelationBulkPanel } from "./relation-bulk-panel";
@@ -39,7 +40,8 @@ type FieldGroup = {
 type ProfileInfo = { code:string; name:string; version:string; status:string; ownerDepartment:string; recordedVersion:string|null };
 type VocabularyMap = Record<string, Array<{ code:string; label:string }> | null>;
 type DetailPage = { pageNumber:number; width:number; height:number; rawText:string; fullText:string; searchText:string; confirmedText:string|null; confirmedBy:string|null; confirmedAt:string|null; words:Array<{text:string;confidence:number;box:[number,number,number,number]}>; averageConfidence:number; model:string };
-type DetailDocument = { id:string; referenceNo:string; originalName:string; mediaType:string; byteSize:number; sha256:string; documentType:string; unit:string; status:string; uploadedBy:string; createdAt:string; updatedAt:string; fileUrl:string };
+type Classification = { code:string; label:string } | null;
+type DetailDocument = { id:string; referenceNo:string; originalName:string; mediaType:string; byteSize:number; sha256:string; documentType:string; unit:string; status:string; uploadedBy:string; createdAt:string; updatedAt:string; fileUrl:string; filePlan:Classification; retentionRule:Classification };
 type BinaryObject = { id:string; objectClass:string; mediaType:string; byteSize:number; sha256:string; retentionStatus:string; legalHoldStatus:string; generator:string|null; createdAt:string };
 type AuditEvent = { eventNumber:number; actor:string; action:string; details:unknown; previousHash:string|null; eventHash:string; createdAt:string };
 type OcrJobState = { status:string; attempt:number; maxAttempts:number; deadLettered:boolean;
@@ -68,6 +70,9 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
   // Gerekçe listeleri kurumun düzenlediği sözlüklerdir; kod içinde sabit değil.
   const fieldRejectionReasons:RejectionReason[]=detail?.vocabularies[FIELD_REJECTION_VOCABULARY_CODE]??[];
   const relationRejectionReasons:RejectionReason[]=detail?.vocabularies[RELATION_REJECTION_VOCABULARY_CODE]??[];
+  // §9.5: arşivleme tasnifi bu iki kontrollü listeden yapılır.
+  const filePlanTerms:RejectionReason[]=detail?.vocabularies[FILE_PLAN_VOCABULARY_CODE]??[];
+  const retentionRuleTerms:RejectionReason[]=detail?.vocabularies[RETENTION_RULE_VOCABULARY_CODE]??[];
   const [additions,setAdditions]=useState<Addition[]>([]);
   const [textDrafts,setTextDrafts]=useState<Record<number,string>>({});
   const [loading,setLoading]=useState(true);
@@ -291,12 +296,23 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     finally { setSavingText(false); }
   };
 
+  /*
+   * §9.5 kararı: arşivleme, tasnif diyaloğundan geçer — dosya planı ve
+   * saklama kuralı seçilmeden istek gönderilmez; sunucu da zaten reddeder.
+   */
+  const [archiveDialog,setArchiveDialog]=useState(false);
+  const [filePlanCode,setFilePlanCode]=useState("");
+  const [retentionRuleCode,setRetentionRuleCode]=useState("");
   const approve=async()=>{
     setSaving(true);setError("");setNotice("");
     try {
-      const response=await fetch(`/api/documents/${documentId}/approve`,{method:"POST"});
+      const response=await fetch(`/api/documents/${documentId}/approve`,{
+        method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({filePlanCode,retentionRuleCode}),
+      });
       const payload=await response.json() as {error?:string};
       if(!response.ok) throw new Error(payload.error||"Belge arşivlenemedi.");
+      setArchiveDialog(false);
       setNotice("Belge arşivlendi ve özet zincirine yeni denetim olayı eklendi.");
       await load();
     } catch(reason) { setError(reason instanceof Error?reason.message:"Belge arşivlenemedi."); }
@@ -536,7 +552,7 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
       <div>{needsOcr?
         canProcess?<button className="approve" onClick={process} disabled={processing}>{processing?<LoaderCircle className="spin" size={16}/>:<Play size={16}/>} OCR işlemini çalıştır</button>:<span className="archived-lock restricted"><LockKeyhole size={15}/> OCR yetkisi gerekli</span>:
         archived?<span className="archived-lock"><LockKeyhole size={15}/> Salt okunur</span>:
-        <>{canReview?<button className="outline save-fields" onClick={saveFields} disabled={saving||incompleteRejections.length>0||(!pendingValues&&!hasFieldChanges&&!hasAdditions)} title={incompleteRejections.length?"Reddedilen her değer için gerekçe seçilmelidir.":undefined}>{saving?<LoaderCircle className="spin" size={15}/>:<Save size={15}/>} {pendingValues?"Alanları onayla":"Düzeltmeleri kaydet"}</button>:null}{canArchive?<button className="approve" onClick={approve} disabled={saving||savingText||archiveBlocked} title={archiveBlockers.length?`Arşivlemeden önce tamamlanmalı: ${archiveBlockers.join(", ")}.`:undefined}><CheckCircle2 size={17}/> Doğrula ve arşivle</button>:null}{!canReview&&!canArchive?<span className="archived-lock restricted"><LockKeyhole size={15}/> Görüntüleme yetkisi</span>:null}</>}
+        <>{canReview?<button className="outline save-fields" onClick={saveFields} disabled={saving||incompleteRejections.length>0||(!pendingValues&&!hasFieldChanges&&!hasAdditions)} title={incompleteRejections.length?"Reddedilen her değer için gerekçe seçilmelidir.":undefined}>{saving?<LoaderCircle className="spin" size={15}/>:<Save size={15}/>} {pendingValues?"Alanları onayla":"Düzeltmeleri kaydet"}</button>:null}{canArchive?<button className="approve" onClick={()=>{setError("");setArchiveDialog(true);}} disabled={saving||savingText||archiveBlocked} title={archiveBlockers.length?`Arşivlemeden önce tamamlanmalı: ${archiveBlockers.join(", ")}.`:undefined}><CheckCircle2 size={17}/> Doğrula ve arşivle</button>:null}{!canReview&&!canArchive?<span className="archived-lock restricted"><LockKeyhole size={15}/> Görüntüleme yetkisi</span>:null}</>}
       </div>
       {ocrJob&&(needsOcr||ocrJob.status==="failed")
         ?<p className={`ocr-job-note ${ocrJob.deadLettered?"blocked":""}`}>
@@ -550,6 +566,35 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     </div>
     {error?<div className="inline-error"><AlertTriangle size={16}/>{error}</div>:null}
     {notice?<div className="inline-notice"><CheckCircle2 size={16}/>{notice}</div>:null}
+    {/* §9.5 kararı: tasnif arşivleme ANINDA ve ZORUNLU istenir. Arşiv kaydı
+        WORM'a girdikten sonra tasniflenemez; diyalog son kapıdır. */}
+    {archiveDialog?<div className="archive-dialog-backdrop" role="dialog" aria-label="Arşivleme tasnifi">
+      <div className="archive-dialog">
+        <header><LockKeyhole size={16}/><span><b>Arşivleme tasnifi</b>
+          <small>{detail.document.referenceNo} · arşivlendikten sonra kayıt salt okunur olur</small></span></header>
+        <label>Dosya planı
+          <select value={filePlanCode} onChange={event=>setFilePlanCode(event.target.value)}>
+            <option value="">— dosya planı seçin —</option>
+            {filePlanTerms.map(term=><option key={term.code} value={term.code}>{term.label}</option>)}
+          </select>
+        </label>
+        <label>Saklama kuralı
+          <select value={retentionRuleCode} onChange={event=>setRetentionRuleCode(event.target.value)}>
+            <option value="">— saklama kuralı seçin —</option>
+            {retentionRuleTerms.map(term=><option key={term.code} value={term.code}>{term.label}</option>)}
+          </select>
+        </label>
+        <p>Saklama süresinin dolması otomatik imha değildir; tasfiye ayrı ve kurullu bir süreçtir.</p>
+        <footer>
+          <button type="button" onClick={()=>setArchiveDialog(false)} disabled={saving}>Vazgeç</button>
+          <button type="button" className="approve" onClick={approve}
+            disabled={saving||!filePlanCode||!retentionRuleCode}
+            title={!filePlanCode||!retentionRuleCode?"Dosya planı ve saklama kuralı seçilmelidir.":undefined}>
+            {saving?<LoaderCircle className="spin" size={15}/>:<CheckCircle2 size={15}/>} Tasnifle ve arşivle
+          </button>
+        </footer>
+      </div>
+    </div>:null}
     {/* design.md §3.2 sekme şeridi: doğrulama, ilişkiler ve denetim izi ayrılır. */}
     <nav className="review-tabs" aria-label="Belge bölümleri">
       {([["fields","Belge ve alanlar",pendingValues],
@@ -607,6 +652,9 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
             <small>{detail.profile.ownerDepartment} belge türü tanımı uygulanıyor</small>
             {technical?<small className="tech-readout">{detail.profile.code} v{detail.profile.version}
               {detail.profile.recordedVersion&&detail.profile.recordedVersion!==detail.profile.version?` · belgede v${detail.profile.recordedVersion}`:""}</small>:null}
+            {/* §9.5: arşivlenmiş belgenin tasnifi karar anının anlık görüntüsüdür. */}
+            {detail.document.filePlan?<small className="classification-line">
+              {detail.document.filePlan.label} · {detail.document.retentionRule?.label??""}</small>:null}
           </span>
           <em className={`profile-status ${detail.profile.status.toLowerCase()}`}>{profileStatusLabels[detail.profile.status]??detail.profile.status}</em>
         </div>:null}

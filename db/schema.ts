@@ -24,6 +24,11 @@ export const archiveDocuments = sqliteTable("archive_documents", {
   documentProfileVersion: text("document_profile_version"),
   unit: text("unit").notNull().default("Belirlenmedi"),
   status: text("status").notNull().default("queued"),
+  // design.md §9.5: arşivleme tasnifi — karar anının kod + etiket anlık görüntüsü.
+  filePlanCode: text("file_plan_code"),
+  filePlanLabel: text("file_plan_label"),
+  retentionRuleCode: text("retention_rule_code"),
+  retentionRuleLabel: text("retention_rule_label"),
   uploadedBy: text("uploaded_by").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),

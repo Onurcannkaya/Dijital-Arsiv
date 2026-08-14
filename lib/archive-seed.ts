@@ -19,6 +19,10 @@ import {
   FIELD_REJECTION_VOCABULARY_CODE, RELATION_REJECTION_VOCABULARY_CODE,
   SEED_FIELD_REJECTION_REASONS, SEED_RELATION_REJECTION_REASONS,
 } from "./rejection-reasons.ts";
+import {
+  FILE_PLAN_VOCABULARY_CODE, RETENTION_RULE_VOCABULARY_CODE,
+  SEED_FILE_PLAN, SEED_RETENTION_RULES,
+} from "./file-plan.ts";
 
 export const SEED_PROFILE_VERSION = "1.0";
 export const DEFAULT_DOCUMENT_TYPE_CODE = "TASNIF_BEKLIYOR";
@@ -84,6 +88,26 @@ export const seedVocabularies: SeedVocabulary[] = [
     owner: "CBS birimi",
     source: "Yetkili adres/CBS kaynağından aktarılacak — henüz yüklenmedi",
     terms: [],
+  },
+  /*
+   * Dosya planı ve saklama kuralı (design.md §9.5): arşivleme tasnifi bu iki
+   * listeden yapılır ve zorunludur. Kayıtlar TASLAKTIR — ADR-016 gereği
+   * kurumsal dosya/saklama planı yetkili onaydan geçmeden üretim aslı
+   * kilitlenmez; onaylı plan geldiğinde liste ayarlardan güncellenir.
+   */
+  {
+    code: FILE_PLAN_VOCABULARY_CODE,
+    name: "Dosya planı",
+    owner: "Arşiv birimi / Yazı İşleri",
+    source: "TASLAK — kurumsal Standart Dosya Planı onayı bekliyor (ADR-016)",
+    terms: [...SEED_FILE_PLAN],
+  },
+  {
+    code: RETENTION_RULE_VOCABULARY_CODE,
+    name: "Saklama kuralları",
+    owner: "Arşiv birimi / Hukuk",
+    source: "TASLAK — kurumsal saklama planı onayı bekliyor (ADR-016); süre dolması otomatik imha değildir",
+    terms: [...SEED_RETENTION_RULES],
   },
 ];
 

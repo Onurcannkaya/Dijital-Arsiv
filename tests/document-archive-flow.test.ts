@@ -97,8 +97,15 @@ const call = async (server: NodeServer, path: string, init?: RequestInit) => {
   return { status: response.status, body: await response.json().catch(() => null) as { error?: string } & Record<string, unknown> };
 };
 
-const archive = (server: NodeServer, id: string) =>
-  call(server, `/api/documents/${id}/approve`, { method: "POST", headers: IDENTITY });
+/*
+ * §9.5 kararı: arşivleme tasnifi zorunludur; yardımcı, geçerli taslak
+ * kodlarla arşivler. Tasnifsiz/geçersiz istekler kendi testinde denenir.
+ */
+const CLASSIFICATION = { filePlanCode: "SDP-105-04", retentionRuleCode: "SUREKLI" };
+const archive = (server: NodeServer, id: string, classification: Record<string, unknown> = CLASSIFICATION) =>
+  call(server, `/api/documents/${id}/approve`, {
+    method: "POST", headers: JSON_IDENTITY, body: JSON.stringify(classification),
+  });
 
 const confirmFields = (server: NodeServer, id: string) =>
   call(server, `/api/documents/${id}/fields`, {
@@ -134,6 +141,50 @@ test("engeller sırayla ve gerekçesiyle bildirilir", async () => {
     // 3. Metin de onaylanınca engel kalmaz.
     assert.equal((await confirmText(server, id)).status, 200);
     assert.equal((await archive(server, id)).status, 200);
+  });
+});
+
+test("tasnifsiz arşivleme reddedilir; tasnif anlık görüntüyle yazılır", async () => {
+  await withServer(async (server) => {
+    /*
+     * §9.5 kararı: dosya planı ve saklama kuralı seçilmeden belge arşive
+     * giremez — WORM kilidinin ardından tasnif bir daha yapılamaz ve saklama
+     * bitişi onaylı plandan hesaplanamaz (ADR-016). Kod + etiket karar anının
+     * anlık görüntüsü olarak belgeye yazılır: sözlük sonradan değişse bile
+     * arşivdeki tasnif okunur kalır.
+     */
+    const id = await seedDocument(server);
+    assert.equal((await confirmFields(server, id)).status, 200);
+    assert.equal((await confirmText(server, id)).status, 200);
+
+    // Tasnifsiz istek: bütün öbür engeller aşılmışken bile reddedilir.
+    const bare = await archive(server, id, {});
+    assert.equal(bare.status, 409);
+    assert.match(bare.body.error ?? "", /Dosya planı ve saklama kuralı seçilmeden/);
+
+    // Kontrollü listede olmayan kod da reddedilir; serbest tasnif yoktur.
+    const bogus = await archive(server, id, { filePlanCode: "UYDURMA", retentionRuleCode: "SUREKLI" });
+    assert.equal(bogus.status, 409);
+    assert.match(bogus.body.error ?? "", /kontrollü listede bulunmuyor/);
+
+    // Geçerli tasnif: belge arşivlenir, kod + etiket kayda ve denetime girer.
+    const archived = await archive(server, id);
+    assert.equal(archived.status, 200);
+    const row = await server.db.prepare(`SELECT file_plan_code, file_plan_label,
+        retention_rule_code, retention_rule_label FROM archive_documents WHERE id = ?`)
+      .bind(id).first<{ file_plan_code: string; file_plan_label: string;
+        retention_rule_code: string; retention_rule_label: string }>();
+    assert.equal(row?.file_plan_code, "SDP-105-04");
+    assert.match(row?.file_plan_label ?? "", /Numarataj işlemleri/);
+    assert.equal(row?.retention_rule_code, "SUREKLI");
+    assert.match(row?.retention_rule_label ?? "", /Sürekli saklama/);
+
+    const event = await server.db.prepare(`SELECT details_json FROM audit_events
+      WHERE document_id = ? AND action = 'document.archived'`).bind(id).first<{ details_json: string }>();
+    const details = JSON.parse(event?.details_json ?? "{}") as {
+      filePlan?: { code: string }; retentionRule?: { code: string } };
+    assert.equal(details.filePlan?.code, "SDP-105-04", "denetim olayı dosya planını taşımıyor");
+    assert.equal(details.retentionRule?.code, "SUREKLI", "denetim olayı saklama kuralını taşımıyor");
   });
 });
 
