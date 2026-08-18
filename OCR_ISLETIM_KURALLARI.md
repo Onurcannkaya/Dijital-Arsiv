@@ -50,7 +50,11 @@ boşta durur ama kullanılamaz.
 
 Yani hız sorunu bir yazılım ayarı sorunu değil, **bellek boyutlandırma**
 sorunudur. 32 GB RAM'li bir makinede 4–6 işçi, bugünkü 74,7 saati 12–19 saate
-indirir.
+indirir. Karar önerisi ve gerekçesi
+`ARSIV_TARAMA_TEST_RAPORU.md` §12'dedir; oradaki uyarı burada da geçerli:
+donanım tek başına yetmez, cron turunun işleri eşzamanlı dağıtması gerekir
+(§5) ve bu değişiklik **donanım gelmeden açılmamalıdır** — bugünkü makinede
+ikinci işçi verimi yarıya düşürüyor.
 
 ## 3. İş parçacığı: fazlası zarar
 
