@@ -8,8 +8,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import boto3
-from botocore.exceptions import ClientError
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
@@ -71,21 +69,28 @@ def pdfium_version() -> str:
 
 
 def s3_client():
+    """S3 istemcisi TEMBEL kurulur (OCR servisiyle aynı düzen).
+
+    Modül tepesinde `import boto3` durduğu sürece servis, S3 yolu hiç
+    kullanılmasa bile boto3 olmadan açılamıyordu: yerel geliştirmede depo
+    Miniflare R2 emülasyonudur ve S3 ucu yoktur, yani PDF önizlemesi yalnız
+    bu import yüzünden hiç denenemiyordu.
+    """
+    import boto3
+
     return boto3.client("s3", endpoint_url=os.getenv("RENDER_S3_ENDPOINT_URL") or None)
 
 
-def download_original(reference: RenderRequest, destination: Path) -> None:
-    bucket = os.getenv("RENDER_ORIGINAL_BUCKET", "").strip()
-    if not bucket:
-        raise HTTPException(status_code=503, detail="RENDER_ORIGINAL_BUCKET tanımlı değil.")
-    if not reference.objectKey.startswith("originals/") or ".." in reference.objectKey.split("/"):
-        raise HTTPException(status_code=400, detail="Geçersiz asıl nesne anahtarı.")
-    response = s3_client().get_object(Bucket=bucket, Key=reference.objectKey)
-    if int(response.get("ContentLength", -1)) != reference.byteSize:
-        raise HTTPException(status_code=422, detail="Nesne boyutu yetkili kayıtla uyuşmuyor.")
+def s3_client_error() -> type[BaseException]:
+    from botocore.exceptions import ClientError
+
+    return ClientError
+
+
+def _verified_copy(reference: RenderRequest, body: Any, destination: Path) -> None:
+    """Kaynaktan bağımsız ortak güvence: boyut ve SHA-256 yeniden doğrulanır."""
     digest = hashlib.sha256()
     size = 0
-    body = response["Body"]
     try:
         with destination.open("wb") as output:
             while True:
@@ -101,6 +106,18 @@ def download_original(reference: RenderRequest, destination: Path) -> None:
         body.close()
     if size != reference.byteSize or digest.hexdigest() != reference.sha256.lower():
         raise HTTPException(status_code=422, detail="Nesne SHA-256 kanıtı uyuşmuyor.")
+
+
+def download_original(reference: RenderRequest, destination: Path) -> None:
+    if not reference.objectKey.startswith("originals/") or ".." in reference.objectKey.split("/"):
+        raise HTTPException(status_code=400, detail="Geçersiz asıl nesne anahtarı.")
+    bucket = os.getenv("RENDER_ORIGINAL_BUCKET", "").strip()
+    if not bucket:
+        raise HTTPException(status_code=503, detail="RENDER_ORIGINAL_BUCKET tanımlı değil.")
+    response = s3_client().get_object(Bucket=bucket, Key=reference.objectKey)
+    if int(response.get("ContentLength", -1)) != reference.byteSize:
+        raise HTTPException(status_code=422, detail="Nesne boyutu yetkili kayıtla uyuşmuyor.")
+    _verified_copy(reference, response["Body"], destination)
 
 
 def render_pages(source: Path, workdir: Path) -> list[Path]:
@@ -217,7 +234,7 @@ def upload_segment(reference: RenderRequest, part: int, source: Path) -> dict[st
                     "objectClass": "access",
                 },
             )
-    except ClientError as exc:
+    except s3_client_error() as exc:
         status = int(exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode", 0))
         code = str(exc.response.get("Error", {}).get("Code", ""))
         if status == 412 or code in {"PreconditionFailed", "ConditionalRequestConflict"}:

@@ -191,6 +191,46 @@ zinciri, girdi **tek bir karar** olduğunda uçtan uca çalışıyor.
    `DOCUMENT_RENDER_IMAGE_DIGEST` yok — uygulama açılışta bunu uyarı olarak
    yazıyor. Sonuç: yerelde PDF belgenin önizlemesi hiç oluşmaz.
 
+## 6.b Alan çıkarma düzeltmeleri (§6'daki 1, 2, 3, 4 ve 6 giderildi)
+
+Desenler artık satır satır değil **sayfa metninin tamamı** üzerinde çalışıyor ve
+eşleşme konumları kelime kutularına geri eşleniyor; satır sınırını aşan
+ifadeler ve alt satıra düşen karar numaraları böylece yakalanıyor.
+
+| Bulgu | Durum | Kanıt |
+|---|---|---|
+| Karar numarası alanı yok | giderildi | `document_number` (VERI_SOZLUGU.md §5) profil çekirdeğine eklendi; şema 30 |
+| Mahalle uzun öneki yutuyor | giderildi | `MAHALLESİ` öncesi TEK kelime; sözlük yüklendiğinde çok kelimeli adlar |
+| Tarihsel tarih biçimleri | giderildi | tek haneli gün/ay ve 3 haneli yıl; değer `GG.AA.YYYY` sıfır dolgulu |
+| Çoklu ada/parsel | giderildi | `42-43-44` üç parsele ayrılıyor; hukuki ek (`12/A`, `12-B`) korunuyor |
+| Satır sınırını aşan ada/parsel | giderildi | sayfa genelinde eşleşme; kanıt kutusu iki satırın birleşimi |
+| PDF'te CLAHE çalışmıyor | giderildi | sayfa görüntüye render edilip aynı ölçüt ve iyileştirmeden geçiyor |
+| Asıl/suret ayrımı | **açık** | kurumun profil envanteri ve tespit işaretleri gerekiyor (§8) |
+
+Gerçek dosyada doğrulama — `1975 - 1 - 600 Encümen Asıl.pdf`, sayfa 17–21
+(`model: PP-OCRv5+clahe-auto`, yani iyileştirme gerçekten uygulandı):
+
+| Alan | Çıkan değerler | Önceki durum |
+|---|---|---|
+| `document_date` | 25.02.1975, 18.02.1975, 29.01.1975, 07.02.1975 | bu külliyatta **%0** |
+| `document_number` | 442, 419, 351, 307 | alan hiç yoktu |
+| `neighborhood` | Kizilirmak, Sularbaşı | eski kod `Olarak Pulur` üretmişti |
+| `ada`/`parcel` | 211/74, 286/45, 288/2, 889/1, 932/64 | ilişkiler kuruldu |
+
+Tarih değerleri `risk=MEDIUM` geliyor: sıfır dolgulu biçim profildeki kalıbı
+karşılıyor. Ham biçimde bırakılsalardı kritik alanda biçim ihlali sayılıp
+`CRITICAL` olur ve öneri işe yaramazdı.
+
+Bu koşuda bir gerçek hata da yakalandı ve düzeltildi: iyileştirilmiş sayfa tek
+kanallı dizi olarak dönüyordu, Paddle'ın belge düzeltme ön işlemcisi ise
+`img.shape[2]` okuyor — dilim `IndexError` ile 500 veriyordu. Eski yol
+görüntüyü PNG'ye yazdığı için dönüşüm dosya okumada örtük yapılıyordu.
+
+Ölçülen bir sınır: `document_number` sayfa 20'de `1975` gibi yanlış bir aday da
+üretebiliyor. Tek değerli alan olduğu için belge kapanışında en güvenli aday
+seçilir; ama 487 ayrı karar taşıyan bir dosyada "belgenin karar numarası" zaten
+anlamsızdır — bu, §4'teki toplu dosya sorununun bir görünümüdür, desenin değil.
+
 ## 7. Uygulanan düzeltmeler (1 ve 2)
 
 İlk iki madde uygulandı ve gerçek arşiv dosyasıyla doğrulandı; ayrıntı §9'da.
@@ -210,19 +250,38 @@ zinciri, girdi **tek bir karar** olduğunda uçtan uca çalışıyor.
    adlandırılan, bayt sınırlı bir önbellekten okunur: dilimler aynı belgeyi
    yeniden indirmez.
 
-## 8. Kalan öneriler (öncelik sırasıyla)
+## 8. Kalan işler — kod değil KARAR gerektiriyor
 
-1. **Toplu tarama dosyaları için ayırma adımı.** Karar başlığı + karar numarası
-   ile sayfa aralıklarına böl, her karar için ayrı belge kaydı üret. Bunun
-   önkoşulu karar numarası alanının profile eklenmesidir.
-4. **Desen düzeltmeleri:** tek haneli gün/ay ve 3 haneli yıl için tarih deseni;
-   mahalle adını kontrollü sözlükle eşleyip en fazla 1–2 kelime geriye bakma;
-   çoklu parsel listelerini (`42-43-44`) ve satır sınırını aşan ada/parsel
-   çiftlerini yakalama.
-5. **PDF sayfalarını görüntüye render edip CLAHE yolundan geçir**, ya da
-   iyileştirmeyi PDF sayfaları için de uygula.
-6. **Yerel yığına `document-render`'ı ekle** ve eksik `DOCUMENT_RENDER_*`
-   değişkenlerini `.dev.vars`'a koy; yoksa PDF önizleme yerelde hiç test edilemez.
+Aşağıdaki üç madde kasten yapılmadı: üçü de kurumsal ya da mimari bir karar
+istiyor ve yarım bir uygulama, olmayandan daha kötüdür.
+
+1. **Toplu tarama dosyalarını kararlara bölmek.** Karar numarası alanı artık
+   var, yani önkoşul karşılandı. Ama bölme, tek bir yüklemeden N belge kaydı
+   üretmek demektir ve bu doğrudan yetkili nesne modeline dokunur: asıl nesne
+   değişmezdir (ADR-016) ve her karar kendi aslına mı, yoksa sayfa aralığı
+   türevine mi (ADR-015) bağlanacaktır? Ayrıca bölme ancak bütün sayfalar
+   okunduktan sonra yapılabilir (623 sayfa ≈ 8,6 saat) ve sınır tespiti eski
+   taramalarda hatasız değildir — yanlış bölünmüş bir karar, hiç bölünmemiş
+   olandan daha zor düzeltilir. Kararı verilmeden kodlanmamalıdır.
+
+2. **Asıl/suret ayrımı.** Şu an tek bir encümen profili var
+   ("Encümen karar sureti") ve her encümen kararı onunla etiketleniyor; bu
+   yüzden "Encümen Asıl" dosyasından gelen sayfa da "suret" görünüyor. Doğru
+   çözüm ayrı bir profil ve tespit işaretleri tanımlamaktır — bu, sınıflandırma
+   verisidir ve sahibi Yazı İşleri Müdürlüğü'dür (profiller `HYPOTHESIS`
+   durumunda). Servis kendi sözlüğünü uydurmaz (PROJE_PLANI.md 8. madde), bu
+   yüzden işaretler koda gömülmedi. Hafifletici: `document_type` alanı
+   `VERIFY_REQUIRED`, yani memur onaylamadan belge arşive girmiyor.
+
+3. **Yerelde PDF önizlemesi.** Denendi ve BLOKE: renderer türev bölümlerini
+   doğrudan nesne deposuna (S3) yazıyor, yerelde ise depo Miniflare R2
+   emülasyonudur ve S3 ucu yoktur. Okuma tarafı için iç uç var ama o uç
+   **bilerek salt-okunur** — üç kilidinden biri budur. Yerel önizleme, iç uca
+   bir YAZMA yolu eklemeyi gerektirir ve bu, güvenlik yüzeyini genişleten bir
+   tasarım kararıdır; yarım bırakmak yerine geri alındı. Bu koşuda yalnız
+   bağımsız bir kusur düzeltildi: renderer `boto3`'ü modül tepesinde içe
+   alıyordu ve S3 yolu hiç kullanılmasa bile bağımlılık olmadan açılamıyordu
+   (OCR servisi aynı bağımlılığı zaten işlev içinde alıyor).
 
 ## 9. Düzeltmelerin gerçek dosyada doğrulanması
 

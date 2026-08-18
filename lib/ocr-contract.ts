@@ -102,6 +102,13 @@ export type OcrProfilePayload = {
   profileVersion: string;
   vocabularyVersion: string | null;
   units: string[];
+  /**
+   * Kontrollü mahalle listesi. Boş olabilir: yetkili adres/CBS kaynağı henüz
+   * yüklenmedi. Liste geldiğinde çok kelimeli mahalle adları ("Ali Baba")
+   * doğru çıkarılır; boşken servis `MAHALLESİ`den önceki tek kelimeyi tahmin
+   * eder ve değeri yine personel doğrular.
+   */
+  neighborhoods: string[];
   documentTypes: Array<{ name: string; markers: string[] }>;
 };
 

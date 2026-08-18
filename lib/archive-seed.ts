@@ -145,6 +145,22 @@ function coreFields(required: string[]): SeedField[] {
       requirement: requirementOf("document_date"), isCritical: true,
       formatPattern: DATE_PATTERN, formatHint: "Belge tarihi GG.AA.YYYY biçiminde olmalıdır.",
     },
+    /*
+     * VERI_SOZLUGU.md §5 `document_number` — encümen ve meclis kararında karar
+     * numarası. Memurun bir kararı ararken kullandığı ilk anahtar budur; alan
+     * hiç tanımlı olmadığı için OCR `SAYI: 1635` ifadesini doğru okuduğu hâlde
+     * değer hiçbir yere yazılamıyordu.
+     *
+     * Sözlükte "koşullu" olduğu için varsayılan OPTIONAL: hangi belge türünde
+     * ARŞİVLEME İÇİN zorunlu olacağı kurumun tasnif kararıdır ve profil
+     * verisinden (`requiredFields`) yönetilir.
+     */
+    {
+      fieldCode: "document_number", label: "Belge/karar sayısı", dataType: "IDENTIFIER",
+      cardinality: "one", requirement: requirementOf("document_number"), isCritical: false,
+      formatPattern: "^[0-9A-Za-zÇĞİÖŞÜçğıöşü./-]{1,32}$",
+      formatHint: "Belge sayısı en çok 32 karakter olmalıdır; baştaki sıfırlar korunur.",
+    },
     {
       fieldCode: "neighborhood", label: "Mahalle", dataType: "TEXT", cardinality: "many",
       requirement: requirementOf("neighborhood"), isCritical: false,

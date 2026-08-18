@@ -74,13 +74,13 @@ class PageWindowTests(unittest.TestCase):
 
     def test_window_cap_limits_pages_and_reports_remainder(self):
         main._engine = FakeEngine()
-        pages, next_page = main.predict_pages(FakeDocument(10), 10, first_page=1, window=3, started=time.perf_counter())
+        pages, next_page, _ = main.predict_pages(FakeDocument(10), 10, first_page=1, window=3, started=time.perf_counter())
         self.assertEqual([page["pageNumber"] for page in pages], [1, 2, 3])
         self.assertEqual(next_page, 4, "kalan ilk sayfa bildirilmedi; belge yarıda kalırdı")
 
     def test_last_window_reports_no_remainder(self):
         main._engine = FakeEngine()
-        pages, next_page = main.predict_pages(FakeDocument(5), 5, first_page=4, window=3, started=time.perf_counter())
+        pages, next_page, _ = main.predict_pages(FakeDocument(5), 5, first_page=4, window=3, started=time.perf_counter())
         self.assertEqual([page["pageNumber"] for page in pages], [4, 5])
         self.assertIsNone(next_page, "belge bittiği hâlde kalan sayfa bildirildi")
 
@@ -93,7 +93,7 @@ class PageWindowTests(unittest.TestCase):
         """
         main._engine = FakeEngine(seconds=0.05)
         main.REQUEST_BUDGET_SECONDS = 0.01
-        pages, next_page = main.predict_pages(FakeDocument(20), 20, first_page=1, window=20, started=time.perf_counter())
+        pages, next_page, _ = main.predict_pages(FakeDocument(20), 20, first_page=1, window=20, started=time.perf_counter())
         self.assertEqual(len(pages), 1, "bütçe dolmasına rağmen dilim büyümeye devam etti")
         self.assertEqual(next_page, 2)
 
@@ -102,7 +102,7 @@ class PageWindowTests(unittest.TestCase):
         # halde iş hiç ilerlemeden sonsuza dek yeniden kuyruğa girer.
         main._engine = FakeEngine()
         main.REQUEST_BUDGET_SECONDS = 0.0
-        pages, next_page = main.predict_pages(FakeDocument(3), 3, first_page=1, window=3,
+        pages, next_page, _ = main.predict_pages(FakeDocument(3), 3, first_page=1, window=3,
                                               started=time.perf_counter() - 100)
         self.assertEqual(len(pages), 1)
         self.assertEqual(next_page, 2)
@@ -111,8 +111,65 @@ class PageWindowTests(unittest.TestCase):
         # Dilim numaraları belge genelinde mutlaktır; yeniden numaralandırma
         # sayfaların üst üste yazılmasına yol açardı.
         main._engine = FakeEngine()
-        pages, _ = main.predict_pages(FakeDocument(30), 30, first_page=17, window=2, started=time.perf_counter())
+        pages, _, _ = main.predict_pages(FakeDocument(30), 30, first_page=17, window=2, started=time.perf_counter())
         self.assertEqual([page["pageNumber"] for page in pages], [17, 18])
+
+    def test_faint_pdf_page_is_enhanced_like_an_uploaded_image(self):
+        """Soluk PDF sayfası da CLAHE yolundan geçer.
+
+        Eski kodda iyileştirme yalnız `image/*` yüklemelerinde çalışıyordu ve
+        PDF yolu hemen dönüyordu: arşivin tamamı PDF olduğu için soluk
+        1975/1983 taramaları — bu iyileştirmenin asıl hedefi — hiç
+        iyileştirilmiyordu.
+        """
+        import numpy as np
+
+        faint = FakeDocument(1)
+        """Soluk tarama ölçütü: parlaklık yüksek, kontrast dar, gri seviye ÇOK.
+
+        Seviye sayısı önemlidir: iki seviyeli bir görüntü gerçek siyah-beyaz
+        tarama sayılır ve bilerek iyileştirilmez.
+        """
+        gradient = np.arange(40 * 30, dtype="int32").reshape(40, 30) % 30 + 218
+        page = np.repeat(gradient.astype("uint8")[:, :, None], 3, axis=2)
+        page[10:20, 5:25] = 205
+        faint._pages = [page]
+        main._engine = FakeEngine()
+        _, _, enhanced = main.predict_pages(faint, 1, first_page=1, window=1, started=time.perf_counter())
+        self.assertTrue(enhanced, "soluk PDF sayfası iyileştirilmedi")
+
+    def test_enhanced_page_stays_three_channel(self):
+        """İyileştirilmiş sayfa ÜÇ KANALLI kalmalıdır.
+
+        Paddle'ın belge düzeltme ön işlemcisi `img.shape[2]` okur; tek kanallı
+        gri dizi verildiğinde IndexError ile çöker ve OCR isteği 500 döner.
+        Gerçek 1975 taramasında tam bu yaşandı: soluk sayfalar iyileştirmeyi
+        tetikledi ve dilim çöktü. Eski yol görüntüyü PNG'ye yazdığı için
+        dönüşüm dosya okumada örtük yapılıyordu.
+        """
+        import numpy as np
+
+        faint = FakeDocument(1)
+        gradient = np.arange(40 * 30, dtype="int32").reshape(40, 30) % 30 + 218
+        page = np.repeat(gradient.astype("uint8")[:, :, None], 3, axis=2)
+        page[10:20, 5:25] = 205
+        faint._pages = [page]
+        image, enhanced, _ = main.render_pdf_page(faint, 1)
+        self.assertTrue(enhanced, "test verisi iyileştirmeyi tetiklemedi")
+        self.assertEqual(image.ndim, 3, "iyileştirilmiş sayfa tek kanala düştü")
+        self.assertEqual(image.shape[2], 3)
+
+    def test_real_bilevel_pdf_page_is_left_alone(self):
+        # Gerçek siyah-beyaz tarama gereksiz yeniden işlemden korunur.
+        import numpy as np
+
+        crisp = FakeDocument(1)
+        page = np.zeros((40, 30, 3), dtype="uint8")
+        page[:20] = 255
+        crisp._pages = [page]
+        main._engine = FakeEngine()
+        _, _, enhanced = main.predict_pages(crisp, 1, first_page=1, window=1, started=time.perf_counter())
+        self.assertFalse(enhanced, "siyah-beyaz sayfa gereksiz yeniden işlendi")
 
     def test_busy_predictor_fails_fast_instead_of_burning_the_budget(self):
         main._engine = FakeEngine()

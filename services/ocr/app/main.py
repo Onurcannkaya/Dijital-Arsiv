@@ -221,26 +221,17 @@ def prepare_image(source_path: str, content_type: str) -> tuple[str, bool, int |
         return source_path, False, None, None, {}, None
     try:
         import cv2
-        import numpy as np
         image = cv2.imread(source_path, cv2.IMREAD_COLOR)
         if image is None:
             return source_path, False, None, None, {}, None
         height, width = image.shape[:2]
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        mean = float(gray.mean())
-        p05 = float(np.percentile(gray, 5))
-        p95 = float(np.percentile(gray, 95))
-        contrast_span = p95 - p05
-        unique_levels = int(np.unique(gray).size)
-        mode = os.getenv("PADDLEOCR_PREPROCESS", "auto").strip().lower()
-        is_bilevel = unique_levels <= 8
-        should_enhance = mode == "always" or (mode == "auto" and not is_bilevel and mean > 210 and contrast_span < 80)
-        metrics = {"mean": round(mean, 2), "contrastSpan": round(contrast_span, 2), "uniqueLevels": unique_levels}
+        # Ölçüt ve iyileştirme PDF sayfalarıyla ORTAK: iki yolda farklı eşik
+        # kullanılırsa aynı tarama biçimine göre farklı okunur.
+        metrics, should_enhance = quality_metrics(gray)
         if not should_enhance:
             return source_path, False, width, height, metrics, None
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
-        blurred = cv2.GaussianBlur(clahe, (0, 0), 1.0)
-        enhanced = cv2.addWeighted(clahe, 1.55, blurred, -0.55, 0)
+        enhanced = enhance_gray(gray)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as generated:
             generated_path = generated.name
         if not cv2.imwrite(generated_path, enhanced, [cv2.IMWRITE_PNG_COMPRESSION, 3]):
@@ -344,8 +335,43 @@ def cached_original(reference: OcrObjectRequest, suffix: str) -> str:
     return str(target)
 
 
-def render_pdf_page(document: Any, page_number: int) -> Any:
-    """PDF sayfasını çıkarım için BGR diziye çevirir (pdfium, 1 tabanlı sayfa)."""
+def quality_metrics(gray: Any) -> tuple[dict[str, float], bool]:
+    """Soluk tarama ölçütü: parlaklık yüksek, kontrast aralığı dar.
+
+    Gerçek siyah-beyaz taramalar (`uniqueLevels` küçük) gereksiz yeniden
+    işlemden korunur; ölçümde bu varyant güveni düşürüyordu.
+    """
+    import numpy as np
+
+    mean = float(gray.mean())
+    p05 = float(np.percentile(gray, 5))
+    p95 = float(np.percentile(gray, 95))
+    contrast_span = p95 - p05
+    unique_levels = int(np.unique(gray).size)
+    mode = os.getenv("PADDLEOCR_PREPROCESS", "auto").strip().lower()
+    is_bilevel = unique_levels <= 8
+    should_enhance = mode == "always" or (mode == "auto" and not is_bilevel and mean > 210 and contrast_span < 80)
+    metrics = {"mean": round(mean, 2), "contrastSpan": round(contrast_span, 2), "uniqueLevels": unique_levels}
+    return metrics, should_enhance
+
+
+def enhance_gray(gray: Any) -> Any:
+    """CLAHE + keskinleştirme; seçilen en iyi varyant (OCR_TEST_RAPORU.md)."""
+    import cv2
+
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    blurred = cv2.GaussianBlur(clahe, (0, 0), 1.0)
+    return cv2.addWeighted(clahe, 1.55, blurred, -0.55, 0)
+
+
+def render_pdf_page(document: Any, page_number: int) -> tuple[Any, bool, dict[str, float]]:
+    """PDF sayfasını çıkarım için hazırlar (pdfium, 1 tabanlı sayfa).
+
+    İyileştirme burada da uygulanır. Eski kodda `prepare_image` yalnız
+    `image/*` yüklemelerinde çalışıyordu ve PDF yolu hemen dönüyordu: soluk
+    1975/1983 taramaları — CLAHE'nin asıl hedefi — hiç iyileştirilmiyordu,
+    oysa arşivin tamamı PDF olarak geliyor.
+    """
     import numpy as np
 
     page = document[page_number - 1]
@@ -354,10 +380,25 @@ def render_pdf_page(document: Any, page_number: int) -> Any:
     if array.ndim == 3 and array.shape[2] >= 3:
         # pdfium RGB verir; Paddle cv2 düzeninde (BGR) bekler.
         array = array[:, :, 2::-1]
-    return np.ascontiguousarray(array)
+    array = np.ascontiguousarray(array)
+    try:
+        import cv2
+        gray = cv2.cvtColor(array, cv2.COLOR_BGR2GRAY) if array.ndim == 3 else array
+        metrics, should_enhance = quality_metrics(gray)
+        if should_enhance:
+            # Üç kanala geri çevrilir: Paddle'ın belge düzeltme ön işlemcisi
+            # `img.shape[2]` okur ve tek kanallı dizide IndexError ile çöker.
+            # Eski yol iyileştirilmiş görüntüyü PNG olarak yazdığı için bu
+            # dönüşüm dosya okumada örtük yapılıyordu.
+            enhanced = cv2.cvtColor(enhance_gray(gray), cv2.COLOR_GRAY2BGR)
+            return np.ascontiguousarray(enhanced), True, metrics
+        return array, False, metrics
+    except Exception:
+        # İyileştirme bir kolaylıktır; başarısız olursa ham sayfa işlenir.
+        return array, False, {}
 
 
-def predict_pages(document: Any, page_count: int, first_page: int, window: int, started: float) -> tuple[list[dict[str, Any]], int | None]:
+def predict_pages(document: Any, page_count: int, first_page: int, window: int, started: float) -> tuple[list[dict[str, Any]], int | None, bool]:
     """Sayfa penceresini işler; bütçe dolduğunda kalan ilk sayfayı bildirir.
 
     Kilit pencerenin tamamı için BİR kez alınır: pencere kısa olduğundan bu
@@ -367,12 +408,14 @@ def predict_pages(document: Any, page_count: int, first_page: int, window: int, 
     if not _predict_lock.acquire(timeout=LOCK_WAIT_SECONDS):
         raise HTTPException(status_code=503, detail="OCR çıkarımı başka bir belgeyle meşgul; iş kuyrukta kalmalı")
     pages: list[dict[str, Any]] = []
+    enhanced_any = False
     try:
         for offset in range(window):
             number = first_page + offset
             if number > page_count:
                 break
-            image = render_pdf_page(document, number)
+            image, enhanced, _ = render_pdf_page(document, number)
+            enhanced_any = enhanced_any or enhanced
             predictions = list(engine().predict(image))
             page = page_from_result(predictions[0], number) if predictions else {
                 "pageNumber": number, "width": 0, "height": 0, "rawText": "",
@@ -388,7 +431,7 @@ def predict_pages(document: Any, page_count: int, first_page: int, window: int, 
     finally:
         _predict_lock.release()
     served_to = first_page + len(pages) - 1
-    return pages, (served_to + 1 if served_to < page_count else None)
+    return pages, (served_to + 1 if served_to < page_count else None), enhanced_any
 
 
 def _verified_copy(reference: OcrObjectRequest, body: Any, destination: str) -> None:
@@ -490,12 +533,13 @@ def run_ocr(reference: OcrObjectRequest) -> dict[str, Any]:
     with single_flight(reference.documentId):
         source_path = cached_original(reference, suffix)
         if reference.mediaType == "application/pdf":
-            pages, next_page, page_count = ocr_pdf_window(reference, source_path, started)
+            pages, next_page, page_count, enhanced = ocr_pdf_window(reference, source_path, started)
             return {
-                "engine": "PaddleOCR", "model": base_model,
+                "engine": "PaddleOCR",
+                "model": f"{base_model}+clahe-auto" if enhanced else base_model,
                 "durationMs": int((time.perf_counter() - started) * 1000),
                 "documentId": reference.documentId,
-                "preprocessing": {"enhanced": False, "renderDpi": PDF_RENDER_DPI},
+                "preprocessing": {"enhanced": enhanced, "renderDpi": PDF_RENDER_DPI},
                 "profileVersion": document_profile.get("profileVersion"),
                 "vocabularyVersion": document_profile.get("vocabularyVersion"),
                 "accessDerivative": None,
@@ -540,8 +584,11 @@ def run_ocr(reference: OcrObjectRequest) -> dict[str, Any]:
                 Path(generated_path).unlink(missing_ok=True)
 
 
-def ocr_pdf_window(reference: OcrObjectRequest, source_path: str, started: float) -> tuple[list[dict[str, Any]], int | None, int]:
-    """PDF'in istenen sayfa dilimini işler ve (sayfalar, kalan ilk sayfa, toplam) döner."""
+def ocr_pdf_window(reference: OcrObjectRequest, source_path: str, started: float) -> tuple[list[dict[str, Any]], int | None, int, bool]:
+    """PDF'in istenen sayfa dilimini işler.
+
+    (sayfalar, kalan ilk sayfa, toplam sayfa, iyileştirme uygulandı mı) döner.
+    """
     try:
         import pypdfium2
     except ImportError as exc:
@@ -554,7 +601,7 @@ def ocr_pdf_window(reference: OcrObjectRequest, source_path: str, started: float
         if reference.pageFrom > page_count:
             raise HTTPException(status_code=400, detail=f"İstenen sayfa {reference.pageFrom}, belge {page_count} sayfa")
         window = min(reference.maxPages or MAX_PAGES_PER_REQUEST, MAX_PAGES_PER_REQUEST)
-        pages, next_page = predict_pages(document, page_count, reference.pageFrom, window, started)
-        return pages, next_page, page_count
+        pages, next_page, enhanced = predict_pages(document, page_count, reference.pageFrom, window, started)
+        return pages, next_page, page_count, enhanced
     finally:
         document.close()
