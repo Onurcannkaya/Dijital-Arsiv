@@ -409,7 +409,88 @@ belgesi yok**, oysa arşivde iki meclis cildi (515 sayfa) var. Bu sınıflandır
 verisidir ve §8'deki gerekçeyle uydurulmadı; ölçümler, doğrulanmış tespit
 işaretleri ve dört profillik öneri `MECLIS_PROFIL_ONERISI.md` taslağında.
 
-## 11. Test sırasında ortamda yapılanlar
+## 11. Hız ölçümleri — ayar değil, bellek
+
+İşletim kuralları `OCR_ISLETIM_KURALLARI.md` içindedir; buradaki bölüm o
+kuralların dayandığı ölçümdür. Örnek küme her dönemden birer gerçek sayfadır
+(1972, 1975, 1983, 2019, 2020, 2021) ve her varyantta süreyle birlikte satır
+sayısı, güven ve **gerçek alan çıkarımı** kaydedilmiştir — hız uğruna veri
+kaybını görmek için.
+
+### Motor ayarı: altı deneme, altısı da kayıp
+
+| Varyant | Ort. sn/sayfa | Toplam satır | Temele göre kaybedilen alan |
+|---|---:|---:|---|
+| **Temel (bugün)** | **43,9** | 292 | — |
+| Unwarp kapalı | 45,4 | 303 | 4 |
+| +Yön sınıflandırma kapalı | 44,3 | 303 | 4 |
+| İş parçacığı 16 | 58,8 | 303 | 4 |
+| İş parçacığı 2 | 63,9 | 284 | — |
+| Render 150 dpi | 46,4 | 279 | — |
+| Render 137 dpi | 44,5 | 284 | 2 |
+| Mobil tespit modeli | **249,2** (1 sayfa) | — | eleme |
+
+Kaybedilen alanlar somut: 1983'ün iki belge tarihi, 2020'nin karar numarası
+(854), 1972'nin müdürlüğü, 1975'in belge tarihi. Yani yardımcı modelleri
+kapatmak veya çözünürlüğü düşürmek bedava tasarruf değil, bedelsiz kayıptır.
+
+Çözünürlüğün işe yaramamasının sebebi yapısaldır: tespit girdisi
+`PADDLEOCR_DET_LIMIT_SIDE_LEN=1600` ile zaten küçültülüyor, tanıma kırpmaları da
+sabit yüksekliğe normalleştiriliyor. 200 dpi ile 137 dpi aynı tespit işini
+yapıyor; fark yalnız okunan metinde kalıyor (303 → 284 satır).
+
+### Paralellik: tavanı CPU değil bellek koyuyor
+
+| İşçi | sn/sayfa | Saatte sayfa | Sonuç |
+|---:|---:|---:|---|
+| 1 | **40,7** | **88** | en iyi |
+| 2 | 155,9 | 46 | verim yarıya düştü |
+| 3 | — | 0 | hiçbir işçi başlayamadı |
+| 4 | 106,1 | 68 | dört işçinin yalnız ikisi hayatta kaldı |
+
+Ölçülen sebep: işçi başına **4.841 MB RSS**. İki işçi 15,7 GB'lık makinenin
+9,7 GB'ını alıyor, boş RAM 0,31 GB'a iniyor, sistem takas belleğine giriyor —
+ısınma 29 sn'den 140 sn'ye, sayfa süresi 40,7'den 156 sn'ye çıkıyor. 20 çekirdek
+boşta durur ama kullanılamaz.
+
+Ölçüm sırasında iki tuzak da belgelendi: `OMP_NUM_THREADS=4` vermek **segfault**
+üretiyor (bu Paddle derlemesi OpenBLAS ile yapılmış ve çok iş parçacığını
+desteklemiyor), Windows'ta `multiprocessing` spawn ise Store `python` ara
+katmanıyla birleşince çocuk süreçleri hiç başlatmadan kilitliyor.
+
+### Metin katmanı kapısı: ölçülen tek gerçek kazanç
+
+Elde hem gömülü katman hem gerçek OCR bulunan 12 sayfa karşılaştırıldı. Ayırt
+edici sinyal Türkçe harf oranı: geçen tek sayfada %9,6 ve OCR'a %70 benzerlik,
+diğer hepsinde **%0** ve `say1lt`, `1le` gibi rakam-harf karışmaları.
+
+| Cilt | Sayfa | Kapıyı geçen |
+|---|---:|---:|
+| 2021 1-75 Encümen Asıl | 459 | 302 (%65,8) |
+| 2021 1-30 Meclis | 178 | 124 (%69,7) |
+| Diğer altı cilt | 6.392 | 0 |
+| **Toplam** | **7.029** | **426 (%6,1)** |
+
+Aynı yılın iki encümen cildinden biri %65,8 geçerken öbürü hiç geçmiyor; karar
+bu yüzden cilt başına değil **sayfa başına** verilir.
+
+Uçtan uca doğrulama: `2021 1-75` cildinden üç sayfa gerçek hattan geçirildi ve
+**0,2 saniyede** tamamlandı (OCR ile ~120 sn), dokuz alan çıktı
+(`ada=1104`, `parcel=16`, `document_date=19.01.2021`, müdürlük, iki mahalle) ve
+`ocr_pages.model` değeri üç sayfada `pdf-text-layer` yazıldı.
+
+### Takvim
+
+| Senaryo | Sayfa | Süre |
+|---|---:|---:|
+| Bugün, kapı yok | 7.029 | 79,5 saat |
+| Kapı ile (uygulandı) | 6.603 | **74,7 saat** |
+| 32 GB RAM + 4 işçi | 6.603 | **18,7 saat** |
+
+Yazılım tarafında yapılacak iş bitti. Kalan dört kat hızlanma bir bellek
+boyutlandırma kararıdır, ayar meselesi değil.
+
+## 12. Test sırasında ortamda yapılanlar
 
 - Tıkanmış OCR süreci durduruldu; servis düzeltmelerden sonra yeni kodla,
   ısınmış olarak yeniden başlatıldı (`:8090`, `modelReady: true`). Kullanıcının

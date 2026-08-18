@@ -14,6 +14,16 @@ export type OcrPage = {
   fullText: string;
   averageConfidence: number;
   words: OcrWord[];
+  /**
+   * Sayfanın metni NEREDEN geldi.
+   *
+   * Sayfa bazlı, çünkü aynı belgede iki kaynak karışabilir: gömülü metin
+   * katmanı güvenilir olan sayfalarda OCR hiç koşmaz (`pdf-text-layer`),
+   * taranmış sayfalarda model adı yazılır. Ölçümde aynı yılın bir cildinin
+   * %65,8'i katmandan geçerken öbürü hiç geçmedi, dolayısıyla belge düzeyinde
+   * tek bir model adı gerçeği yanlış kaydeder.
+   */
+  model?: string | null;
 };
 
 export type ExtractedField = {
@@ -138,7 +148,9 @@ export function parseOcrServiceResult(value: unknown): OcrServiceResult {
       if (typeof word.text !== "string" || !isNumber(word.confidence) || !isBox(word.box)) throw new Error("OCR kelime kanıtı geçersiz.");
       return { text: word.text, confidence: word.confidence, box: word.box };
     });
-    return { pageNumber: page.pageNumber, width: page.width, height: page.height, rawText: page.rawText, fullText: page.fullText, averageConfidence: page.averageConfidence, words };
+    return { pageNumber: page.pageNumber, width: page.width, height: page.height,
+      rawText: page.rawText, fullText: page.fullText, averageConfidence: page.averageConfidence,
+      words, model: typeof page.model === "string" && page.model.trim() ? page.model.trim() : null };
   });
 
   const fields = data.fields.map((item) => {

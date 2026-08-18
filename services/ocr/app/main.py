@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 import threading
 import time
@@ -36,6 +37,27 @@ bütçesini aştığında elindeki sayfayı bitirip döner, böylece istemcinin 
 vazgeçtiği bir çıkarım kilidi saatlerce tutmaz. Terk edilmiş koşuların
 kuyruğu zehirlemesi tam olarak bu sınırla engellenir.
 """
+"""Gömülü metin katmanı kapısı: güvenilir katman varsa OCR HİÇ koşmaz.
+
+Ölçüm (D:\\Arşiv, 12 sayfada katman ile gerçek OCR karşılaştırıldı): ayırt edici
+sinyal Türkçe harf oranıdır. Gerçekten dijital üretilmiş sayfada bu oran ~%9 ve
+metin OCR ile %70 örtüşüyor; eski bir OCR turundan gelen katmanlarda oran **%0**
+ve `say1lt`, `Miidiirliigiinden` gibi rakam-harf karışmaları var. Kapı tüm arşivde
+7.029 sayfanın 426'sını (%6,1) geçiriyor ve bunlar iki cilde toplanmıyor: aynı
+yılın iki encümen cildinden biri %65,8 geçerken öbürü %0 geçiyor. Bu yüzden karar
+cilt başına değil SAYFA başına verilir.
+
+Kapıdan geçen sayfada güven 1,0 bildirilir: değer bir model tahmini değil,
+belgenin kendi gömülü metnidir. Kapının işi tam olarak yalnız güvenilir katmanı
+kabul etmektir. Sağlama yine personelde kalır — kritik alanlar profilde
+`VERIFY_REQUIRED` olduğu için memur onayı olmadan belge arşive girmez.
+"""
+TEXT_LAYER_GATE = os.getenv("OCR_TEXT_LAYER_GATE", "true").strip().lower() == "true"
+LAYER_MIN_WORDS = int(os.getenv("OCR_LAYER_MIN_WORDS", "40"))
+LAYER_MIN_TR_RATIO = float(os.getenv("OCR_LAYER_MIN_TR_RATIO", "0.03"))
+LAYER_MAX_MIXED_RATIO = float(os.getenv("OCR_LAYER_MAX_MIXED_RATIO", "0.02"))
+TEXT_LAYER_MODEL = "pdf-text-layer"
+
 MAX_PAGES_PER_REQUEST = max(1, int(os.getenv("OCR_MAX_PAGES_PER_REQUEST", "8")))
 REQUEST_BUDGET_SECONDS = max(30.0, float(os.getenv("OCR_REQUEST_BUDGET_SECONDS", "240")))
 PDF_RENDER_DPI = max(72, int(os.getenv("OCR_PDF_RENDER_DPI", "200")))
@@ -364,6 +386,102 @@ def enhance_gray(gray: Any) -> Any:
     return cv2.addWeighted(clahe, 1.55, blurred, -0.55, 0)
 
 
+_TR_LETTERS = set("çğıöşüÇĞİÖŞÜ")
+_LAYER_WORD = re.compile(r"[0-9A-Za-zÇĞİÖŞÜçğıöşü]+")
+
+
+def layer_quality(text: str) -> tuple[dict[str, float], bool]:
+    """Gömülü katmanın güvenilir olup olmadığına karar verir.
+
+    Üç ölçüt: yeterli kelime, Türkçe harf varlığı ve rakam-harf karışmasının
+    yokluğu. İkincisi belirleyicidir — Türkçe dil modeli olmayan eski bir OCR
+    turu diakritikleri tümüyle düşürür ve oran sıfırlanır.
+    """
+    letters = [character for character in text if character.isalpha()]
+    words = _LAYER_WORD.findall(text)
+    if len(words) < LAYER_MIN_WORDS or not letters:
+        return {"words": len(words), "trRatio": 0.0, "mixedRatio": 0.0}, False
+    tr_ratio = sum(1 for character in letters if character in _TR_LETTERS) / len(letters)
+    mixed = [
+        word for word in words
+        if len(word) > 2 and any(c.isdigit() for c in word) and any(c.isalpha() for c in word)
+    ]
+    mixed_ratio = len(mixed) / len(words)
+    metrics = {
+        "words": len(words),
+        "trRatio": round(tr_ratio, 4),
+        "mixedRatio": round(mixed_ratio, 4),
+    }
+    return metrics, tr_ratio > LAYER_MIN_TR_RATIO and mixed_ratio < LAYER_MAX_MIXED_RATIO
+
+
+def layer_page(document: Any, page_number: int, dpi: int) -> dict[str, Any] | None:
+    """Katman güvenilirse sayfayı OCR ÇALIŞTIRMADAN üretir; değilse `None`.
+
+    Satır bazlı gruplanır: OCR yolu da satır düzeyinde `words` döndürür, kanıt
+    kırpmaları bu yüzden iki yolda aynı biçimde görünür. Kutular PDF
+    noktasından, OCR yolunun kullandığı render piksel uzayına çevrilir (y ekseni
+    ters çevrilir) — aksi hâlde inceleme ekranındaki kanıt kırpması kayar.
+    """
+    page = document[page_number - 1]
+    textpage = page.get_textpage()
+    try:
+        count = textpage.count_chars()
+        if not count:
+            return None
+        text = textpage.get_text_range(0, count)
+        metrics, passed = layer_quality(text)
+        if not passed:
+            return None
+
+        _, height_points = page.get_size()
+        scale = dpi / 72
+        words: list[dict[str, Any]] = []
+        start = 0
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            span = len(raw_line)
+            if line:
+                boxes = []
+                for index in range(start, min(start + span, count)):
+                    try:
+                        left, bottom, right, top = textpage.get_charbox(index)
+                    except Exception:  # noqa: BLE001 — boşluk karakterinde kutu olmayabilir
+                        continue
+                    if right > left and top > bottom:
+                        boxes.append((left, bottom, right, top))
+                if boxes:
+                    words.append({
+                        "text": line,
+                        # Katman metni model tahmini değil, belgenin kendi metni.
+                        "confidence": 1.0,
+                        "box": [
+                            round(min(b[0] for b in boxes) * scale, 1),
+                            round((height_points - max(b[3] for b in boxes)) * scale, 1),
+                            round(max(b[2] for b in boxes) * scale, 1),
+                            round((height_points - min(b[1] for b in boxes)) * scale, 1),
+                        ],
+                    })
+            # +1: splitlines ayırıcıyı düşürür, karakter dizininde ise yer tutar.
+            start += span + 1
+        if not words:
+            return None
+        raw_text = "\n".join(word["text"] for word in words)
+        return {
+            "pageNumber": page_number,
+            "width": int(page.get_size()[0] * scale),
+            "height": int(height_points * scale),
+            "rawText": raw_text,
+            "fullText": readable_text(words),
+            "averageConfidence": 1.0,
+            "words": words,
+            "model": TEXT_LAYER_MODEL,
+            "layerMetrics": metrics,
+        }
+    finally:
+        textpage.close()
+
+
 def render_pdf_page(document: Any, page_number: int) -> tuple[Any, bool, dict[str, float]]:
     """PDF sayfasını çıkarım için hazırlar (pdfium, 1 tabanlı sayfa).
 
@@ -398,22 +516,38 @@ def render_pdf_page(document: Any, page_number: int) -> tuple[Any, bool, dict[st
         return array, False, {}
 
 
-def predict_pages(document: Any, page_count: int, first_page: int, window: int, started: float) -> tuple[list[dict[str, Any]], int | None, bool]:
+def predict_pages(document: Any, page_count: int, first_page: int, window: int, started: float) -> tuple[list[dict[str, Any]], int | None, bool, int]:
     """Sayfa penceresini işler; bütçe dolduğunda kalan ilk sayfayı bildirir.
 
     Kilit pencerenin tamamı için BİR kez alınır: pencere kısa olduğundan bu
     diğer belgeleri uzun süre bekletmez, sayfa başına yeniden kilitlenmek ise
     dilimin ortasında uzun bir bekleme riski yaratır.
     """
-    if not _predict_lock.acquire(timeout=LOCK_WAIT_SECONDS):
-        raise HTTPException(status_code=503, detail="OCR çıkarımı başka bir belgeyle meşgul; iş kuyrukta kalmalı")
+    """Kapıdan geçen sayfalar çıkarım kilidini HİÇ almaz.
+
+    Katman okuması milisaniye mertebesindedir; onu tek uçuşlu kilidin arkasına
+    koymak, kuyruktaki başka belgeleri bedelsiz biçimde bekletirdi. Kilit bu
+    yüzden ilk gerçek çıkarıma kadar alınmaz.
+    """
     pages: list[dict[str, Any]] = []
     enhanced_any = False
+    layer_pages = 0
+    locked = False
     try:
         for offset in range(window):
             number = first_page + offset
             if number > page_count:
                 break
+            if TEXT_LAYER_GATE:
+                from_layer = layer_page(document, number, PDF_RENDER_DPI)
+                if from_layer:
+                    pages.append(from_layer)
+                    layer_pages += 1
+                    continue
+            if not locked:
+                if not _predict_lock.acquire(timeout=LOCK_WAIT_SECONDS):
+                    raise HTTPException(status_code=503, detail="OCR çıkarımı başka bir belgeyle meşgul; iş kuyrukta kalmalı")
+                locked = True
             image, enhanced, _ = render_pdf_page(document, number)
             enhanced_any = enhanced_any or enhanced
             predictions = list(engine().predict(image))
@@ -429,9 +563,10 @@ def predict_pages(document: Any, page_count: int, first_page: int, window: int, 
             if time.perf_counter() - started >= REQUEST_BUDGET_SECONDS:
                 break
     finally:
-        _predict_lock.release()
+        if locked:
+            _predict_lock.release()
     served_to = first_page + len(pages) - 1
-    return pages, (served_to + 1 if served_to < page_count else None), enhanced_any
+    return pages, (served_to + 1 if served_to < page_count else None), enhanced_any, layer_pages
 
 
 def _verified_copy(reference: OcrObjectRequest, body: Any, destination: str) -> None:
@@ -533,13 +668,14 @@ def run_ocr(reference: OcrObjectRequest) -> dict[str, Any]:
     with single_flight(reference.documentId):
         source_path = cached_original(reference, suffix)
         if reference.mediaType == "application/pdf":
-            pages, next_page, page_count, enhanced = ocr_pdf_window(reference, source_path, started)
+            pages, next_page, page_count, enhanced, layer_pages = ocr_pdf_window(reference, source_path, started)
             return {
                 "engine": "PaddleOCR",
                 "model": f"{base_model}+clahe-auto" if enhanced else base_model,
                 "durationMs": int((time.perf_counter() - started) * 1000),
                 "documentId": reference.documentId,
-                "preprocessing": {"enhanced": enhanced, "renderDpi": PDF_RENDER_DPI},
+                "preprocessing": {"enhanced": enhanced, "renderDpi": PDF_RENDER_DPI,
+                                  "textLayerPages": layer_pages, "ocrPages": len(pages) - layer_pages},
                 "profileVersion": document_profile.get("profileVersion"),
                 "vocabularyVersion": document_profile.get("vocabularyVersion"),
                 "accessDerivative": None,
@@ -584,10 +720,10 @@ def run_ocr(reference: OcrObjectRequest) -> dict[str, Any]:
                 Path(generated_path).unlink(missing_ok=True)
 
 
-def ocr_pdf_window(reference: OcrObjectRequest, source_path: str, started: float) -> tuple[list[dict[str, Any]], int | None, int, bool]:
+def ocr_pdf_window(reference: OcrObjectRequest, source_path: str, started: float) -> tuple[list[dict[str, Any]], int | None, int, bool, int]:
     """PDF'in istenen sayfa dilimini işler.
 
-    (sayfalar, kalan ilk sayfa, toplam sayfa, iyileştirme uygulandı mı) döner.
+    (sayfalar, kalan ilk sayfa, toplam sayfa, iyileştirme, katmandan gelen sayfa) döner.
     """
     try:
         import pypdfium2
@@ -601,7 +737,7 @@ def ocr_pdf_window(reference: OcrObjectRequest, source_path: str, started: float
         if reference.pageFrom > page_count:
             raise HTTPException(status_code=400, detail=f"İstenen sayfa {reference.pageFrom}, belge {page_count} sayfa")
         window = min(reference.maxPages or MAX_PAGES_PER_REQUEST, MAX_PAGES_PER_REQUEST)
-        pages, next_page, enhanced = predict_pages(document, page_count, reference.pageFrom, window, started)
-        return pages, next_page, page_count, enhanced
+        pages, next_page, enhanced, layer_pages = predict_pages(document, page_count, reference.pageFrom, window, started)
+        return pages, next_page, page_count, enhanced, layer_pages
     finally:
         document.close()
