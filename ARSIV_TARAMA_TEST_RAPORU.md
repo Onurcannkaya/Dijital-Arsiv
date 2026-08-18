@@ -404,9 +404,10 @@ Tur başına üç belgenin terfi etmesi tesadüf değil: `lib/scheduled-jobs.ts`
 zinciri, terfi ve OCR kuyruğu birden çok belgeyi hâlihazırda taşıyor.
 
 Denemenin asıl getirisi özellik değil, §6.c'de düzeltilen iki tespit kusurunun
-ortaya çıkması oldu. Ayrıca meclis kararı için **hiç profil yok** (yürürlükteki
-altı profil arasında bulunmuyor), oysa arşivde iki meclis cildi var — bu
-sınıflandırma verisidir ve §8'deki gerekçeyle uydurulmadı.
+ortaya çıkması oldu. Üçüncü bulgu: yürürlükteki altı profil arasında **meclis
+belgesi yok**, oysa arşivde iki meclis cildi (515 sayfa) var. Bu sınıflandırma
+verisidir ve §8'deki gerekçeyle uydurulmadı; ölçümler, doğrulanmış tespit
+işaretleri ve dört profillik öneri `MECLIS_PROFIL_ONERISI.md` taslağında.
 
 ## 11. Test sırasında ortamda yapılanlar
 
