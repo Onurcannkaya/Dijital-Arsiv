@@ -189,6 +189,32 @@ class NeighborhoodTests(unittest.TestCase):
         fields = extract_fields(page_of("bu mahallesi ve mahallesi"))
         self.assertEqual(values(fields, "neighborhood"), [])
 
+    def test_split_name_does_not_become_a_second_neighborhood(self):
+        """OCR adı böldüğünde parça, mahalle değeri olarak yazılmaz.
+
+        Ölçülen kusur: 1975 cildinin bir sayfasında OCR `Kizilirmak` adını bir
+        kez doğru, bir kez `Kizilir mak` olarak okudu ve mahalle alanına hem
+        `Kizilirmak` hem **`Mak`** yazıldı. Alan kritik olmadığı için risk LOW
+        kalıyor, yani uydurma değer personel doğrulaması zorlanmadan arşive
+        girebiliyordu.
+        """
+        fields = extract_fields(page_of(
+            "ait Kizilir mak Mh. arsanin ifrazinin",
+            "adina tapuca kayitli Kizilirmak Mh.ki 217pay pafta, 932 ada, ve 64 parseldeki",
+        ))
+        self.assertEqual(values(fields, "neighborhood"), ["Kizilirmak"])
+
+    def test_digit_inside_the_name_does_not_produce_a_fragment(self):
+        # `Kizil1rmak` okunduğunda desen rakamdan sonrasını yakalıyor ve
+        # mahalle `Rmak` oluyordu. Gerçek ad, ayırıcı olmadan rakamı izlemez.
+        fields = extract_fields(page_of("ait Kizil1rmak Mh. arsanin ifrazi"))
+        self.assertEqual(values(fields, "neighborhood"), [])
+
+    def test_two_different_neighborhoods_both_survive(self):
+        # Ayıklama yalnız GERÇEK son ekleri düşürür; ayrı adlar korunur.
+        fields = extract_fields(page_of("Emek Mahallesi 5 ada", "Kizilirmak Mahallesi 7 ada"))
+        self.assertEqual(sorted(values(fields, "neighborhood")), ["Emek", "Kizilirmak"])
+
 
 class DocumentNumberTests(unittest.TestCase):
     """Karar/belge sayısı — VERI_SOZLUGU.md §5 `document_number`.

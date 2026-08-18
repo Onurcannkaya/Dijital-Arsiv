@@ -281,10 +281,51 @@ def _neighborhood(folded: str, match: re.Match[str], terms: list[str]) -> str | 
         if start >= 0 and folded[start:start + len(folded_term)] == folded_term:
             if start == 0 or not folded[start - 1].isalpha():
                 return term
+    """Kelimenin ORTASINDAN başlayan eşleşme reddedilir.
+
+    Ölçülen kusur: OCR `Kizilirmak` adını `Kizil1rmak` okuduğunda desen
+    rakamdan sonrasını yakalıyor ve mahalle değeri `Rmak` oluyordu. Gerçek bir
+    mahalle adı, araya ayırıcı girmeden hemen bir rakamın ardından gelmez.
+    """
+    başlangıç = match.start("ad")
+    if başlangıç > 0 and folded[başlangıç - 1].isalnum():
+        return None
     name = match.group("ad").strip("'")
     if _upper(name) in _MAHALLE_STOP or len(name) < 3:
         return None
     return _title_tr(name)
+
+
+def _drop_fragments(
+    candidates: list[tuple[str, list[dict[str, Any]]]],
+    terms: list[str],
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Aynı sayfada başka bir adayın SONU olan mahalle adaylarını düşürür.
+
+    Ölçülen kusur: OCR aynı sayfada adı bir kez doğru (`Kizilirmak Mh.`), bir kez
+    bölünmüş (`Kizilir mak Mh.`) okuduğunda mahalle alanına hem `Kizilirmak` hem
+    `Mak` yazılıyordu. Alan kritik olmadığı için risk LOW kalıyor, yani uydurma
+    değer personel doğrulaması zorlanmadan arşive girebiliyordu.
+
+    Yalnız GERÇEK son ekler düşürülür: `Mak`, `Kizilirmak`ın sonudur ama
+    `Emek` ile `Kizilirmak` birbirinin parçası değildir.
+    """
+    değerler = [value for value, _ in candidates]
+    kontrollü = {_upper(term) for term in terms}
+    kalan = []
+    for value, evidence in candidates:
+        # Kontrollü listede geçen ad ASLA parça sayılmaz: sözlük yüklendiğinde
+        # `Şehir` ile `Yenişehir` aynı sayfada geçse bile ikisi de korunur.
+        if _upper(value) in kontrollü:
+            kalan.append((value, evidence))
+            continue
+        parça = any(
+            other != value and _upper(other).endswith(_upper(value))
+            for other in değerler
+        )
+        if not parça:
+            kalan.append((value, evidence))
+    return kalan
 
 
 def extract_fields(pages: list[dict[str, Any]], profile: dict[str, Any] | None = None) -> list[dict[str, Any]]:
@@ -334,11 +375,16 @@ def extract_fields(pages: list[dict[str, Any]], profile: dict[str, Any] | None =
             for parcel in _split_parcels(match.group("parseller")):
                 add(_field("parcel", parcel, page, evidence, parcel, group))
 
+        # Adaylar önce toplanır: parça olan adayı ayıklamak sayfanın tamamını
+        # görmeyi gerektirir (aynı ad bir kez doğru, bir kez bölünmüş okunabilir).
+        mahalle_adaylari: list[tuple[str, list[dict[str, Any]]]] = []
         for match in MAHALLE.finditer(folded):
             value = _neighborhood(folded, match, neighborhoods)
             if value:
                 evidence = _evidence(words, owners, match.start("ad"), match.end())
-                add(_field("neighborhood", value, page, evidence, _upper(value)))
+                mahalle_adaylari.append((value, evidence))
+        for value, evidence in _drop_fragments(mahalle_adaylari, neighborhoods):
+            add(_field("neighborhood", value, page, evidence, _upper(value)))
 
         for match in TARIH.finditer(text):
             value = _normalized_date(match)
