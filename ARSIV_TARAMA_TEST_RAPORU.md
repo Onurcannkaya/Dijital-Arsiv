@@ -490,7 +490,78 @@ Uçtan uca doğrulama: `2021 1-75` cildinden üç sayfa gerçek hattan geçirild
 Yazılım tarafında yapılacak iş bitti. Kalan dört kat hızlanma bir bellek
 boyutlandırma kararıdır, ayar meselesi değil.
 
-## 12. Test sırasında ortamda yapılanlar
+## 12. Donanım önerisi — 32 GB RAM
+
+**Öneri:** OCR'ın koştuğu makine **32 GB RAM**'e çıkarılsın; en az 8 fiziksel
+çekirdek bulunsun. Bu, 6.603 sayfalık OCR yükünü **74,7 saatten ~18,7 saate**
+indirir.
+
+### Neden 32 GB
+
+Ölçülen tek kısıt bellektir (§11). İşçi başına **4.841 MB** yerleşik bellek
+gerekiyor:
+
+| Bileşen | Bellek |
+|---|---:|
+| 4 OCR işçisi | 19,4 GB |
+| İşletim sistemi + uygulama + veritabanı | ~6 GB |
+| **Toplam ihtiyaç** | **~25 GB** |
+| Önerilen (baş payı ile) | **32 GB** |
+
+Baş payı isteğe bağlı bir konfor değil: bugünkü makinede boş RAM 0,31 GB'a
+düştüğünde sistem takas belleğine girdi ve **sayfa süresi 40,7 sn'den 156 sn'ye
+çıktı**. Yani belleğin son yüz megabaytı tükendiğinde kazanç kayba dönüyor.
+32 GB, 4 işçiyi bu eşiğe yaklaşmadan çalıştırır ve 5. işçiye de yer bırakır.
+
+Çekirdek sayısı ikincil kısıttır: her işçi 4 iş parçacığı kullanır (ölçülen
+optimum), yani 4 işçi 16 iş parçacığı ister. Bugünkü 20 mantıksal çekirdek buna
+yeter; darboğaz CPU değil.
+
+### Tek başına yeterli DEĞİL: eşzamanlı dağıtım gerekiyor
+
+Donanım alınsa bile bugünkü kod 4 işçiyi kullanamaz. `lib/scheduled-jobs.ts`
+OCR turunu sırayla döndürüyor (`while (processed < 5)`, her adım `await`):
+uygulama tek seferde tek iş dağıtıyor, dolayısıyla fazladan işçiler boş durur.
+
+Bu değişikliğin veri güvenliği **ölçüldü ve güvenli çıktı** (§11; altı eşzamanlı
+tetikleme, altı ayrı belge, kayıp yok) ve
+`tests/ocr-concurrent-claim.test.ts` ile sabitlendi — ama **uygulanmadı**.
+Yani 18,7 saatlik hedef iki adım ister:
+
+1. 32 GB RAM (satın alma/sağlama kararı),
+2. Cron turunun işleri eşzamanlı dağıtması (küçük kod değişikliği).
+
+İkisinden biri eksikse kazanç gerçekleşmez. Sırası önemli değildir; kod
+değişikliği tek başına bugünkü makinede zarar verir (§11: iki işçi verimi
+yarıya düşürüyor), bu yüzden **donanım gelmeden açılmamalıdır**.
+
+### Bu öneri neyi çözmez
+
+- **Sayfa başına süre değişmez.** ~40 sn/sayfa bu motorun bu sınıf CPU'daki
+  maliyetidir; altı ayar denemesi bunu iyileştiremedi (§11). Kazanç yalnız
+  sayfaların aynı anda işlenmesinden gelir.
+- **Toplu dosya sorunu ayrıdır.** Bir dosyada yüzlerce karar bulunması
+  (§4) bir bölme kararı bekliyor (`ADR-019`); hızla ilgisi yoktur.
+- **Metin katmanı kapısı zaten uygulandı** ve kazancı (%6,1) yukarıdaki
+  74,7 saatin içindedir; donanımdan bağımsızdır.
+
+### Ölçülmemiş alternatif: GPU
+
+Bütün ölçümler CPU üzerinde yapıldı; bu makinede GPU yok
+(`paddle.device.cuda.device_count() = 0`). PaddleOCR GPU'da tipik olarak kat
+kat hızlanır, ama **bunu ölçmedim** ve ölçmeden sayı vermem doğru olmaz. GPU'lu
+bir makine seçenekse, satın alma öncesi tek günlük bir ölçüm 32 GB'lık CPU
+kurulumundan daha iyi bir sonuç verip vermeyeceğini gösterir. Bellek kuralı
+orada da geçerli olacaktır: her işçi kendi modelini yükler.
+
+### Alternatif maliyet
+
+Donanım alınmazsa yük ortadan kalkmaz, **takvime** yazılır: mevcut makinede
+74,7 saat kesintisiz işlem demek, o makinenin üç gün boyunca başka işe
+ayrılamaması demektir. Arşive yeni cilt eklendikçe bu süre doğrusal büyür —
+7.029 sayfa bugünkü envanterdir, hedef değil.
+
+## 13. Test sırasında ortamda yapılanlar
 
 - Tıkanmış OCR süreci durduruldu; servis düzeltmelerden sonra yeni kodla,
   ısınmış olarak yeniden başlatıldı (`:8090`, `modelReady: true`). Kullanıcının
