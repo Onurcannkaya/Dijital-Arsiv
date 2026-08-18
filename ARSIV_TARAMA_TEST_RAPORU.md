@@ -231,6 +231,56 @@ görüntüyü PNG'ye yazdığı için dönüşüm dosya okumada örtük yapılı
 seçilir; ama 487 ayrı karar taşıyan bir dosyada "belgenin karar numarası" zaten
 anlamsızdır — bu, §4'teki toplu dosya sorununun bir görünümüdür, desenin değil.
 
+## 6.c Belge türü tespiti (§6'daki 5. bulgunun kod tarafı)
+
+Toplu yükleme denemesi (§11) tespitin iki kusurunu ölçtü ve ikisi de giderildi.
+
+**İşaret gerçek başlıkta hiç eşleşmiyordu.** Tohumdaki işaret `ENCÜMEN KARAR`,
+başlık ise `BELEDİYE ENCÜMENİ KARAR`. Üç encümen kararının üçünde de eşleşme
+yoktu; tür alanı dolduğunda bu başlıktan değil gövdedeki bir cümleden geliyordu.
+Veritabanındaki 26 gerçek sayfanın başlıkları çıkarıldığında sorunun boyutu
+görüldü — OCR aynı kelimeyi dört ayrı biçimde veriyor ve okuma sırasını
+bozuyor:
+
+| Gerçek başlık (ölçüm) | Kaynak |
+|---|---|
+| `SÍVAS BELEDİYE ENCÜMENİ KARAR SAYI: 1629` | 2021 |
+| `SIVAS BELEDIYE ENCUMENİ KARAR Sayi 565` | 1975 s3 |
+| `SIVAS BELEDIYE ENCUMENT KARAR Sayi 542` | 1975 s8 — İ harfi **T** okunmuş |
+| `SIVAS KARAR BELEDIYE ENCÜMENİ Sayi 518` | 1975 s11 — **sıra bozuk** |
+
+Bu yüzden eşleşme artık ASCII katlaması üzerinde, kelime ÖNEKİ olarak ve belge
+türü işaretlerinde **sıra aranmadan** yapılıyor. Sıra zorlanamaz: `SIVAS KARAR
+BELEDIYE ENCÜMENİ` biçimi sıralı eşleşmede kaçar. Müdürlük adları metinde
+bitişik öbek olarak geçtiği için orada sıra korunuyor, yalnız ASCII katlaması
+ekleniyor — bu da `evrakin Zabita Müdürlüğüne tevdiine` gibi `ı` harfini
+kaybetmiş satırları yakalıyor.
+
+**Belgenin konusu, türünü eziyordu.** 2019 cildinin 12. sayfası `İşyeri açma
+ruhsatı` olarak etiketlenmişti: başlığı `BELEDİYE ENCÜMENİ KARAR` olmasına
+rağmen gövdede ruhsatsız faaliyetten söz edildiği için o türün işareti önce
+eşleşiyordu. Tespit artık önce **başlık bölgesini** (ilk 120 karakter) arıyor;
+orada eşleşme varsa gövdedeki başka tür işaretleri yok sayılıyor. Başlıkta
+hiçbir işaret yoksa gövdeye düşülüyor — 1975 cildinin ilk sayfasında OCR
+başlıktaki `ENCÜMENİ` satırını tümüyle kaçırmış ve tür ancak gövdeden
+bulunabiliyor.
+
+Ölçülen sonuç, veritabanındaki 26 gerçek sayfa üzerinde:
+
+| | Önce | Sonra |
+|---|---:|---:|
+| Türü tespit edilen sayfa | 3 (hepsi gövdeden, kazara) | **21** |
+| Yanlış tür | 1 (`İşyeri açma ruhsatı`) | **0** |
+
+Uçtan uca kanıt: aynı tuzak sayfa yeni bir belge olarak hattan geçirildiğinde
+`profil=ENCUMEN_KARARI`, `tür=Encümen karar sureti` döndü (2 sayfa, 9 alan,
+87,4 sn). Müdürlük `Zabıta Müdürlüğü` — gelen yazı gerçekten o müdürlükten
+geldiği için bu **doğru**; ilk raporda bunu da hatalı saymıştım, değil.
+
+Kalan sınır: başlıkta hiçbir işaret eşleşmezse gövde yedeği yine yanlış tür
+seçebilir. Eskiye göre daha iyi (başlık artık gövdeyi yeniyor) ama tespit hâlâ
+`VERIFY_REQUIRED` bir öneridir; memur onaylamadan belge arşive girmez.
+
 ## 7. Uygulanan düzeltmeler (1 ve 2)
 
 İlk iki madde uygulandı ve gerçek arşiv dosyasıyla doğrulandı; ayrıntı §9'da.
@@ -326,18 +376,57 @@ rota + gerçek şema + SQLite) ve `services/ocr/tests/test_page_window.py`
 (10 test: pencere sınırı, bütçe, mutlak sayfa numarası, tek uçuş koruması).
 `npm run verify` 440 testle temiz geçiyor.
 
-## 10. Test sırasında ortamda yapılanlar
+## 10. Toplu dosya yükleme denemesi
+
+**Böyle bir özellik yok.** Üç yüzeyin hepsi tek dosya alıyor:
+
+- `app/archive/upload-dialog.tsx` — `type="file"` girişinde `multiple` yok ve
+  `files?.item(0)` ile yalnız ilk dosya alınıyor;
+- aynı dosyada sürükle-bırak da `dataTransfer.files.item(0)` — beş dosya
+  bırakıldığında dördü **sessizce** düşer;
+- `app/archive/mobile-scan.tsx` — kamera ve galeri girişleri de tekil.
+
+Arayüzde geçen "toplu" ifadeleri toplu **parsel onayı** paneline aittir.
+
+Buna karşılık **arka uç N belgeyi taşıyor.** Bir toplu yükleyicinin altta
+yapacağı iş elle koşturuldu: dört ayrı cilt sayfası arka arkaya hattan
+geçirildi.
+
+| Aşama | Sonuç |
+|---|---|
+| Dört dosya karantinaya | 1,3 sn; dördü de `QUARANTINED` |
+| Tarama + terfi turları | Tur 1'de 3, tur 2'de 1 → dördü `ACCEPTED` |
+| Belge kaydı | 4/4 oluştu |
+| OCR (sırayla) | 72,6 / 48,0 / 44,0 / 47,0 sn — dördü `review` |
+
+Tur başına üç belgenin terfi etmesi tesadüf değil: `lib/scheduled-jobs.ts` turu
+üç işle sınırlıyor. Yani toplu yükleme büyük ölçüde **arayüz işi**; kabul
+zinciri, terfi ve OCR kuyruğu birden çok belgeyi hâlihazırda taşıyor.
+
+Denemenin asıl getirisi özellik değil, §6.c'de düzeltilen iki tespit kusurunun
+ortaya çıkması oldu. Ayrıca meclis kararı için **hiç profil yok** (yürürlükteki
+altı profil arasında bulunmuyor), oysa arşivde iki meclis cildi var — bu
+sınıflandırma verisidir ve §8'deki gerekçeyle uydurulmadı.
+
+## 11. Test sırasında ortamda yapılanlar
 
 - Tıkanmış OCR süreci durduruldu; servis düzeltmelerden sonra yeni kodla,
   ısınmış olarak yeniden başlatıldı (`:8090`, `modelReady: true`). Kullanıcının
   `:3000` üzerindeki geliştirme sunucusuna ve `:8091` tarama taklidine
   dokunulmadı. `npm run dev:hizmetler` yığınının kendi OCR alt süreci ölü;
   yığını Ctrl+C ile kapatıp yeniden başlatmak temiz durumu geri getirir.
-- Yerel geliştirme şeması 28'den **29**'a göç etti (yeni `next_page` /
-  `page_count` kolonları). Göç, yarım kalmış OCR işlerini sıfırlar.
-- Yerel geliştirme veritabanına bir test belgesi eklendi:
-  `ARS-2026-C42F7DFC` / `ornek-2021-encumen.pdf` (`review` durumunda, arayüzden
-  incelenebilir).
+- Yerel geliştirme şeması 28'den **30**'a göç etti (29: `next_page` /
+  `page_count`; 30: `document_number` alanı ve alan sırası hizalaması). Göç,
+  yarım kalmış OCR işlerini sıfırlar.
+- Uygulama sunucusu bir ara kapalıydı; toplu yükleme denemesi için yeniden
+  başlatıldı (`:3000`).
+- Yerel geliştirme veritabanına altı test belgesi eklendi (hepsi `review`
+  durumunda, arayüzden incelenebilir): `ornek-2021-encumen.pdf`,
+  `karar-a/b/c/d.pdf` ve `ruhsat-tuzagi.pdf`. `karar-c.pdf` düzeltmeden ÖNCE
+  işlendiği için hâlâ `İşyeri açma ruhsatı` görünür; aynı içerik düzeltmeden
+  sonra `ruhsat-tuzagi.pdf` olarak `Encümen karar sureti` döndü. Tasnifi
+  yapılmış bir belgenin türü OCR tarafından değiştirilmediği için karar-c
+  kendiliğinden düzelmez.
 - Eski koddan kalan, `%TEMP%` içindeki 1.557 MB'lık sızmış geçici PDF
   **silinmedi** (yeni kod artık bunları üretmiyor); temizlik için:
 
@@ -345,7 +434,7 @@ rota + gerçek şema + SQLite) ve `services/ocr/tests/test_page_window.py`
   Get-ChildItem $env:TEMP -Filter "tmp*.pdf" | Where-Object Length -gt 100MB | Remove-Item
   ```
 
-- 1975 belgesinin işi **16/623 sayfada, `queued`** durumda duruyor ve kaldığı
+- 1975 belgesinin işi **21/623 sayfada, `queued`** durumda duruyor ve kaldığı
   yerden sürecek. Yerelde OCR cron'u ateşlenmediği için kendiliğinden
   ilerlemez; `POST /api/jobs/process?documentId=…` her çağrıldığında bir dilim
   daha işler.

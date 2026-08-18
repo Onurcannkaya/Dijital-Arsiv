@@ -24,6 +24,72 @@ def _fold(value: str) -> str:
     return "".join(folded)
 
 
+_ASCII_FOLD = str.maketrans({
+    "İ": "I", "ı": "I", "Ş": "S", "ş": "S", "Ğ": "G", "ğ": "G",
+    "Ü": "U", "ü": "U", "Ö": "O", "ö": "O", "Ç": "C", "ç": "C",
+})
+
+
+def _fold_ascii(value: str) -> str:
+    """Türkçe harfleri ASCII karşılığına indirir; UZUNLUĞU korur.
+
+    Eski taramalarda OCR Türkçe harfleri sık sık kaybediyor: gerçek başlıklarda
+    `BELEDIYE ENCUMENI`, `ENCÜMENI` ve `ENCÜMENT` (İ harfi T okunmuş) biçimleri
+    aynı belge türünde yan yana görüldü. İşaret eşleşmesi bu yüzden ASCII
+    katlaması üzerinde yapılır. Uzunluk korunur, çünkü eşleşme konumları kelime
+    kutularına geri eşlenir.
+    """
+    folded = []
+    for character in value:
+        mapped = character.translate(_ASCII_FOLD).upper()
+        folded.append(mapped if len(mapped) == 1 else character)
+    return "".join(folded)
+
+
+def _spans(folded_ascii: str) -> list[tuple[int, int, str]]:
+    """ASCII katlanmış metni (başlangıç, bitiş, kelime) üçlülerine böler."""
+    return [(match.start(), match.end(), match.group(0))
+            for match in re.finditer(r"[A-Z0-9]+", folded_ascii)]
+
+
+def _phrase_span(spans: list[tuple[int, int, str]], tokens: list[str], limit: int | None = None) -> tuple[int, int] | None:
+    """Jetonları ARDIŞIK ve SIRALI arar; her jeton kelime ÖNEKİ olarak eşleşir.
+
+    Müdürlük adları metinde bitişik bir öbek olarak geçer
+    (`Emlak ve İstimlak Müdürlüğünden`), bu yüzden sıra korunur. Önek eşleşmesi
+    Türkçe ekleri karşılar: `MUDURLUGU` jetonu `MUDURLUGUNDEN` kelimesini bulur.
+    """
+    if not tokens:
+        return None
+    for index in range(len(spans) - len(tokens) + 1):
+        if limit is not None and spans[index][0] >= limit:
+            break
+        if all(spans[index + offset][2].startswith(tokens[offset]) for offset in range(len(tokens))):
+            return spans[index][0], spans[index + len(tokens) - 1][1]
+    return None
+
+
+def _terms_span(spans: list[tuple[int, int, str]], tokens: list[str], limit: int | None = None) -> tuple[int, int] | None:
+    """Jetonların hepsini bölgede arar; SIRA VE BİTİŞİKLİK ARAMAZ.
+
+    Belge türü işaretleri için sıra zorlanamaz: ölçülen gerçek başlıklarda OCR
+    okuma sırası bozuluyor ve `BELEDIYE ENCÜMENİ KARAR` ile
+    `SIVAS KARAR BELEDIYE ENCÜMENİ` aynı külliyatta yan yana çıkıyor. Sıralı
+    eşleşme ikincisini kaçırır ve encümen kararlarının büyük bölümü tasnif
+    edilmemiş kalır.
+    """
+    if not tokens:
+        return None
+    window = [span for span in spans if limit is None or span[0] < limit]
+    matched: list[tuple[int, int]] = []
+    for token in tokens:
+        hit = next(((start, end) for start, end, word in window if word.startswith(token)), None)
+        if not hit:
+            return None
+        matched.append(hit)
+    return min(start for start, _ in matched), max(end for _, end in matched)
+
+
 def _title_tr(value: str) -> str:
     lowered = value.replace("İ", "i").replace("I", "ı").lower()
     return " ".join(part[:1].translate(TR_UPPER).upper() + part[1:] for part in lowered.split())
@@ -119,6 +185,19 @@ BELGE_SAYISI = re.compile(
 )
 
 MUHATAP = re.compile(r"(?:İLGİLİSİ|MUHATAP)\s*[:\-]?\s*(?P<ad>[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ\s]{2,60})")
+
+
+"""Başlık bölgesinin genişliği.
+
+Ölçülen gerçek başlıklar 20–50 karakter içinde tür bilgisini veriyor
+(`T.C. SİVAS BELEDİYE ENCÜMENİ KARAR SAYI: 1621`). 120 karakter, başlığın
+dağınık okuma sırasını da kapsayacak kadar geniş, gövdeye taşmayacak kadar dar.
+"""
+HEADER_CHARS = 120
+
+
+def _tokens(value: str) -> list[str]:
+    return re.findall(r"[A-Z0-9]+", _fold_ascii(value))
 
 
 def _units(profile: dict[str, Any]) -> list[str]:
@@ -277,16 +356,33 @@ def extract_fields(pages: list[dict[str, Any]], profile: dict[str, Any] | None =
             evidence = _evidence(words, owners, match.start("ad"), match.end())
             add(_field("addressee", value, page, evidence, value))
 
+        spans = _spans(_fold_ascii(text))
+
         for unit in units:
-            position = folded.find(_upper(unit))
-            if position >= 0:
-                add(_field("unit", unit, page, _evidence(words, owners, position, position + len(unit)), unit))
+            span = _phrase_span(spans, _tokens(unit))
+            if span:
+                add(_field("unit", unit, page, _evidence(words, owners, *span), unit))
                 break
 
-        for name, markers in document_types:
-            position = next((folded.find(marker) for marker in markers if folded.find(marker) >= 0), -1)
-            if position >= 0:
-                add(_field("document_type", name, page, _evidence(words, owners, position, position + 1), name))
-                break
+        """Belge türü: önce BAŞLIK bölgesi, bulunamazsa sayfanın tamamı.
+
+        Ölçülen kusur: 2019 encümen cildinin bir sayfası "İşyeri açma ruhsatı"
+        olarak etiketlendi. Başlığı `BELEDİYE ENCÜMENİ KARAR`dı ama gövdede
+        ruhsatsız faaliyetten söz edildiği için başka bir türün işareti önce
+        eşleşti. İşaret sayfanın her yerinde eşit ağırlıkta arandığı sürece
+        belgenin KONUSU, belgenin TÜRÜNÜ ezmeye devam eder.
+        """
+        def detect(limit: int | None) -> tuple[str, tuple[int, int]] | None:
+            for name, markers in document_types:
+                for marker in markers:
+                    span = _terms_span(spans, _tokens(marker), limit)
+                    if span:
+                        return name, span
+            return None
+
+        detected = detect(HEADER_CHARS) or detect(None)
+        if detected:
+            type_name, type_span = detected
+            add(_field("document_type", type_name, page, _evidence(words, owners, *type_span), type_name))
 
     return fields

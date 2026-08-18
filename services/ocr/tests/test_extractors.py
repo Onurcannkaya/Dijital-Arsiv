@@ -223,5 +223,90 @@ class DocumentNumberTests(unittest.TestCase):
         self.assertEqual(values(fields, "document_number"), [])
 
 
+class DocumentTypeDetectionTests(unittest.TestCase):
+    """Belge türü tespiti: başlık ayrıcalıklı, OCR varyantlarına dayanıklı.
+
+    İki ölçülen kusur:
+
+    1. `ENCÜMEN KARAR` işareti gerçek başlıkların hiçbirinde eşleşmiyordu.
+       Başlık `BELEDİYE ENCÜMENİ KARAR` yazıyor; OCR bunu `ENCÜMENI`,
+       `ENCUMENİ` ve `ENCÜMENT` (İ harfi T okunmuş) biçimlerinde de veriyor ve
+       okuma sırası bozulup `SIVAS KARAR BELEDIYE ENCÜMENİ` olabiliyor. Encümen
+       kararları bu yüzden tasnif edilmemiş kalıyordu; tür alanı dolduğunda ise
+       bu, başlıktan değil gövde metnindeki bir cümleden geliyordu.
+    2. İşaret sayfanın her yerinde eşit ağırlıkta arandığı için 2019 encümen
+       cildinin bir sayfası `İşyeri açma ruhsatı` oldu: gövdede ruhsatsız
+       faaliyetten söz ediliyordu ve o türün işareti önce eşleşti.
+    """
+
+    PROFILE = {
+        "profileVersion": "1.0", "vocabularyVersion": "1.0", "neighborhoods": [],
+        "units": ["Zabıta Müdürlüğü", "Emlak ve İstimlak Müdürlüğü"],
+        "documentTypes": [
+            {"name": "Encümen karar sureti", "markers": ["ENCÜMEN KARAR"]},
+            {"name": "İşyeri açma ruhsatı", "markers": ["İŞYERİ AÇMA"]},
+            {"name": "Yapı kullanma izin belgesi", "markers": ["YAPI KULLANMA İZİN"]},
+        ],
+    }
+
+    def type_of(self, *lines):
+        fields = extract_fields(page_of(*lines), self.PROFILE)
+        return next((f["value"] for f in fields if f["name"] == "document_type"), None)
+
+    def test_real_header_variants_all_match_one_marker(self):
+        # Dördü de gerçek taramalardan; işaret tek: "ENCÜMEN KARAR".
+        for header in (
+            "SÍVAS BELEDİYE ENCÜMENİ KARAR SAYI: 1629",
+            "SIVAS BELEDIYE ENCUMENİ KARAR Sayi 565",
+            "SIVAS BELEDIYE ENCUMENT KARAR Sayi 542",
+            "T. C. SIVAS BELEDIYE ENCÜMENI KARAR Sayi: .2673",
+        ):
+            with self.subTest(header=header):
+                self.assertEqual(self.type_of(header), "Encümen karar sureti")
+
+    def test_scrambled_reading_order_still_matches(self):
+        # OCR okuma sırası başlıkta bozulabiliyor; sıra zorlanamaz.
+        self.assertEqual(
+            self.type_of("SIVAS KARAR BELEDIYE ENCÜMENİ Sayi 518 Müdirlüğünden verilen"),
+            "Encümen karar sureti")
+
+    def test_header_beats_another_types_marker_in_the_body(self):
+        """Ölçülen kusurun testi: konu, türü ezmemeli."""
+        self.assertEqual(
+            self.type_of(
+                "T.C. SÍVAS BELEDİYE ENCÜMENİ KARAR SAYI: 1621",
+                "Başkanlığın 31/12/2019 tarihinde Encümene havaleli Zabıta Müdürlüğünden verilen yazı",
+                "Hasan ÖZKAYNAKÇI'nın ruhsatsız faaliyet gösterdiği, işyeri açma ve çalışma ruhsatı bulunmadığı",
+            ),
+            "Encümen karar sureti")
+
+    def test_body_still_detects_when_header_has_no_marker(self):
+        # 1975 cildinin ilk sayfasında OCR başlıktaki ENCÜMENİ satırını
+        # kaçırmış; tür yine gövdeden bulunabilmelidir.
+        self.assertEqual(
+            self.type_of(
+                "T. C. SIVAS KARAR Sayi 595 uhasebe wüdürlüğünden verilen 14/3/975 tarihli yazi",
+                "verilmesinin belirtildiği anlaşıldı. Belediye Encümenin 4/2/975 tarih ve 261 sayılı kararı",
+            ),
+            "Encümen karar sureti")
+
+    def test_unrelated_page_gets_no_type(self):
+        # Hiçbir işaret eşleşmiyorsa tür uydurulmaz.
+        self.assertIsNone(self.type_of("Gi T.C. SİVAS BELEDİYE MECLİSİ Karar No: 29 OCAK AYI TOPLANTISI"))
+
+    def test_unit_matches_although_ocr_lost_the_dotless_i(self):
+        # Gerçek metin: "evrakin Zabita Müdürlüğüne tevdiine" — `ı` kaybolmuş.
+        fields = extract_fields(page_of(
+            "SIVAS KARAR BELEDIYE ENCÜMENİ Sayi 547",
+            "işlemin yapılmasi için evrakin Zabita Müdürlüğüne tevdiine ll/3/l975 tarihinde",
+        ), self.PROFILE)
+        self.assertEqual(values(fields, "unit"), ["Zabıta Müdürlüğü"])
+
+    def test_unit_suffix_does_not_block_the_match(self):
+        fields = extract_fields(page_of(
+            "Emlak ve İstimlak Müdürlüğünden verilen aynı tarih ve 4315 sayılı yazı"), self.PROFILE)
+        self.assertEqual(values(fields, "unit"), ["Emlak ve İstimlak Müdürlüğü"])
+
+
 if __name__ == "__main__":
     unittest.main()
