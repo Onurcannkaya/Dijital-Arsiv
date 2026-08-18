@@ -60,10 +60,18 @@ test("OCR eşleşen ada/parsel için varlık ilişkisi önerir", async () => {
     read("services/ocr/app/extractors.py"),
     read("lib/ocr-contract.ts"),
   ]);
-  assert.match(extractors, /parcel-\{parcel_group\}/);
+  /*
+   * Grup ADA değerine göre kurulur. Eşleşme başına kurulsaydı
+   * `152 ada 42-43-44 nolu parseller` ifadesinde ada değeri tekrarlandığı için
+   * ikinci ve üçüncü parsel adasız kalır ve ilişkileri hiç kurulmazdı.
+   */
+  assert.match(extractors, /group = f"parcel-\{ada\}"/);
   assert.match(contract, /group\?: string \| null/);
   assert.match(processor, /parcelGroups/);
   assert.match(processor, /resolveParcelEntity/);
+  // Bir grup birden çok parsel taşıyabilir; her parsel için ayrı ilişki kurulur.
+  assert.match(processor, /parcels: PersistedField\[\]/);
+  assert.match(processor, /for \(const parcel of entry\.parcels\)/);
   // Öneri doğrulanmış hukuki ilişki sayılmaz.
   assert.match(processor, /relationType: "TEXT_MENTION"/);
   assert.match(processor, /verificationStatus: "SUGGESTED"/);

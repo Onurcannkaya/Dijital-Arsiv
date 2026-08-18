@@ -284,6 +284,98 @@ test("tek değerli alan belgenin tamamı okunduktan sonra en güvenli adayla kap
   }
 });
 
+const relationLabels = async (server: NodeServer) => (await server.db
+  .prepare(`SELECT e.display_label AS label FROM document_entity_relations r
+    INNER JOIN entities e ON e.id = r.entity_id
+    WHERE r.document_id = ? ORDER BY e.display_label`).bind(DOC)
+  .all<{ label: string }>()).results.map((row) => row.label);
+
+test("karar sayısı alanı profilde tanımlı olduğu için kaydedilir", async () => {
+  /*
+   * VERI_SOZLUGU.md §5 `document_number`. Alan profilde hiç tanımlı olmadığı
+   * için OCR `SAYI: 1635` ifadesini doğru okuduğu hâlde değer hiçbir yere
+   * yazılamıyordu; memurun bir kararı ararken kullandığı ilk anahtar buydu.
+   */
+  const ocr = await fakeWindowedOcr({
+    pageCount: 1, windowSize: 1,
+    fieldsFor: (pageNumber) => [{
+      name: "document_number", value: "1635", normalizedValue: "1635", confidence: 0.98,
+      pageNumber, box: [0, 0, 40, 20], evidenceText: "SAYI: 1635",
+    }],
+  });
+  try {
+    await withServer(ocr.url, async (server) => {
+      const result = await runOcr(server);
+      assert.equal(result.body.completed, true);
+      const row = await server.db.prepare(`SELECT field_value, risk_level, verification_status
+        FROM extracted_fields WHERE document_id = ? AND field_name = 'document_number'`).bind(DOC)
+        .first<{ field_value: string; risk_level: string; verification_status: string }>();
+      assert.ok(row, "karar sayısı kaydedilmedi; alan profilde tanımlı değil");
+      assert.equal(row.field_value, "1635");
+      // Kritik olmayan alan personel onayına kapatılmaz ama öneri olarak kalır.
+      assert.equal(row.verification_status, "SUGGESTED");
+    });
+  } finally {
+    await ocr.close();
+  }
+});
+
+test("bir adaya bağlı birden çok parsel için ayrı ilişki kurulur", async () => {
+  /*
+   * `152 ada 42-43-44 nolu parseller` tevhit/ifraz kararlarının tipik
+   * biçimidir. Grup başına tek parsel varsayıldığında yalnız son parsel
+   * eşlenir, diğerleri sessizce düşerdi.
+   */
+  const ocr = await fakeWindowedOcr({
+    pageCount: 1, windowSize: 1,
+    fieldsFor: (pageNumber) => [
+      { name: "ada", value: "152", normalizedValue: "152", confidence: 0.97, pageNumber, box: [0, 0, 90, 20], evidenceText: "152 ada 42-43-44 nolu parseller", group: "parcel-152" },
+      { name: "parcel", value: "42", normalizedValue: "42", confidence: 0.97, pageNumber, box: [0, 0, 90, 20], evidenceText: "152 ada 42-43-44 nolu parseller", group: "parcel-152" },
+      { name: "parcel", value: "43", normalizedValue: "43", confidence: 0.97, pageNumber, box: [0, 0, 90, 20], evidenceText: "152 ada 42-43-44 nolu parseller", group: "parcel-152" },
+      { name: "parcel", value: "44", normalizedValue: "44", confidence: 0.97, pageNumber, box: [0, 0, 90, 20], evidenceText: "152 ada 42-43-44 nolu parseller", group: "parcel-152" },
+    ],
+  });
+  try {
+    await withServer(ocr.url, async (server) => {
+      const result = await runOcr(server);
+      assert.equal(result.body.completed, true);
+      assert.deepEqual(await relationLabels(server),
+        ["152 ada 42 parsel", "152 ada 43 parsel", "152 ada 44 parsel"]);
+    });
+  } finally {
+    await ocr.close();
+  }
+});
+
+test("ada önceki dilimde yazılmışsa yeni parselin ilişkisi yine kurulur", async () => {
+  /*
+   * Ada değeri dilimler arası tekrarda yeni satır açmaz. Var olan satırın
+   * kimliği taşınmazsa, sonraki dilimde bulunan parsel adasız kalır ve
+   * ilişkisi hiç kurulmaz — uzun bir belgede bu sessiz veri kaybıdır.
+   */
+  const ocr = await fakeWindowedOcr({
+    pageCount: 2, windowSize: 1,
+    fieldsFor: (pageNumber) => [
+      { name: "ada", value: "152", normalizedValue: "152", confidence: 0.96, pageNumber, box: [0, 0, 90, 20], evidenceText: `152 ada sayfa ${pageNumber}`, group: "parcel-152" },
+      { name: "parcel", value: pageNumber === 1 ? "42" : "43", normalizedValue: pageNumber === 1 ? "42" : "43", confidence: 0.96, pageNumber, box: [0, 0, 90, 20], evidenceText: `parsel sayfa ${pageNumber}`, group: "parcel-152" },
+    ],
+  });
+  try {
+    await withServer(ocr.url, async (server) => {
+      await runOcr(server);
+      const second = await runOcr(server);
+      assert.equal(second.body.completed, true);
+      // Ada tek satır kalır ama iki parselin de ilişkisi vardır.
+      const adaRows = await server.db.prepare(`SELECT COUNT(*) AS total FROM extracted_fields
+        WHERE document_id = ? AND field_name = 'ada'`).bind(DOC).first<{ total: number }>();
+      assert.equal(adaRows?.total, 1, "ada değeri dilimler arasında tekrarlandı");
+      assert.deepEqual(await relationLabels(server), ["152 ada 42 parsel", "152 ada 43 parsel"]);
+    });
+  } finally {
+    await ocr.close();
+  }
+});
+
 test("servis hâlâ çalışıyorsa deneme bütçesi harcanmaz", async () => {
   /*
    * Zaman aşımına düşen istek servisi durdurmaz; yeniden deneme süren koşuya

@@ -45,7 +45,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 29;
+export const ARCHIVE_SCHEMA_VERSION = 30;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -760,6 +760,30 @@ async function migrateProcessingJobPageWindowColumns(db: D1Database) {
     WHERE kind = 'ocr' AND status IN ('queued', 'processing', 'failed')`).run();
 }
 
+/**
+ * 29 → 30: tohum alanlarının görüntüleme sırasını yeniden hizalar.
+ *
+ * `coreFields` dizisine ortadan bir alan eklendiğinde (bu sürümde
+ * `document_number`) mevcut satırlar `ON CONFLICT DO NOTHING` yüzünden eski
+ * sıralarını korur ve yeni alan var olan bir sıra numarasıyla çakışır: iki
+ * satır aynı `sort_order` ile kalır, inceleme ekranındaki alan sırası
+ * veritabanına göre değişir. Bu adım göç sırasında ALANLAR EKLENMEDEN önce
+ * çalışır; mevcut alanlar yeni tohum sırasına taşınır, yeni alan zaten doğru
+ * sırayla yazılır.
+ */
+async function resyncSeedFieldOrder(db: D1Database) {
+  if (!(await tableExists(db, "field_definitions"))) return;
+  const statements: D1PreparedStatement[] = [];
+  for (const documentType of seedDocumentTypes) {
+    const typeId = `doctype:${documentType.code}@${SEED_PROFILE_VERSION}`;
+    seedFieldsFor(documentType.code).forEach((field, index) => {
+      statements.push(db.prepare(`UPDATE field_definitions SET sort_order = ?
+        WHERE document_type_id = ? AND field_code = ?`).bind(index, typeId, field.fieldCode));
+    });
+  }
+  if (statements.length) await db.batch(statements);
+}
+
 /** F1.3: dağıtık parça yüklemelerinde oturum başına en çok dört aktif istek. */
 async function migrateIngestSessionConcurrencyColumn(db: D1Database) {
   if (!(await tableExists(db, "upload_sessions"))) return;
@@ -1432,6 +1456,8 @@ const dataMigrations: MigrationStep[] = [
   { version: 28, run: seedClassificationVocabularies },
   // 28 → 29: OCR iş birimi belgeden sayfa dilimine iner; ilerleme işte taşınır.
   { version: 29, run: migrateProcessingJobPageWindowColumns },
+  // 29 → 30: belge/karar sayısı alanı profillere girer; alan sırası hizalanır.
+  { version: 30, run: resyncSeedFieldOrder },
 ];
 
 /**
