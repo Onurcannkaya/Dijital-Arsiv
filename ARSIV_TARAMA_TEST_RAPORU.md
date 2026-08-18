@@ -580,12 +580,18 @@ ayrılamaması demektir. Arşive yeni cilt eklendikçe bu süre doğrusal büyü
   sonra `ruhsat-tuzagi.pdf` olarak `Encümen karar sureti` döndü. Tasnifi
   yapılmış bir belgenin türü OCR tarafından değiştirilmediği için karar-c
   kendiliğinden düzelmez.
-- Eski koddan kalan, `%TEMP%` içindeki 1.557 MB'lık sızmış geçici PDF
-  **silinmedi** (yeni kod artık bunları üretmiyor); temizlik için:
-
-  ```bash
-  Get-ChildItem $env:TEMP -Filter "tmp*.pdf" | Where-Object Length -gt 100MB | Remove-Item
-  ```
+- Eski koddan kalan, `%TEMP%` içindeki **1.557 MB**'lık sızmış geçici PDF
+  **silindi** (altı dosya; yeni kod artık bunları üretmiyor). Silmeden önce
+  köken kanıtlandı: dört büyük kopyanın SHA-256 değeri
+  `1975 - 1 - 600 Encümen Asıl.pdf` aslıyla birebir aynıydı
+  (`55c184240f0fe67b…`, 408.081.441 bayt), iki küçüğü de test evrakının
+  kopyasıydı (275.982 bayt). Asıllar `D:\Arşiv` ve yerel nesne deposunda
+  duruyor; silinen yalnız kopyaydı.
+- **OCR asıl önbelleği korundu**: `%TEMP%\sivas-ocr-originals`, 9 dosya,
+  465 MB. Bu sızıntı değil, düzeltmenin parçası — SHA-256 adlı, bayt sınırlı
+  bir önbellek ve sayfa dilimlerinin aynı belgeyi yeniden indirmesini
+  engelliyor. İçindeki 389 MB'lık girdi hâlâ gerekli, çünkü 1975 belgesinin
+  işi 21. sayfada duruyor.
 
 - 1975 belgesinin işi **21/623 sayfada, `queued`** durumda duruyor ve kaldığı
   yerden sürecek. Yerelde OCR cron'u ateşlenmediği için kendiliğinden
