@@ -255,7 +255,8 @@ anlamsızdır — bu, §4'teki toplu dosya sorununun bir görünümüdür, desen
 Aşağıdaki üç madde kasten yapılmadı: üçü de kurumsal ya da mimari bir karar
 istiyor ve yarım bir uygulama, olmayandan daha kötüdür.
 
-1. **Toplu tarama dosyalarını kararlara bölmek.** Karar numarası alanı artık
+1. **Toplu tarama dosyalarını kararlara bölmek.** Seçenekler, ölçümler ve öneri
+   `ADR-019-TOPLU-TARAMA-KARAR-BOLME.md` taslağında. Karar numarası alanı artık
    var, yani önkoşul karşılandı. Ama bölme, tek bir yüklemeden N belge kaydı
    üretmek demektir ve bu doğrudan yetkili nesne modeline dokunur: asıl nesne
    değişmezdir (ADR-016) ve her karar kendi aslına mı, yoksa sayfa aralığı
