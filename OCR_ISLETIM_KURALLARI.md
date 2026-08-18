@@ -107,12 +107,28 @@ Makine kapasitesi artsa bile bugünkü kod onu kullanamaz:
 - Servis tek süreç olduğunda `_predict_lock` bütün çıkarımı sıraya diziyor.
 
 Paralelliği gerçeğe çevirmek için iki değişiklik gerekir: birden çok OCR işçi
-süreci **ve** uygulamanın işleri eşzamanlı dağıtması. İş talep etme SQL'i
-(`UPDATE ... WHERE status IN ('queued','failed') RETURNING`) atomik olduğu için
-eşzamanlı dağıtım veri açısından güvenli görünüyor — ama bu **ölçülmedi**;
-uygulanmadan önce gerçek bir eşzamanlılık testiyle doğrulanmalıdır. Yanlışsa iki
-işçi aynı belgeyi alır ve servis 409 döner (bu durum zaten zararsızdır: iş
-kuyrukta bekletilir, deneme tüketilmez).
+süreci **ve** uygulamanın işleri eşzamanlı dağıtması.
+
+İkincisinin veri güvenliği **ölçüldü**. Kuyrukta altı iş varken altı eşzamanlı
+tetikleme yapıldı:
+
+| Ölçüm | Sonuç |
+|---|---|
+| Eşzamanlı çağrı | 6 |
+| İşlenen iş | **6, hepsi ayrı belge** |
+| Aynı belgeyi iki kez alan çağrı | **yok** |
+| Kaybolan iş | **yok** (6 iş `completed`) |
+| Duvar süresi | 52 ms |
+
+Yani iş talep etme sorgusu (`UPDATE ... WHERE status IN ('queued','failed')
+RETURNING`) eşzamanlı çağrıda doğru davranıyor: ikinci çağrının alt sorgusu
+güncellenmiş durumu görüp sıradaki işi seçiyor. Dağıtımı paralelleştirmek veri
+açısından güvenlidir; engel yalnız bellektir (§2).
+
+Bu davranış `tests/ocr-concurrent-claim.test.ts` ile sabitlendi — kırılırsa
+paralel dağıtım iki işçiyi aynı belgeye gönderir. Test hem davranışı hem
+sorgunun tek koşullu `UPDATE` kurgusunu denetler; önce `SELECT` edip sonra
+`UPDATE` eden bir kurgu aynı işi iki kez verirdi.
 
 ## 6. Motor ayarlarına DOKUNMA
 
