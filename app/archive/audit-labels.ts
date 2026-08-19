@@ -8,6 +8,7 @@
 export const auditLabels: Record<string, string> = {
   "document.received": "Belge kabul edildi",
   "ocr.completed": "OCR tamamlandı",
+  "ocr.requeued": "OCR işi kuyruğa geri alındı",
   "fields.confirmed": "Alanlar doğrulandı",
   "text.confirmed": "Tam metin onaylandı",
   "text.corrected": "Tam metin düzeltildi",
