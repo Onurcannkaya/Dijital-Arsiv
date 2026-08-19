@@ -143,5 +143,8 @@ test("işi talep eden sorgu durumu atomik olarak değiştirir", async () => {
   const source = await (await import("node:fs/promises"))
     .readFile(new URL("../app/api/jobs/process/route.ts", import.meta.url), "utf8");
   assert.match(source, /UPDATE processing_jobs\s*\n\s*SET status = 'processing'/);
-  assert.match(source, /AND status IN \('queued', 'failed'\)\s*\n\s*RETURNING/);
+  // Dış koruma kirası geçmiş 'processing' işi de kapsar: yalnız queued/failed
+  // kalsaydı, terk edilmiş işin kurtarılması alt sorguda seçilse bile burada düşerdi.
+  assert.match(source,
+    /AND \(status IN \('queued', 'failed'\)\s*\n\s*OR \(status = 'processing' AND \(lease_expires_at IS NULL OR lease_expires_at <= CURRENT_TIMESTAMP\)\)\)\s*\n\s*RETURNING/);
 });

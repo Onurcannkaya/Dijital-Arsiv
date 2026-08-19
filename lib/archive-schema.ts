@@ -45,7 +45,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 30;
+export const ARCHIVE_SCHEMA_VERSION = 31;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -167,6 +167,10 @@ const tableStatements: string[] = [
     next_attempt_at TEXT,
     last_attempt_at TEXT,
     dead_lettered_at TEXT,
+    -- İşleyici kirası: 'processing' durumundaki iş bu andan sonra yeniden talep
+    -- edilebilir. Talep eden istek dilim ortasında ölürse işi kuyruğa döndürecek
+    -- kimse yoktur; kira terk edilmiş işi kurtarır (derivative_jobs deseni).
+    lease_expires_at TEXT,
     next_page INTEGER NOT NULL DEFAULT 1,
     page_count INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -531,7 +535,11 @@ export function declaredColumns(createStatement: string): string[] {
   const open = createStatement.indexOf("(");
   const close = createStatement.lastIndexOf(")");
   if (open < 0 || close <= open) return [];
-  const body = createStatement.slice(open + 1, close);
+  // Açıklamalar virgül bölmesinden ÖNCE sıyrılır: virgül içeren bir açıklama
+  // satırı sonradan süzülemez çünkü bölme onu iki parçaya ayırır ve ikinci
+  // yarının ilk kelimesi kolon adı sanılır.
+  const body = createStatement.slice(open + 1, close)
+    .split("\n").map((line) => line.replace(/--.*$/, "")).join("\n");
 
   const parts: string[] = [];
   let depth = 0;
@@ -758,6 +766,26 @@ async function migrateProcessingJobPageWindowColumns(db: D1Database) {
       attempt = 0, next_attempt_at = NULL, dead_lettered_at = NULL,
       error_message = NULL, status = 'queued', updated_at = CURRENT_TIMESTAMP
     WHERE kind = 'ocr' AND status IN ('queued', 'processing', 'failed')`).run();
+}
+
+/**
+ * 30 → 31: OCR işi işleyici kirası kazanır.
+ *
+ * Talep tek koşullu UPDATE ile `status = 'processing'` yazar; talep eden HTTP
+ * isteği dilim ortasında ölürse (işçi çökmesi, dağıtım) işi kuyruğa döndürecek
+ * hiçbir yol yoktu ve belge kalıcı kilitleniyordu — elle tetikleme de
+ * "hâlihazırda sürüyor" deyip geri dönüyordu. `derivative_jobs` deseninde
+ * olduğu gibi talep artık bir son kullanma anı yazar; anı geçmiş 'processing'
+ * iş yeniden talep edilebilir sayılır. Eski satırlarda kolon boştur ve boş
+ * kira "süresi geçmiş" kabul edilir: göçten önce takılı kalmış işler ilk
+ * tetiklemede kendiliğinden kurtulur, veri düzeltmesi gerekmez.
+ */
+async function migrateProcessingJobLeaseColumn(db: D1Database) {
+  if (!(await tableExists(db, "processing_jobs"))) return;
+  const columns = await columnNames(db, "processing_jobs");
+  if (!columns.has("lease_expires_at")) {
+    await db.prepare("ALTER TABLE processing_jobs ADD COLUMN lease_expires_at TEXT").run();
+  }
 }
 
 /**
@@ -1430,6 +1458,8 @@ const structuralMigrations: MigrationStep[] = [
   { version: 27, run: migrateFieldRejectionReasonColumns },
   // 27 → 28: arşivleme tasnifi (dosya planı + saklama kuralı) belge kaydına eklenir.
   { version: 28, run: migrateArchiveClassificationColumns },
+  // 30 → 31: OCR işi işleyici kirası kazanır; terk edilmiş iş kurtarılabilir olur.
+  { version: 31, run: migrateProcessingJobLeaseColumn },
 ];
 
 /**
