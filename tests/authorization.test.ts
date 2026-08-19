@@ -74,16 +74,18 @@ async function decide(
 const everyPermission: ArchivePermission[] = [
   "document.read", "document.download", "document.upload",
   "document.review", "document.archive", "ocr.run", "users.manage",
-  "technical.view",
+  "technical.view", "ingest.retry",
 ];
 
 /** ANA_SISTEM_TASARIM_BELGESI.md §5 rollerinin beklenen yetki kümesi.
  * `technical.view` design.md §9.3 kararıdır: teknik gösterimler (yüzde,
  * koordinat, SHA-256, sürüm) yalnız yönetici ve arşiv sorumlusuna erişilir;
- * doğrulayıcı/görüntüleyici ekranı eylem dilinde kalır. */
+ * doğrulayıcı/görüntüleyici ekranı eylem dilinde kalır.
+ * `ingest.retry` ADR-013 kurtarma komutudur: FAILED oturumu terfiye geri
+ * almak arşiv sorumluluğu taşıyan rollerde kalır; yükleyebilen herkese açılmaz. */
 const expected: Record<ArchiveRole, ArchivePermission[]> = {
   admin: everyPermission,
-  archive_manager: ["document.read", "document.download", "document.upload", "document.review", "document.archive", "ocr.run", "technical.view"],
+  archive_manager: ["document.read", "document.download", "document.upload", "document.review", "document.archive", "ocr.run", "technical.view", "ingest.retry"],
   reviewer: ["document.read", "document.review"],
   viewer: ["document.read"],
 };

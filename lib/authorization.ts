@@ -18,7 +18,15 @@ export type ArchivePermission =
    * sunucuda tutulmaz. Doğrulayıcı ve görüntüleyici rollerine verilmez ki
    * personel ekranının eylem dili (§6) sayılarla sulanmasın.
    */
-  | "technical.view";
+  | "technical.view"
+  /*
+   * ADR-013: FAILED oturumu PROMOTING'e geri alan operatör komutu AYRI yetki
+   * ister — "bu komut ayrı yetki, gerekçe ve denetim olayı gerektirir".
+   * `document.upload` yeterli sayılsaydı her yükleyen memur kurtarma
+   * çalıştırabilirdi; oysa kurtarma karantina kanıtına dayanan bir işletim
+   * kararıdır ve arşiv sorumluluğu taşıyan rollerde kalır.
+   */
+  | "ingest.retry";
 export type ArchivePrincipal = { email:string; displayName:string; role:ArchiveRole; unit:string; permissions:ArchivePermission[] };
 
 type UserRow = { email:string; display_name:string; role:ArchiveRole; unit:string; active:number };
@@ -30,8 +38,8 @@ type UserRow = { email:string; display_name:string; role:ArchiveRole; unit:strin
  * doğrulayıcı belgeyi görüntüleyerek karşılaştırır.
  */
 const permissionMap: Record<ArchiveRole, ArchivePermission[]> = {
-  admin: ["document.read", "document.download", "document.upload", "document.review", "document.archive", "ocr.run", "users.manage", "technical.view"],
-  archive_manager: ["document.read", "document.download", "document.upload", "document.review", "document.archive", "ocr.run", "technical.view"],
+  admin: ["document.read", "document.download", "document.upload", "document.review", "document.archive", "ocr.run", "users.manage", "technical.view", "ingest.retry"],
+  archive_manager: ["document.read", "document.download", "document.upload", "document.review", "document.archive", "ocr.run", "technical.view", "ingest.retry"],
   reviewer: ["document.read", "document.review"],
   viewer: ["document.read"],
 };

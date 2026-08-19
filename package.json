@@ -11,7 +11,7 @@
         "build": "vinext build",
         "start": "vinext start",
         "test": "npm run build && node --test \"tests/*.test.mjs\" \"tests/*.test.ts\"",
-        "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .wrangler --ignore-pattern outputs --ignore-pattern work",
+        "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .wrangler --ignore-pattern outputs --ignore-pattern work --ignore-pattern .claude",
         "typecheck": "tsc --noEmit",
         "verify": "npm run typecheck && npm run lint && npm test",
         "deploy:staging": "wrangler deploy --env staging",
