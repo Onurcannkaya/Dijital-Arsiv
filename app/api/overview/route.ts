@@ -4,6 +4,7 @@ import {
   readKeyMigrationSummary, readMaintenanceProgress, readReconciliationSummary,
   requireArchiveSchema, getArchiveBindings,
 } from "../../../lib/archive-storage";
+import { readBackupSummary } from "../../../lib/backup";
 import { failure } from "../../../lib/errors";
 
 export const dynamic = "force-dynamic";
@@ -125,10 +126,13 @@ export async function GET(request: Request) {
       // F1.8: `LIKE '%.%'` göstergesinin yerini alan yetkili envanter. `pending`
       // sınıflandırılmış eski anahtar sayısıdır; kapsam `inventory` alanındadır.
       keyMigrations: await readKeyMigrationSummary(bindings.DB, scope),
-      // Kapasite kotası ve yedekleme durumu henüz ölçülmüyor; uydurma değer
-      // döndürmek yerine açıkça bildirilmez. Servis sağlığı listeden çıktı:
-      // /api/health ölçüyor ve pano ile Ayarlar aynı kaynağı gösteriyor.
-      unmeasured: ["storageQuota", "lastBackup"],
+      // ADR-017: yedek durumu backup_runs defterinden ölçülür; hedef
+      // yapılandırılmamışsa configured:false döner, uydurma zaman dönmez.
+      backup: await readBackupSummary(bindings),
+      // Kapasite kotası henüz ölçülmüyor; uydurma değer döndürmek yerine
+      // açıkça bildirilmez. Servis sağlığını /api/health, yedeği `backup`
+      // bloğu ölçtüğünden ikisi listeden çıktı.
+      unmeasured: ["storageQuota"],
     });
   } catch (error) {
     return failure(error, "overview.read", "Genel bakış alınamadı.", request);

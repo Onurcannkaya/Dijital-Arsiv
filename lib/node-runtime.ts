@@ -96,6 +96,8 @@ export function bootstrapNodeRuntime(options: NodeRuntimeOptions = {}): NodeRunt
       derivativeFiles: namespaceFor(env.ARCHIVE_S3_BUCKET_DERIVATIVE || "arsiv-turev"),
       temporaryFiles: namespaceFor(env.ARCHIVE_S3_BUCKET_TEMPORARY || "arsiv-gecici"),
       quarantineFiles: namespaceFor(env.ARCHIVE_S3_BUCKET_QUARANTINE || "arsiv-karantina"),
+      // Yedek hedefi bilinçlidir: varsayılan ad verilmez, tanımsızsa kapalıdır.
+      backupFiles: namespaceFor(env.ARCHIVE_S3_BUCKET_BACKUP),
     };
     setArchiveBindingsProvider(createNodeEnvBindingsProvider(adapters, env));
     return { db, close() { setArchiveBindingsProvider(null); db.close(); } };
@@ -118,6 +120,27 @@ export function bootstrapNodeRuntime(options: NodeRuntimeOptions = {}): NodeRunt
     return name ? createNodeS3Namespace({ ...s3Base, bucket: name }) : undefined;
   };
 
+  /*
+   * ADR-017: yedek hedefi ikinci hata alanında ve ayrı yönetim kimliğinde
+   * olmalıdır. Bu yüzden yedek kovası kendi ucunu/kimliğini alabilir; verilmeyen
+   * her değer birincile düşer ama uç ve kimlik birincille aynıysa "ikinci hata
+   * alanı" şartı KARŞILANMAMIŞTIR — bu bir kod kararı değil kurulum kararıdır
+   * ve işletim rehberine yazılır.
+   */
+  const backupBucket = env.ARCHIVE_S3_BUCKET_BACKUP?.trim();
+  const backupFiles = backupBucket ? createNodeS3Namespace({
+    endpoint: env.ARCHIVE_BACKUP_S3_ENDPOINT?.trim() || s3Base.endpoint,
+    allowHttp: env.ARCHIVE_BACKUP_S3_ALLOW_HTTP === "enabled" || s3Base.allowHttp,
+    region: env.ARCHIVE_BACKUP_S3_REGION?.trim() || s3Base.region,
+    credentials: env.ARCHIVE_BACKUP_S3_ACCESS_KEY_ID?.trim() ? {
+      accessKeyId: requireEnv(env, "ARCHIVE_BACKUP_S3_ACCESS_KEY_ID"),
+      secretAccessKey: requireEnv(env, "ARCHIVE_BACKUP_S3_SECRET_ACCESS_KEY"),
+      sessionToken: env.ARCHIVE_BACKUP_S3_SESSION_TOKEN?.trim() || undefined,
+    } : s3Base.credentials,
+    fetcher: options.fetcher,
+    bucket: backupBucket,
+  }) : undefined;
+
   const adapters: NodeRuntimeAdapters = {
     db,
     archiveFiles: createNodeS3Namespace({
@@ -127,6 +150,7 @@ export function bootstrapNodeRuntime(options: NodeRuntimeOptions = {}): NodeRunt
     derivativeFiles: namespaceFor(env.ARCHIVE_S3_BUCKET_DERIVATIVE),
     temporaryFiles: namespaceFor(env.ARCHIVE_S3_BUCKET_TEMPORARY),
     quarantineFiles: namespaceFor(env.ARCHIVE_S3_BUCKET_QUARANTINE),
+    backupFiles,
   };
   setArchiveBindingsProvider(createNodeEnvBindingsProvider(adapters, env));
 

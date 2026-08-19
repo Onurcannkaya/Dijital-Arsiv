@@ -24,6 +24,14 @@ export type ArchiveBindings = {
   DERIVATIVE_FILES?: StorageBinding;
   TEMPORARY_FILES?: StorageBinding;
   QUARANTINE_FILES?: StorageBinding;
+  /**
+   * ADR-017 yedek hedefi. Tanımlıysa yedek dilimleri çalışır; değilse yedekleme
+   * "yapılandırılmadı" olarak ölçülür. İkinci hata alanı ve ayrı yönetim
+   * kimliği ADR şartıdır — Node yapılandırması ayrı uç/kimlik destekler
+   * (ARCHIVE_BACKUP_S3_*); aynı MinIO'ya aynı kimlikle yazmak bu şartı
+   * karşılamaz ve işletim rehberinde açıkça söylenir.
+   */
+  BACKUP_FILES?: StorageBinding;
   OCR_SERVICE_URL?: string;
   OCR_SERVICE_TOKEN?: string;
   CONTENT_SCAN_SERVICE_URL?: string;
@@ -44,6 +52,13 @@ export type ArchiveBindings = {
    * bağlanır (ADR-014); bu bayrak dağıtım yapılandırmalarına asla girmez.
    */
   ARCHIVE_INTERNAL_OBJECT_FETCH?: string;
+  /**
+   * Alarm taşıyıcısı: tanımlıysa kritik işletim olayları (bütünlük bulgusu,
+   * dead-letter artışı, yedek arızası) bu uca JSON POST edilir. Tanımlı
+   * değilse olaylar yalnız yapılandırılmış log'da kalır — bu durum gizlenmez.
+   */
+  ALARM_WEBHOOK_URL?: string;
+  ALARM_WEBHOOK_TOKEN?: string;
 };
 
 export type ArchiveBindingsProvider = () => Partial<ArchiveBindings>;
@@ -81,6 +96,7 @@ export type NodeRuntimeAdapters = {
   derivativeFiles?: StorageBinding;
   temporaryFiles?: StorageBinding;
   quarantineFiles?: StorageBinding;
+  backupFiles?: StorageBinding;
 };
 
 const NODE_CONFIG_KEYS = [
@@ -96,6 +112,8 @@ const NODE_CONFIG_KEYS = [
   "APP_ENV",
   "ARCHIVE_ACCEPTANCE_TOKEN",
   "ARCHIVE_INTERNAL_OBJECT_FETCH",
+  "ALARM_WEBHOOK_URL",
+  "ALARM_WEBHOOK_TOKEN",
 ] as const;
 
 /**
@@ -114,6 +132,7 @@ export function createNodeEnvBindingsProvider(
       DERIVATIVE_FILES: adapters.derivativeFiles,
       TEMPORARY_FILES: adapters.temporaryFiles,
       QUARANTINE_FILES: adapters.quarantineFiles,
+      BACKUP_FILES: adapters.backupFiles,
     };
     for (const key of NODE_CONFIG_KEYS) {
       const value = env[key]?.trim();

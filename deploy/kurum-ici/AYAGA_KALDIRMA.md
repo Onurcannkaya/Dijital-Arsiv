@@ -123,10 +123,22 @@ WantedBy=multi-user.target
 
 Yedekleme (İş Etki Analizi RPO/RTO kararına bağlanır):
 
+- **Uygulama yedek dilimi (ADR-017)**: `.env` içinde `ARCHIVE_S3_BUCKET_BACKUP`
+  (ve ikinci hata alanı için `ARCHIVE_BACKUP_S3_ENDPOINT` + ayrı
+  `ARCHIVE_BACKUP_S3_ACCESS_KEY_ID/_SECRET_ACCESS_KEY`) tanımlanınca bakım
+  turu saatte bir asıl nesneleri artımlı kopyalar, günde bir üst veri dökümü
+  ve nesne manifesti üretir; durum `backup_runs` defterinde ve panoda görünür.
+  **Uyarı**: yedek ucu/kimliği birincille aynıysa ADR-017'nin "ikinci hata
+  alanı ve ayrı yönetim kimliği" şartı karşılanmaz — kod bunu ölçemez.
 - **SQLite**: `docker compose stop api` → `api-veri` biriminin anlık
   görüntüsü → `start`. (Kapanış WAL checkpoint yapar; canlı kopya İSTENMEZ.)
+  Uygulamanın günlük JSON dökümü bunun yerine geçmez; 15 dk RPO hedefi bu
+  anlık görüntü/PITR katmanının işidir.
 - **MinIO**: ikinci makineye `mc mirror --watch` ya da site replication;
   `arsiv-asil` için sürümler ve Object Lock hedefte de korunmalıdır.
+- **Alarm**: `ALARM_WEBHOOK_URL` tanımlanırsa bütünlük bulgusu, OCR
+  dead-letter artışı ve yedek arızası bu uca JSON POST edilir; tanımsızsa
+  olaylar yalnız log'da kalır.
 - Geri yükleme tatbikatı yılda en az bir kez T-09 yürütücüsüyle koşulur.
 
 ## 7. Sorun giderme

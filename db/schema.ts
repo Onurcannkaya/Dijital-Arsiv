@@ -862,3 +862,25 @@ export const uploadSessionEvents = sqliteTable("upload_session_events", {
   check("upload_session_events_hash_check", sql`length(${table.eventHash}) = 64`),
   check("upload_session_events_retry_check", sql`${table.fromStatus} <> 'FAILED' OR ${table.toStatus} <> 'PROMOTING' OR (${table.actorKind} = 'operator' AND length(trim(${table.reason})) > 0 AND ${table.ingestReceiptId} IS NOT NULL)`),
 ]);
+
+/** ADR-017 yedekleme defteri; "son başarılı yedek" göstergesi buradan ölçülür. */
+export const backupRuns = sqliteTable("backup_runs", {
+  id: text("id").primaryKey(),
+  kind: text("kind").notNull(),
+  status: text("status").notNull().default("RUNNING"),
+  objectKey: text("object_key"),
+  byteSize: integer("byte_size"),
+  sha256: text("sha256"),
+  copiedCount: integer("copied_count").notNull().default(0),
+  cursor: text("cursor"),
+  error: text("error"),
+  startedAt: text("started_at").notNull(),
+  completedAt: text("completed_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("backup_runs_kind_status_idx").on(table.kind, table.status, table.completedAt),
+  check("backup_runs_kind_check", sql`${table.kind} IN ('metadata_export', 'originals_incremental', 'manifest_daily')`),
+  check("backup_runs_status_check", sql`${table.status} IN ('RUNNING', 'COMPLETED', 'FAILED')`),
+  check("backup_runs_sha_check", sql`${table.sha256} IS NULL OR length(${table.sha256}) = 64`),
+  check("backup_runs_copied_check", sql`${table.copiedCount} >= 0`),
+]);
