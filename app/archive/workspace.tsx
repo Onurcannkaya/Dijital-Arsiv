@@ -3,7 +3,7 @@
 import {
   Archive, Bell, Camera, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Clock3,
   FileCheck2, FileSearch, Files, FolderArchive, Gauge, History,
-  LayoutDashboard, LoaderCircle, Menu, Moon, ScanLine, Search, Settings, ShieldCheck,
+  LayoutDashboard, LoaderCircle, Menu, Moon, RotateCcw, ScanLine, Search, Settings, ShieldCheck,
   Sun, TriangleAlert, Upload, UserRound, X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -140,7 +140,7 @@ function Dashboard({rows,overview,health,open,onUpload,userName,canUpload}:{rows
           <div><b className="green">{documents?.archived??0}</b><span>Arşiv<small>Bugün {documents?.archivedToday??0}</small></span></div>
         </div>
         {documents?.failed?<div className="processor failed"><TriangleAlert size={19}/><span><b>{documents.failed} belge OCR hatasında</b><small>Kontrollü tekrar deneme gerekiyor</small></span></div>:null}
-        {overview?.jobs.deadLetter?<div className="processor failed"><TriangleAlert size={19}/><span><b>{overview.jobs.deadLetter} OCR işi dead-letter kuyruğunda</b><small>Azami deneme sayısı aşıldı; işletim incelemesi gerekiyor</small></span></div>:null}
+        {overview?.jobs.deadLetter?<div className="processor failed"><TriangleAlert size={19}/><span><b>{overview.jobs.deadLetter} OCR işi dead-letter kuyruğunda</b><small>Gelen Evrak&apos;taki &quot;Okuma arızaları&quot; panelinden kuyruğa geri alınabilir</small></span></div>:null}
         {overview?.integrity?.lastError?<div className="processor failed"><TriangleAlert size={19}/><span><b>Nesne bütünlük taraması uyarı verdi</b><small>{overview.integrity.lastError}</small></span></div>:null}
         {overview?.storage.legacyKeys?<div className="processor failed"><TriangleAlert size={19}/><span><b>{overview.storage.legacyKeys} nesne anahtarı dosya adı içeriyor</b><small>Politika öncesi kayıtlar; yetkili yeniden kabulle taşınmalı</small></span></div>:null}
       </article>
@@ -245,6 +245,36 @@ function FailedUploads({sessions,busyId,onRetry}:{sessions:FailedSession[],busyI
       : null}
     </li>)}</ul>
     {error?<p className="retry-error" role="alert">{error}</p>:null}
+  </section>;
+}
+
+/** Azami denemeyi tüketmiş OCR işi; pano sayacının arkasındaki satır. */
+type DeadLetterJob = { jobId:string; documentId:string; referenceNo:string; originalName:string;
+  documentType:string; unit:string; attempt:number; maxAttempts:number;
+  errorMessage:string|null; deadLetteredAt:string|null };
+
+/**
+ * Dead-letter paneli. Pano "N iş dead-letter kuyruğunda" derken o işlere giden
+ * yol yoktu; burada listelenir ve tek tek ya da toplu kuyruğa geri alınır.
+ * Geri alma işi HEMEN okutmaz — kuyruğa dönen işi tarama turu ya da hızlı
+ * kabul yoklaması alır; son hata denetim izine yazılır, iz kaybolmaz.
+ */
+function DeadLetterPanel({jobs,busy,onRequeue,onOpenDocument}:{jobs:DeadLetterJob[],busy:boolean,
+  onRequeue:(documentIds?:string[])=>void,onOpenDocument:(id:string)=>void}) {
+  if(!jobs.length) return null;
+  return <section className="panel pending-uploads dead-letter-panel">
+    <header><div><h2>Okuma arızaları</h2><p>Azami denemeyi tüketen OCR işleri. Kuyruğa geri almak deneme bütçesini tazeler; son hata denetim izine yazılır.</p></div>
+      <button className="outline" onClick={()=>onRequeue()} disabled={busy}>
+        {busy?<LoaderCircle className="spin" size={15}/>:<RotateCcw size={15}/>} Tümünü kuyruğa geri al ({jobs.length})
+      </button>
+    </header>
+    <ul>{jobs.map(job=><li key={job.jobId} className="pending-failed">
+      <b>{job.referenceNo}</b>
+      <span>{job.originalName} · {job.attempt}/{job.maxAttempts} deneme
+        {job.errorMessage?` · ${job.errorMessage}`:""}{job.deadLetteredAt?` · ${formatUploadedAt(job.deadLetteredAt)}`:""}</span>
+      <button className="outline" onClick={()=>onOpenDocument(job.documentId)}>Belgeyi aç</button>
+      <button className="outline" onClick={()=>onRequeue([job.documentId])} disabled={busy}>Kuyruğa geri al</button>
+    </li>)}</ul>
   </section>;
 }
 
@@ -371,6 +401,30 @@ export function ArchiveWorkspace(){
       setFailedSessions(response.ok?(payload.sessions??[]):[]);
     } catch { /* Ağ hatasında mevcut panel korunur. */ }
   },[]);
+  /** Dead-letter paneli; yetkisiz kullanıcıda sunucu 403 döner, panel boş kalır. */
+  const [deadLetterJobs,setDeadLetterJobs]=useState<DeadLetterJob[]>([]);
+  const [requeueBusy,setRequeueBusy]=useState(false);
+  const loadDeadLetter=useCallback(async()=>{
+    try {
+      const response=await fetch("/api/jobs/dead-letter");
+      const payload=await response.json() as {jobs?:DeadLetterJob[]};
+      setDeadLetterJobs(response.ok?(payload.jobs??[]):[]);
+    } catch { /* Ağ hatasında mevcut panel korunur. */ }
+  },[]);
+  const requeueDeadLetter=useCallback(async(documentIds?:string[])=>{
+    setRequeueBusy(true);
+    try {
+      const response=await fetch("/api/jobs/dead-letter",{
+        method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify(documentIds?.length?{documentIds}:{}),
+      });
+      const payload=await response.json() as {requeued?:number;error?:string};
+      if(!response.ok){setToast(payload.error??"İşler kuyruğa geri alınamadı");return;}
+      setToast(`${payload.requeued??0} okuma işi kuyruğa geri alındı`);
+      await Promise.all([loadDeadLetter(),loadList(),loadContext()]);
+    } catch { setToast("İşler kuyruğa geri alınamadı; ağ bağlantısını kontrol edin"); }
+    finally { setRequeueBusy(false); }
+  },[loadDeadLetter,loadList,loadContext]);
   const retrySession=useCallback(async(id:string,reason:string):Promise<string|null>=>{
     setRetryingId(id);
     try {
@@ -403,7 +457,7 @@ export function ArchiveWorkspace(){
     } catch { /* Tur ilerletilemezse şerit eski durumu göstermeye devam eder. */ }
     finally { setAdvancingScan(false); }
   };
-  const refresh=useCallback(async()=>{await Promise.all([loadContext(),loadList(),loadPending(),loadFailed()])},[loadContext,loadList,loadPending,loadFailed]);
+  const refresh=useCallback(async()=>{await Promise.all([loadContext(),loadList(),loadPending(),loadFailed(),loadDeadLetter()])},[loadContext,loadList,loadPending,loadFailed,loadDeadLetter]);
   // Oturum ve operasyon özeti liste sorgusundan bağımsızdır; arama yazılırken
   // tekrar yüklenmez ve eski liste yanıtı yeni sonucu ezemez.
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -419,8 +473,8 @@ export function ArchiveWorkspace(){
   // Bekleyen yüklemeler Gelen Evrak açıkken ve yükleme diyaloğu kapanınca tazelenir.
   useEffect(()=>{
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if(view==="inbox"&&!uploadOpen){ void loadPending(); void loadFailed(); }
-  },[view,uploadOpen,loadPending,loadFailed]);
+    if(view==="inbox"&&!uploadOpen){ void loadPending(); void loadFailed(); void loadDeadLetter(); }
+  },[view,uploadOpen,loadPending,loadFailed,loadDeadLetter]);
 
   const loadMore=async()=>{
     if(!nextCursor||loadingMore) return;
@@ -465,7 +519,8 @@ export function ArchiveWorkspace(){
         advancing={advancingScan}
         onAdvance={()=>{void advanceScan()}}
         onOpenDocument={openDocument}
-      /><FailedUploads sessions={failedSessions} busyId={retryingId} onRetry={retrySession}/></>:null}<List
+      /><FailedUploads sessions={failedSessions} busyId={retryingId} onRetry={retrySession}/>
+      <DeadLetterPanel jobs={deadLetterJobs} busy={requeueBusy} onRequeue={ids=>{void requeueDeadLetter(ids)}} onOpenDocument={openDocument}/></>:null}<List
         rows={rows}
         title={view==="inbox"?"Gelen Evrak":view==="review"?"Doğrulama":"Dijital Arşiv"}
         subtitle={view==="inbox"?"Yeni belgeleri, OCR durumunu ve hataları yönetin."

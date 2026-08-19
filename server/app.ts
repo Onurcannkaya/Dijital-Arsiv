@@ -42,6 +42,7 @@ import * as uploadParts from "../app/api/uploads/[id]/parts/route.ts";
 import * as uploadComplete from "../app/api/uploads/[id]/complete/route.ts";
 import * as uploadRetry from "../app/api/uploads/[id]/retry/route.ts";
 import * as jobsProcess from "../app/api/jobs/process/route.ts";
+import * as jobsDeadLetter from "../app/api/jobs/dead-letter/route.ts";
 import * as pipelineAdvance from "../app/api/pipeline/advance/route.ts";
 import * as adminMaintenance from "../app/api/admin/maintenance/route.ts";
 import * as adminMigrate from "../app/api/admin/migrate/route.ts";
@@ -80,6 +81,7 @@ const ROUTES: Array<{ pattern: RegExp; module: RouteModule }> = [
   { pattern: /^\/api\/uploads\/([^/]+)\/complete$/, module: uploadComplete },
   { pattern: /^\/api\/uploads\/([^/]+)\/retry$/, module: uploadRetry },
   { pattern: /^\/api\/jobs\/process$/, module: jobsProcess },
+  { pattern: /^\/api\/jobs\/dead-letter$/, module: jobsDeadLetter },
   { pattern: /^\/api\/pipeline\/advance$/, module: pipelineAdvance },
   { pattern: /^\/api\/admin\/maintenance$/, module: adminMaintenance },
   { pattern: /^\/api\/admin\/migrate$/, module: adminMigrate },
