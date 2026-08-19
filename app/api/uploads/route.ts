@@ -84,7 +84,42 @@ export async function GET(request: Request) {
     if (schemaError) return schemaError;
     const principal = await authorizeRequest(request, bindings.DB, "document.upload", bindings.ARCHIVE_ADMIN_EMAILS);
     if (principal instanceof Response) return principal;
-    const id = new URL(request.url).searchParams.get("id");
+    const url = new URL(request.url);
+    const id = url.searchParams.get("id");
+    /*
+     * `ids` ile istenen oturumlar hızlı kabul sihirbazının yoklamasıdır:
+     * kabul edilenler de (ACCEPTED) döner ve terfinin ürettiği belge kimliği
+     * eklenir — sihirbaz yüklediği dosyanın hangi belgeye dönüştüğünü ancak
+     * böyle bilir. Liste yine kullanıcının KENDİ oturumlarıyla sınırlıdır.
+     */
+    const ids = (url.searchParams.get("ids") ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+    if (ids.length) {
+      if (ids.length > 40) return jsonError("Tek istekte en fazla 40 oturum sorgulanabilir.");
+      const placeholders = ids.map(() => "?").join(", ");
+      const sessions = await bindings.DB.prepare(`SELECT s.id, s.original_name, s.requested_document_type,
+          s.status, s.duplicate_of_document_id, s.failure_code, s.created_at, s.updated_at,
+          (SELECT j.document_id FROM promotion_jobs j
+            WHERE j.upload_session_id = s.id AND j.status = 'COMPLETED'
+            ORDER BY j.created_at DESC LIMIT 1) AS promoted_document_id
+        FROM upload_sessions s WHERE s.user_id = ? AND s.id IN (${placeholders})`)
+        .bind(principal.email, ...ids)
+        .all<{ id: string; original_name: string; requested_document_type: string; status: string;
+          duplicate_of_document_id: string | null; failure_code: string | null;
+          created_at: string; updated_at: string; promoted_document_id: string | null }>();
+      return Response.json({
+        sessions: sessions.results.map((row) => ({
+          id: row.id,
+          originalName: row.original_name,
+          documentType: row.requested_document_type,
+          status: row.status,
+          duplicateOfDocumentId: row.duplicate_of_document_id,
+          documentId: row.promoted_document_id,
+          failureCode: row.failure_code,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        })),
+      });
+    }
     /*
      * Kimliksiz istek, KENDİ yüklemelerinin son durumunu listeler. Belge
      * kaydı ancak tarama + terfi sonrası doğar (F1.5); o ana kadar yükleme
