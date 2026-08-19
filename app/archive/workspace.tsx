@@ -40,6 +40,9 @@ type Overview = {
   pending:{ fieldValues:number; relations:number; textPages:number };
   storage:{ objects:number; bytes:number; legacyKeys:number; withoutAccessDerivative:number };
   integrity:{ status:string; processed:number; total:number|null; lastError:string|null; updatedAt:string }|null;
+  /** ADR-017: yedek durumu backup_runs defterinden ölçülür; hedef yoksa configured:false. */
+  backup?:{ configured:boolean; lastIncrementalAt?:string|null; lastMetadataExportAt?:string|null;
+    lastManifestAt?:string|null; failures24h?:number }|null;
 };
 
 const nav = [
@@ -149,7 +152,15 @@ function Dashboard({rows,overview,health,open,onUpload,userName,canUpload}:{rows
         <div className="health-row"><span><ShieldCheck size={17}/>Servis sağlığı</span>
           <b className={health&&healthyCount<healthTotal?"pending":""}>
             {health?`${healthyCount}/${healthTotal} çalışıyor`:"—"}</b></div>
-        <div className="backup"><Clock3 size={17}/><span>Yedekleme ve kapasite kotası<b>Henüz ölçülmüyor</b></span></div>
+        {/* ADR-017: yedek artık backup_runs defterinden ölçülür; kota hâlâ ölçülmez ve bu söylenir. */}
+        <div className="backup"><Clock3 size={17}/><span>Yedekleme{overview?.backup?.configured
+          ? <b className={overview.backup.failures24h?"pending":""}>{overview.backup.failures24h
+              ? `Son 24 saatte ${overview.backup.failures24h} arıza`
+              : overview.backup.lastIncrementalAt
+                ? `Son asıl kopyası ${formatUploadedAt(overview.backup.lastIncrementalAt)}`
+                : "İlk koşu bekleniyor"}</b>
+          : <b>Yapılandırılmadı</b>}</span></div>
+        <div className="backup"><Clock3 size={17}/><span>Kapasite kotası<b>Henüz ölçülmüyor</b></span></div>
       </article>
     </section>
     <section className="panel recent"><header><div><h2>Son belgeler</h2><p>Kapsamınızdaki en yeni kayıtlar</p></div></header><Table rows={rows} onOpen={open} empty="Henüz belge yüklenmedi." highlightNewest/></section>

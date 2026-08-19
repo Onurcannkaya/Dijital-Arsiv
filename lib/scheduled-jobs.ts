@@ -1,4 +1,6 @@
 import { processNextOcrJob } from "../app/api/jobs/process/route.ts";
+import { dispatchAlert } from "./alerts.ts";
+import { runBackupSlice } from "./backup.ts";
 import { processNextContentScanJob } from "./content-scan.ts";
 import { assertSchemaReady, runMaintenanceSlice } from "./archive-schema.ts";
 import { getPromotionStorages, type ArchiveBindings } from "./archive-storage.ts";
@@ -150,6 +152,19 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
         retryWait: after.retryWait,
         deadLetter: after.deadLetter,
       });
+      /*
+       * Dead-letter ARTIŞI alarm olayıdır: iş azami denemesini tüketti ve
+       * artık kendi kendine düzelmeyecek. Mevcut birikinti her turda yeniden
+       * bildirilmez — alarm sayaç deltasına bağlıdır, spam üretmez.
+       */
+      if (after.deadLetter > before.deadLetter) {
+        await dispatchAlert(bindings, {
+          severity: "critical",
+          event: "ocr.dead-letter",
+          title: `${after.deadLetter - before.deadLetter} OCR işi azami denemeyi tüketti; işletim incelemesi gerekiyor.`,
+          detail: { deadLetter: after.deadLetter, queueDepth: after.depth },
+        });
+      }
     });
     return;
   }
@@ -214,11 +229,16 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
         }
         if (!progress) break;
       }
+      // ADR-017: yedek dilimi bakım turuna bağlıdır; hızını backup_runs
+      // defterinden alır (saatlik artımlı, günlük döküm + manifest).
+      const backup = await runBackupSlice(bindings);
+
       logEvent("info", "cron.maintenance-result", {
         ...result,
         ingestLifecycle,
         keyInventory: { checked: inventory.checked, enqueued: inventory.enqueued, done: inventory.done },
         keyMigrationsProcessed: migrated,
+        backup,
       });
     });
     return;
@@ -270,6 +290,22 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
           done: reconciliation.done,
         },
       });
+      /*
+       * Bütünlük/uzlaştırma bulgusu WORM kasada bozulma ya da kayıp demektir;
+       * biri panoya bakana kadar bekleyemez. Alarm YENİ bulgu üreten dilimde
+       * atılır (findings bu dilimin sayacıdır, kalıcı toplam değil).
+       */
+      if (integrity.findings > 0 || reconciliation.findings > 0) {
+        await dispatchAlert(bindings, {
+          severity: "critical",
+          event: "integrity.finding",
+          title: "Nesne bütünlük/uzlaştırma taraması yeni bulgu üretti; işletim incelemesi gerekiyor.",
+          detail: {
+            integrityFindings: integrity.findings,
+            reconciliationFindings: reconciliation.findings,
+          },
+        });
+      }
     });
     return;
   }

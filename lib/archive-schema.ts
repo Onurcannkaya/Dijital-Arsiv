@@ -45,7 +45,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 31;
+export const ARCHIVE_SCHEMA_VERSION = 32;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -520,6 +520,36 @@ const tableStatements: string[] = [
     BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'Denetim kaydı değiştirilemez'); END`,
   `CREATE TRIGGER IF NOT EXISTS audit_events_no_delete
     BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT, 'Denetim kaydı silinemez'); END`,
+
+  /*
+   * ADR-017 yedekleme defteri. Her koşu bir satırdır; "son başarılı yedek"
+   * göstergesi bu tablodan ölçülür (uydurma değer dönmek yerine ölçülmeyeni
+   * bildirme kuralının kapanışı). `cursor`, artımlı asıl kopyasının kaldığı
+   * yeri taşır (binary_objects created_at|id); ilerleme koşular arasında
+   * kaybolmaz. Defter yalnız uygulama yedek işiyle yazılır; satır silinmez —
+   * yedek geçmişi de denetim kanıtıdır.
+   */
+  `CREATE TABLE IF NOT EXISTS backup_runs (
+    id TEXT PRIMARY KEY NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'RUNNING',
+    object_key TEXT,
+    byte_size INTEGER,
+    sha256 TEXT,
+    copied_count INTEGER NOT NULL DEFAULT 0,
+    cursor TEXT,
+    error TEXT,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (kind IN ('metadata_export', 'originals_incremental', 'manifest_daily')),
+    CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED')),
+    CHECK (sha256 IS NULL OR length(sha256) = 64),
+    CHECK (copied_count >= 0)
+  )`,
+  "CREATE INDEX IF NOT EXISTS backup_runs_kind_status_idx ON backup_runs (kind, status, completed_at)",
+  `CREATE TRIGGER IF NOT EXISTS backup_runs_no_delete
+    BEFORE DELETE ON backup_runs BEGIN SELECT RAISE(ABORT, 'Yedek koşusu kaydı silinemez'); END`,
 ];
 
 const MIGRATE_HINT = "göçü `POST /api/admin/migrate` ile çalıştırın.";
@@ -1488,7 +1518,16 @@ const dataMigrations: MigrationStep[] = [
   { version: 29, run: migrateProcessingJobPageWindowColumns },
   // 29 → 30: belge/karar sayısı alanı profillere girer; alan sırası hizalanır.
   { version: 30, run: resyncSeedFieldOrder },
+  // 31 → 32: ADR-017 yedekleme defteri mevcut kurulumlara eklenir.
+  { version: 32, run: createBackupRunsTable },
 ];
+
+/** ADR-017: yedek koşusu defteri mevcut kurulumlara eklenir. */
+async function createBackupRunsTable(db: D1Database) {
+  for (const statement of tableStatements.filter((sql) => sql.includes("backup_runs"))) {
+    await db.prepare(statement).run();
+  }
+}
 
 /**
  * Ret gerekçeleri kod içindeki sabit listeden `vocabulary_terms` tablosuna

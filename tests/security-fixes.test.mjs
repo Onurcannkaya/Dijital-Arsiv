@@ -120,6 +120,7 @@ test("genel bakış sayıları gerçek sorgudan gelir ve kapsamla süzülür", a
   assert.match(overview, /FROM processing_jobs/);
   assert.match(overview, /FROM binary_objects/);
   // Ölçülmeyen göstergeler uydurulmaz, açıkça bildirilir. Servis sağlığı
-  // artık /api/health ile ölçüldüğünden listede değildir.
-  assert.match(overview, /unmeasured: \["storageQuota", "lastBackup"\]/);
+  // /api/health, yedek durumu backup_runs defteriyle ölçüldüğünden ikisi
+  // listede değildir; kota hâlâ ölçülmüyor ve listede kalır.
+  assert.match(overview, /unmeasured: \["storageQuota"\]/);
 });
