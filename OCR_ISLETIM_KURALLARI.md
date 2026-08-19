@@ -21,6 +21,7 @@
 | `OCR_PRELOAD_MODEL` | **true** | Isınma 29–150 sn; ilk gerçek belge bunu ödememeli |
 | `OCR_PDF_RENDER_DPI` | **200** | 150 ve 137 dpi hız kazandırmıyor, metin kaybettiriyor |
 | `OCR_TEXT_LAYER_GATE` | **true** | Arşivin %6,1'inde OCR'ı tümüyle kaldırıyor |
+| `PADDLEOCR_ENABLE_MKLDNN` | **false** | Açmak servisi **çökertiyor** (§6'daki hata imzası) |
 | Çoklu süreç yöntemi | Bağımsız işletim sistemi süreçleri | Windows'ta `multiprocessing` kilitleniyor |
 
 ## 2. Bellek işçi sayısını belirler, CPU değil
@@ -136,20 +137,40 @@ sorgunun tek koşullu `UPDATE` kurgusunu denetler; önce `SELECT` edip sonra
 
 ## 6. Motor ayarlarına DOKUNMA
 
-Altı ayar denendi; hiçbiri kazanmadı. Değiştirilmemesi gereken ayarlar ve
+Sekiz ayar denendi; hiçbiri kazanmadı. Değiştirilmemesi gereken ayarlar ve
 gerekçeleri:
 
 | Ayar | Denenen | Sonuç |
 |---|---|---|
 | `use_doc_unwarping` | kapalı | Hız yok; 1983'te iki belge tarihi, 2020'de karar numarası kaybı |
 | `use_doc_orientation_classify` | kapalı | Aynı kayıplar, hız yok |
+| `use_textline_orientation` | kapalı | Fark yok (43,7 → 43,9 sn); alanlar birebir aynı — açık kalır |
 | `OCR_PDF_RENDER_DPI` | 150 / 137 | Hız yok; satır sayısı 303 → 279/284 |
 | Tespit modeli | `PP-OCRv5_mobile_det` | **4,6 kat yavaş** |
+| `PADDLEOCR_ENABLE_MKLDNN` | true | **Servis ısınmada çöküyor** (aşağıda) |
 
 Çözünürlük düşürmenin işe yaramamasının sebebi yapısaldır: tespit girdisi
 `PADDLEOCR_DET_LIMIT_SIDE_LEN=1600` ile zaten küçültülüyor, tanıma kırpmaları da
 sabit yüksekliğe normalleştiriliyor. Piksel azaltmak maliyeti düşürmez, yalnız
 okunan metni azaltır.
+
+### `PADDLEOCR_ENABLE_MKLDNN` — açmayı DENEME
+
+oneDNN Intel CPU'da tipik olarak büyük kazanç verdiği için bu ayar başka bir
+makinede ilk denenecek düğmedir; o yüzden çökme imzası buraya kaydedildi.
+Kapalı kalışının eski gerekçesi bir nottu ("Windows CPU oneDNN uyumsuzluğu
+güvenli ayarla kapatıldı"); artık güncel sürümde ölçülmüş bir çökmedir. İki
+ayrı denemede (tek başına ve textline kapalıyken) servis daha ısınmada düştü:
+
+```
+NotImplementedError: (Unimplemented) ConvertPirAttribute2RuntimeAttribute
+not support [pir::ArrayAttribute<pir::DoubleAttribute>]
+(paddle\fluid\framework\new_executor\instruction\onednn\onednn_instruction.cc:118)
+```
+
+Paddle sürümü değiştiğinde yeniden denenebilir; kabul ölçütü aynıdır — hız
+tek başına yetmez, altı gerçek sayfadaki satır/alan çıktısı temelle birebir
+aynı kalmalıdır.
 
 ## 7. Metin katmanı kapısı
 

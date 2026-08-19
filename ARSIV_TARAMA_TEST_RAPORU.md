@@ -417,7 +417,7 @@ kuralların dayandığı ölçümdür. Örnek küme her dönemden birer gerçek 
 sayısı, güven ve **gerçek alan çıkarımı** kaydedilmiştir — hız uğruna veri
 kaybını görmek için.
 
-### Motor ayarı: altı deneme, altısı da kayıp
+### Motor ayarı: sekiz deneme, sekizi de kayıp
 
 | Varyant | Ort. sn/sayfa | Toplam satır | Temele göre kaybedilen alan |
 |---|---:|---:|---|
@@ -429,6 +429,15 @@ kaybını görmek için.
 | Render 150 dpi | 46,4 | 279 | — |
 | Render 137 dpi | 44,5 | 284 | 2 |
 | Mobil tespit modeli | **249,2** (1 sayfa) | — | eleme |
+| Textline yönü kapalı | 43,9 | 294 | 0 — alanlar birebir aynı, hız da aynı |
+| **mkldnn açık** | **ÇÖKTÜ** | — | ısınmada `NotImplementedError` (onednn_instruction.cc) |
+
+Son iki satır ayrı bir koşuda ölçüldü (temel o koşuda 43,7 sn verdi — önceki
+43,9 ile gürültü içinde aynı, yani koşular karşılaştırılabilir). mkldnn iki
+denemede de (tek başına ve textline kapalıyken) daha ısınmada düştü; eski test
+raporundaki "Windows CPU oneDNN uyumsuzluğu" notu böylece güncel sürümde
+ölçülmüş bir çökmeye dönüştü. Çökme imzası `OCR_ISLETIM_KURALLARI.md` §6'da —
+başka bir makinede ilk denenecek düğme budur ve deneyen kişi imzayı tanımalı.
 
 Kaybedilen alanlar somut: 1983'ün iki belge tarihi, 2020'nin karar numarası
 (854), 1972'nin müdürlüğü, 1975'in belge tarihi. Yani yardımcı modelleri
@@ -538,7 +547,7 @@ yarıya düşürüyor), bu yüzden **donanım gelmeden açılmamalıdır**.
 ### Bu öneri neyi çözmez
 
 - **Sayfa başına süre değişmez.** ~40 sn/sayfa bu motorun bu sınıf CPU'daki
-  maliyetidir; altı ayar denemesi bunu iyileştiremedi (§11). Kazanç yalnız
+  maliyetidir; sekiz ayar denemesi bunu iyileştiremedi (§11). Kazanç yalnız
   sayfaların aynı anda işlenmesinden gelir.
 - **Toplu dosya sorunu ayrıdır.** Bir dosyada yüzlerce karar bulunması
   (§4) bir bölme kararı bekliyor (`ADR-019`); hızla ilgisi yoktur.
