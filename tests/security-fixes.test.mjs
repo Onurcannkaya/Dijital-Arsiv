@@ -119,6 +119,7 @@ test("genel bakış sayıları gerçek sorgudan gelir ve kapsamla süzülür", a
   assert.match(overview, /FROM archive_documents WHERE \(\? = '\*' OR unit = \?\)/);
   assert.match(overview, /FROM processing_jobs/);
   assert.match(overview, /FROM binary_objects/);
-  // Ölçülmeyen göstergeler uydurulmaz, açıkça bildirilir.
-  assert.match(overview, /unmeasured: \["storageQuota", "lastBackup", "serviceHealth"\]/);
+  // Ölçülmeyen göstergeler uydurulmaz, açıkça bildirilir. Servis sağlığı
+  // artık /api/health ile ölçüldüğünden listede değildir.
+  assert.match(overview, /unmeasured: \["storageQuota", "lastBackup"\]/);
 });

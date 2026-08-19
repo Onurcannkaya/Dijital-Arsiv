@@ -21,12 +21,12 @@ type Settings = {
 };
 type Health = {
   status?:string;
-  checks?:Record<string,{ok:boolean; latencyMs?:number; version?:number}>;
+  checks?:Record<string,{ok:boolean; latencyMs?:number; version?:number; configured?:boolean}>;
 };
 
 const serviceLabels: Record<string,string> = {
   database:"Veritabanı", objectStorage:"Nesne deposu", ocr:"OCR servisi",
-  contentScan:"İçerik tarama", schema:"Şema",
+  contentScan:"İçerik tarama", documentRender:"PDF görüntüleme türevi", schema:"Şema",
 };
 
 export function SettingsScreen() {
@@ -146,9 +146,11 @@ export function SettingsScreen() {
           return <article key={key} className={`status-card ${check?(ok?"ok":"down"):"unknown"}`}>
             <span>{key==="database"?<Database size={17}/>:key==="schema"?<ShieldCheck size={17}/>:<RefreshCw size={17}/>}</span>
             <div><small>{serviceLabel}</small>
-              <b>{check?(ok?"Çalışıyor":"Ulaşılamıyor"):"Bilinmiyor"}</b>
+              {/* Yapılandırılmamış servis "ulaşılamıyor" değildir; ikisi farklı eylem ister. */}
+              <b>{check?(check.configured===false?"Yapılandırılmadı":ok?"Çalışıyor":"Ulaşılamıyor"):"Bilinmiyor"}</b>
               <p>{key==="schema"
                 ?`Sürüm ${settings.schema.version} / beklenen ${settings.schema.expected}`
+                :check?.configured===false?"Servis adresi tanımlı değil"
                 :check?.latencyMs!==undefined?`${check.latencyMs} ms`:"Ölçüm yok"}</p></div>
           </article>;
         })}

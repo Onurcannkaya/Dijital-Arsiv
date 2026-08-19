@@ -6,7 +6,7 @@ import { correlationId, logEvent } from "../../../lib/observability";
 
 export const dynamic = "force-dynamic";
 
-type Check = { ok: boolean; latencyMs: number };
+type Check = { ok: boolean; latencyMs: number; configured?: boolean };
 
 async function check(operation: () => Promise<unknown>): Promise<Check> {
   const started = Date.now();
@@ -26,7 +26,16 @@ export async function GET(request: Request) {
     const storage = getArchiveObjectStorage(bindings);
     const ocrUrl = localOcrServiceUrl(request, bindings.OCR_SERVICE_URL);
     const contentScanUrl = localContentScanServiceUrl(request, bindings.CONTENT_SCAN_SERVICE_URL);
-    const [database, objectStorage, ocr, contentScan] = await Promise.all([
+    /*
+     * PDF erişim türevi üreticisi (ADR-015) de ölçülür: üretimde zorunlu sır
+     * olduğu hâlde readiness ona hiç bakmıyordu — servis çökse sistem "ready"
+     * görünüyordu. Yerel fallback yok (dev-stack render koşturmaz, compose ağı
+     * `document-render:8100` kullanır); yapılandırılmamışsa denetim GÖRÜNÜR
+     * (`configured:false`) ama readiness'i düşürmez: üretimde sır wrangler
+     * tarafından zorunlu kılınır, yerel geliştirme ise türevsiz çalışabilir.
+     */
+    const renderUrl = bindings.DOCUMENT_RENDER_SERVICE_URL?.replace(/\/$/, "");
+    const [database, objectStorage, ocr, contentScan, documentRender] = await Promise.all([
       check(() => bindings.DB.prepare("SELECT 1 AS ok").first()),
       check(() => storage.check()),
       ocrUrl
@@ -45,10 +54,18 @@ export async function GET(request: Request) {
             if (state.scannerReady !== true) throw new Error("Content scanner is not ready");
           })
         : Promise.resolve({ ok: false, latencyMs: 0 }),
+      renderUrl
+        ? check(async () => {
+            const response = await fetch(`${renderUrl}/health`, { signal: AbortSignal.timeout(5_000) });
+            // Servis kendi yapılandırma eksiğini 503 ile bildirir (main.py /health).
+            if (!response.ok) throw new Error("Document render health check failed");
+          })
+        : Promise.resolve({ ok: false, latencyMs: 0, configured: false }),
     ]);
     const schemaVersion = database.ok ? await readSchemaVersion(bindings.DB).catch(() => -1) : -1;
     const schema = { ok: schemaVersion === ARCHIVE_SCHEMA_VERSION, version: schemaVersion };
-    const ready = database.ok && objectStorage.ok && ocr.ok && contentScan.ok && schema.ok;
+    const ready = database.ok && objectStorage.ok && ocr.ok && contentScan.ok
+      && (renderUrl ? documentRender.ok : true) && schema.ok;
 
     logEvent(ready ? "info" : "warn", "health.checked", {
       correlationId: requestId,
@@ -57,11 +74,12 @@ export async function GET(request: Request) {
       objectStorage: objectStorage.ok,
       ocr: ocr.ok,
       contentScan: contentScan.ok,
+      documentRender: documentRender.ok,
       schemaVersion,
     });
     return Response.json({
       status: ready ? "ready" : "degraded",
-      checks: { database, objectStorage, ocr, contentScan, schema },
+      checks: { database, objectStorage, ocr, contentScan, documentRender, schema },
       timestamp: new Date().toISOString(),
       correlationId: requestId,
     }, {

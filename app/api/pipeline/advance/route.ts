@@ -87,13 +87,22 @@ export async function POST(request: Request) {
           ORDER BY j.created_at DESC LIMIT 1`)
           .bind(principal.email).first<{ id: string }>();
         if (own) {
-          const result = await processNextOcrJob(bindings, {
-            actor: `user:${principal.email}`,
-            unit: principal.unit,
-            serviceUrl: bindings.OCR_SERVICE_URL,
-            requestedDocumentId: own.id,
-          });
-          if (result.processed) advanced.ocr = 1;
+          /*
+           * `processNextOcrJob` işi kuyruğa geri bıraktıktan sonra hatayı
+           * YENİDEN FIRLATIR (jobs/process bunu yanıt gövdesine çevirir).
+           * Burada yutulur: OCR denemesinin başarısızlığı turun tamamını 500
+           * yapamaz — tarama/terfi sayaçları yazılmıştır, iş sayaç ve hata
+           * iziyle kuyruktadır, sonraki yoklama ya da cron kaldığı yerden sürer.
+           */
+          try {
+            const result = await processNextOcrJob(bindings, {
+              actor: `user:${principal.email}`,
+              unit: principal.unit,
+              serviceUrl: bindings.OCR_SERVICE_URL,
+              requestedDocumentId: own.id,
+            });
+            if (result.processed) advanced.ocr = 1;
+          } catch { /* Neden processing_jobs.error_message içinde. */ }
         }
       }
     }
