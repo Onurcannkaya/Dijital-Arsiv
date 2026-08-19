@@ -165,6 +165,12 @@ export const processingJobs = sqliteTable("processing_jobs", {
   lastAttemptAt: text("last_attempt_at"),
   deadLetteredAt: text("dead_lettered_at"),
   /**
+   * İşleyici kirası: 'processing' iş bu andan sonra yeniden talep edilebilir.
+   * Talep eden istek dilim ortasında ölürse işi kuyruğa döndürecek kimse
+   * yoktur; kira terk edilmiş işi kurtarır. Boş kira süresi geçmiş sayılır.
+   */
+  leaseExpiresAt: text("lease_expires_at"),
+  /**
    * OCR iş birimi belge değil sayfa dilimidir: ilerleme burada taşınır.
    * `nextPage` işlenecek ilk sayfa, `pageCount` servisin bildirdiği toplam
    * (ilk dilim dönene kadar bilinmez).
