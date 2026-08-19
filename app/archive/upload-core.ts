@@ -28,12 +28,13 @@ export type SecureUploadInput = {
 };
 
 /**
- * Dosyayı kabul hattından geçirir; başarıda sessizce döner, hatada insan
- * okunur mesajla fırlatır. Belge kaydı burada DOĞMAZ: kayıt, tarama ve terfi
- * tamamlanınca oluşur (F1.5) — karantina aşamasında listeye sahte satır
- * eklenmez.
+ * Dosyayı kabul hattından geçirir; başarıda oturum kimliğini döner, hatada
+ * insan okunur mesajla fırlatır. Belge kaydı burada DOĞMAZ: kayıt, tarama ve
+ * terfi tamamlanınca oluşur (F1.5) — karantina aşamasında listeye sahte satır
+ * eklenmez. Oturum kimliği, hızlı kabul sihirbazının tarama/terfi/OCR
+ * ilerlemesini yoklayabilmesi içindir.
  */
-export async function uploadSecurely({ file, documentType, unit, idempotencyKey, onProgress }: SecureUploadInput): Promise<void> {
+export async function uploadSecurely({ file, documentType, unit, idempotencyKey, onProgress }: SecureUploadInput): Promise<{ sessionId: string }> {
   const progress = onProgress ?? (() => undefined);
   progress("Güvenli yükleme oturumu hazırlanıyor…");
   const opened = await fetch("/api/uploads", {
@@ -77,4 +78,5 @@ export async function uploadSecurely({ file, documentType, unit, idempotencyKey,
   const completed = await fetch(`/api/uploads/${session.id}/complete`, { method: "POST" });
   const completedPayload = await completed.json() as { session?: { status: string }; error?: string };
   if (!completed.ok || !completedPayload.session) throw new Error(completedPayload.error || "Yükleme tamamlanamadı.");
+  return { sessionId: session.id };
 }

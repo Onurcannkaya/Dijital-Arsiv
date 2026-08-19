@@ -16,7 +16,7 @@ import { SettingsScreen } from "./settings";
 import { confidenceBadge } from "../../lib/confidence-language";
 
 type View = "dashboard" | "inbox" | "review" | "archive" | "users" | "activity" | "settings";
-type DocumentRow = { id:string; referenceNo?:string; title:string; unit:string; place:string; parcel:string; status:string; rawStatus:string; confidence:number; contentMatch?:boolean; pending?:number; relations?:number };
+type DocumentRow = { id:string; referenceNo?:string; title:string; unit:string; place:string; parcel:string; status:string; rawStatus:string; confidence:number; contentMatch?:boolean; pending?:number; relations?:number; createdAt:string };
 type CurrentUser = { email:string; displayName:string; role:string; roleLabel:string; unit:string; permissions:string[] };
 /** §3.10 hızlı sorgu: sunucunun sorgudan çıkardığı hedefli süzgeçler. */
 type QuickFilter = { key:string; label:string; value:string };
@@ -60,15 +60,46 @@ function formatBytes(bytes:number) {
 function formatToday() {
   return new Date().toLocaleDateString("tr-TR",{day:"numeric",month:"long",year:"numeric",weekday:"long"});
 }
+/*
+ * `created_at` iki biçimde gelir: terfi ISO yazar ("...T...Z"), SQLite
+ * varsayılanı boşluklu UTC yazar ("YYYY-MM-DD HH:MM:SS"). İkisi de UTC'dir;
+ * boşluklu biçim olduğu gibi ayrıştırılırsa yerel saat sanılır ve liste
+ * "3 saat önce yüklenen" belgeyi az önce yüklenmiş gösterir.
+ */
+function parseDbMoment(value:string) {
+  if(!value) return null;
+  const iso=value.includes("T")?value:`${value.replace(" ","T")}Z`;
+  const date=new Date(/Z$|[+-]\d{2}:\d{2}$/.test(iso)?iso:`${iso}Z`);
+  return Number.isNaN(date.getTime())?null:date;
+}
+/** Yüklenme anı memur dilinde: bugünküler saatle, eskiler tarih+saatle. */
+function formatUploadedAt(value:string) {
+  const date=parseDbMoment(value);
+  if(!date) return "—";
+  const time=date.toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});
+  return date.toDateString()===new Date().toDateString()
+    ?`Bugün ${time}`
+    :`${date.toLocaleDateString("tr-TR",{day:"2-digit",month:"2-digit",year:"numeric"})} ${time}`;
+}
 
 function Badge({status}:{status:string}) {
   const tone=status==="Arşivlendi"?"success":status==="İşleniyor"?"info":status==="OCR hatası"?"danger":"warning";
   return <span className={`status ${tone}`}><i />{status}</span>;
 }
-function Table({rows,onOpen,empty}:{rows:DocumentRow[],onOpen:(id:string)=>void,empty:string}) {
+function Table({rows,onOpen,empty,highlightNewest}:{rows:DocumentRow[],onOpen:(id:string)=>void,empty:string,highlightNewest?:boolean}) {
   if(!rows.length) return <p className="table-empty">{empty}</p>;
-  return <div className="table-wrap"><table><thead><tr><th>Belge</th><th>İlgili birim</th><th>Ada / parsel</th><th>Durum</th><th>OCR okuması</th><th /></tr></thead><tbody>
-    {rows.map(d=><tr key={d.id}><td><button className="doc-cell" onClick={()=>onOpen(d.id)}><span><FileSearch size={18}/></span><b>{d.title}<small>{d.referenceNo??d.id} · {d.place}{d.relations?` · ${d.relations} doğrulanmış ilişki`:""}</small></b></button></td><td>{d.unit}</td><td className="mono">{d.parcel}</td><td><Badge status={d.status}/>{d.pending?<small className="pending-count">{d.pending} kayıt bekliyor</small>:null}</td><td>{d.confidence>0?(()=>{const okuma=confidenceBadge(d.confidence/100);
+  /*
+   * "Son yüklenen" vurgusu listedeki EN YENİ kayda gider; sıralama sunucuda
+   * `created_at DESC` olduğundan çoğu zaman ilk satırdır ama arama/sayfalama
+   * varsayımına yaslanmak yerine değerden hesaplanır.
+   */
+  const newestId=highlightNewest?rows.reduce<DocumentRow|null>((newest,row)=>{
+    const current=parseDbMoment(row.createdAt)?.getTime()??0;
+    const best=newest?parseDbMoment(newest.createdAt)?.getTime()??0:-1;
+    return current>best?row:newest;
+  },null)?.id:null;
+  return <div className="table-wrap"><table><thead><tr><th>Belge</th><th>İlgili birim</th><th>Ada / parsel</th><th>Yüklendi</th><th>Durum</th><th>OCR okuması</th><th /></tr></thead><tbody>
+    {rows.map(d=><tr key={d.id} className={d.id===newestId?"newest-row":""}><td><button className="doc-cell" onClick={()=>onOpen(d.id)}><span><FileSearch size={18}/></span><b>{d.title}<small>{d.referenceNo??d.id} · {d.place}{d.relations?` · ${d.relations} doğrulanmış ilişki`:""}</small></b></button></td><td>{d.unit}</td><td className="mono">{d.parcel}</td><td className="uploaded-cell"><time>{formatUploadedAt(d.createdAt)}</time>{d.id===newestId?<small className="newest-badge">Son yüklenen</small>:null}</td><td><Badge status={d.status}/>{d.pending?<small className="pending-count">{d.pending} kayıt bekliyor</small>:null}</td><td>{d.confidence>0?(()=>{const okuma=confidenceBadge(d.confidence/100);
       return <b className={okuma.needsReview?"low-confidence":"confidence"}>{okuma.label}</b>;})()
       :<span className="pending-confidence">Bekliyor</span>}</td><td><button className="icon-btn" aria-label={`${d.referenceNo??d.title} belgesini aç`} onClick={()=>onOpen(d.id)}><ChevronRight size={17}/></button></td></tr>)}
   </tbody></table></div>;
@@ -119,11 +150,11 @@ function Dashboard({rows,overview,health,open,onUpload,userName,canUpload}:{rows
         <div className="backup"><Clock3 size={17}/><span>Yedekleme ve kapasite kotası<b>Henüz ölçülmüyor</b></span></div>
       </article>
     </section>
-    <section className="panel recent"><header><div><h2>Son belgeler</h2><p>Kapsamınızdaki en yeni kayıtlar</p></div></header><Table rows={rows} onOpen={open} empty="Henüz belge yüklenmedi."/></section>
+    <section className="panel recent"><header><div><h2>Son belgeler</h2><p>Kapsamınızdaki en yeni kayıtlar</p></div></header><Table rows={rows} onOpen={open} empty="Henüz belge yüklenmedi." highlightNewest/></section>
   </>;
 }
 
-function List({rows,title,subtitle,open,onUpload,canUpload,onScan,query,onQuery,empty,hasMore,loadingMore,onLoadMore,unsearchable,quickFilters}:{rows:DocumentRow[],title:string,subtitle:string,open:(id:string)=>void,onUpload:()=>void,canUpload:boolean,onScan:()=>void,query:string,onQuery:(value:string)=>void,empty:string,hasMore:boolean,loadingMore:boolean,onLoadMore:()=>void,unsearchable:boolean,quickFilters:QuickFilter[]}) {
+function List({rows,title,subtitle,open,onUpload,canUpload,onScan,query,onQuery,empty,hasMore,loadingMore,onLoadMore,unsearchable,quickFilters,highlightNewest}:{rows:DocumentRow[],title:string,subtitle:string,open:(id:string)=>void,onUpload:()=>void,canUpload:boolean,onScan:()=>void,query:string,onQuery:(value:string)=>void,empty:string,hasMore:boolean,loadingMore:boolean,onLoadMore:()=>void,unsearchable:boolean,quickFilters:QuickFilter[],highlightNewest?:boolean}) {
   return <><section className="heading"><div><p className="eyebrow">BELGE YÖNETİMİ</p><h1>{title}</h1><span>{subtitle}</span></div>{canUpload?<div className="heading-actions">
     {/* §4.4: dar ekranda birincil giriş kameradır; geniş ekranda gizlenir. */}
     <button className="primary scan-entry" onClick={onScan}><Camera size={17}/> Belge tara</button>
@@ -132,7 +163,7 @@ function List({rows,title,subtitle,open,onUpload,canUpload,onScan,query,onQuery,
       ?"Arama teriminde aranabilir karakter yok; en az bir harf ya da rakam girin."
       :`Onaylı OCR metni, alan değerleri ve doğrulanmış varlık ilişkilerinde ${rows.length} sonuç gösteriliyor${hasMore?" (daha fazlası var)":""}.`}
       {/* §3.10: sunucunun sorgudan çıkardığı süzgeçler açıkça gösterilir. */}
-      {!unsearchable&&quickFilters.length?<span className="quick-filters">{quickFilters.map(filter=><code key={filter.key}><b>{filter.label}</b> = {filter.value}</code>)}</span>:null}</p>:null}<Table rows={rows} onOpen={open} empty={empty}/>
+      {!unsearchable&&quickFilters.length?<span className="quick-filters">{quickFilters.map(filter=><code key={filter.key}><b>{filter.label}</b> = {filter.value}</code>)}</span>:null}</p>:null}<Table rows={rows} onOpen={open} empty={empty} highlightNewest={highlightNewest}/>
     {/* Sonuç kümesi sunucuda sayfalanır; liste sessizce kesilmez. */}
     {hasMore?<div className="list-more"><button className="outline" onClick={onLoadMore} disabled={loadingMore}>{loadingMore?<LoaderCircle className="spin" size={15}/>:<ChevronDown size={15}/>} Daha fazla göster</button></div>:null}
   </section></>;
@@ -177,6 +208,7 @@ function toDocumentRow(document: StoredDocument): DocumentRow {
     contentMatch:document.contentMatch,
     pending:(document.pendingValues??0)+(document.suggestedRelations??0),
     relations:document.verifiedRelations??0,
+    createdAt:document.createdAt,
   };
 }
 
@@ -329,7 +361,8 @@ export function ArchiveWorkspace(){
   // Kuyruk `review` + `ready` içerir; kenar çubuğu ve bildirim de aynı sayıyı kullanır.
   const reviewPending=overview?overview.documents.review+overview.documents.ready:0;
   const initials=(user?.displayName??"?").split(/\s+/).map(part=>part[0]).join("").slice(0,2).toLocaleUpperCase("tr");
-  const created=(document:StoredDocument)=>{setToast(`${document.referenceNo} OCR kuyruğuna alındı`);setView("inbox");void refresh()};
+  // Sihirbaz belgeyi OCR bittiğinde bildirir; kuyruğa alınma değil okunma duyurulur.
+  const created=(document:StoredDocument)=>{setToast(`${document.referenceNo} okundu; kontrole hazır`);void refresh()};
   const go=(v:View)=>{setView(v);setMobile(false);setSelectedId(null);setNextCursor(null)};
   const openDocument=(id:string)=>{setSelectedId(id);setView("review");setMobile(false)};
   const backToList=()=>{setSelectedId(null);setView("inbox");void refresh()};
@@ -364,6 +397,7 @@ export function ArchiveWorkspace(){
         onScan={()=>setScanOpen(true)}
         query={query} onQuery={setQuery} unsearchable={unsearchable} quickFilters={quickFilters}
         hasMore={Boolean(nextCursor)} loadingMore={loadingMore} onLoadMore={loadMore}
+        highlightNewest={view==="inbox"&&!searching}
       /></>}
-  </main></section><UploadDialog open={uploadOpen} onClose={()=>setUploadOpen(false)} onCreated={created}/><MobileScan open={scanOpen} onClose={()=>setScanOpen(false)}/>{toast&&<div className="toast" role="status"><CheckCircle2 size={17}/><span>{toast}</span><button onClick={()=>setToast("")} aria-label="Bildirimi kapat"><X size={15}/></button></div>}</div>;
+  </main></section><UploadDialog open={uploadOpen} onClose={()=>{setUploadOpen(false);void refresh()}} onCreated={created}/><MobileScan open={scanOpen} onClose={()=>setScanOpen(false)}/>{toast&&<div className="toast" role="status"><CheckCircle2 size={17}/><span>{toast}</span><button onClick={()=>setToast("")} aria-label="Bildirimi kapat"><X size={15}/></button></div>}</div>;
 }

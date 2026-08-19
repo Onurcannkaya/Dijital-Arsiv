@@ -41,6 +41,7 @@ import * as uploads from "../app/api/uploads/route.ts";
 import * as uploadParts from "../app/api/uploads/[id]/parts/route.ts";
 import * as uploadComplete from "../app/api/uploads/[id]/complete/route.ts";
 import * as jobsProcess from "../app/api/jobs/process/route.ts";
+import * as pipelineAdvance from "../app/api/pipeline/advance/route.ts";
 import * as adminMaintenance from "../app/api/admin/maintenance/route.ts";
 import * as adminMigrate from "../app/api/admin/migrate/route.ts";
 import * as adminScan from "../app/api/admin/scan/route.ts";
@@ -77,6 +78,7 @@ const ROUTES: Array<{ pattern: RegExp; module: RouteModule }> = [
   { pattern: /^\/api\/uploads\/([^/]+)\/parts$/, module: uploadParts },
   { pattern: /^\/api\/uploads\/([^/]+)\/complete$/, module: uploadComplete },
   { pattern: /^\/api\/jobs\/process$/, module: jobsProcess },
+  { pattern: /^\/api\/pipeline\/advance$/, module: pipelineAdvance },
   { pattern: /^\/api\/admin\/maintenance$/, module: adminMaintenance },
   { pattern: /^\/api\/admin\/migrate$/, module: adminMigrate },
   { pattern: /^\/api\/admin\/scan$/, module: adminScan },

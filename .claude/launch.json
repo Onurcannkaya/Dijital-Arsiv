@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 3000
+    },
+    {
+      "name": "arsiv-hizmetler",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:hizmetler"],
+      "port": 8090
     }
   ]
 }

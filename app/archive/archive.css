@@ -481,3 +481,45 @@ body.dense-review .brand{justify-content:center;padding:0}
 .review-steps button.done i{background:var(--ar-green-soft);color:var(--ar-green)}
 .review-steps button.current{border-color:var(--navy-800);background:var(--navy-800);color:#fff;font-weight:600}
 .review-steps button.current i{background:rgba(255,255,255,.2);color:#fff}
+
+/* ---- Hizli kabul sihirbazi (upload-dialog.tsx) ---- */
+.upload-modal.wizard{width:min(680px,96vw);display:flex;flex-direction:column}
+.wizard-steps{list-style:none;display:flex;gap:6px;margin:0;padding:12px 18px 0}
+.wizard-steps li{flex:1;display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--ar-border);border-radius:7px;background:var(--ar-surface-2);color:var(--ar-muted);font-size:12px}
+.wizard-steps li b{width:20px;height:20px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--ar-border);color:var(--ar-text);font-size:11px}
+.wizard-steps li.active{border-color:var(--ar-blue);color:var(--ar-text)}
+.wizard-steps li.active b{background:var(--ar-blue);color:#fff}
+.wizard-steps li.done{color:var(--ar-green)}
+.wizard-steps li.done b{background:var(--ar-green);color:#fff}
+.upload-modal .wizard-body{padding:18px;overflow:auto}
+.upload-modal.wizard>footer{display:flex;justify-content:flex-end;gap:8px;padding:15px 18px 18px;border-top:1px solid var(--ar-border)}
+.wizard-files{list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto}
+.wizard-files li{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--ar-border);border-radius:7px;background:var(--ar-surface-2);font-size:12px}
+.wizard-files li>svg{flex:none}
+.wizard-files li b{max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wizard-files li small{color:var(--ar-muted);white-space:nowrap}
+.wizard-files li span{flex:1;color:var(--ar-muted);text-align:right}
+.wizard-files li svg.ok,.wizard-summary svg.ok{color:var(--ar-green)}
+.wizard-files li svg.warn,.wizard-summary svg.warn{color:var(--ar-amber)}
+.wizard-files li.file-duplicate,.wizard-files li.file-rejected,.wizard-files li.file-failed,.wizard-files li.file-skipped{border-left:3px solid var(--ar-amber)}
+.wizard-files li.file-review,.wizard-files li.file-submitted{border-left:3px solid var(--ar-green)}
+.wizard-hint{display:flex;align-items:flex-start;gap:8px;margin:0 0 12px;padding:10px 12px;border-radius:7px;background:var(--ar-blue-soft);color:var(--ar-blue);font-size:12px}
+.wizard-hint svg{flex:none;margin-top:1px}
+.wizard-note{margin:10px 0 0;font-size:12px;color:var(--ar-muted)}
+.wizard-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.wizard-fields label{font-size:12px;color:var(--ar-muted)}
+.wizard-fields label>span{display:flex;align-items:center;gap:6px}
+.wizard-fields label>span i{color:var(--ar-red);font-style:normal}
+.wizard-fields label>span em{margin-left:auto;font-style:normal;font-size:11px}
+.wizard-fields em.low-confidence{color:var(--ar-amber)}
+.wizard-fields em.confidence{color:var(--ar-green)}
+.wizard-fields input,.wizard-fields select{display:block;width:100%;height:38px;margin-top:7px;padding:0 10px;border:1px solid var(--ar-border);border-radius:7px;background:var(--ar-surface-2);color:var(--ar-text);font-size:12px;outline:0}
+.wizard-fields input:focus,.wizard-fields select:focus{border-color:var(--ar-blue);box-shadow:0 0 0 2px color-mix(in srgb,var(--ar-blue) 14%,transparent)}
+.wizard-summary{display:flex;flex-direction:column;gap:10px;font-size:12.5px}
+.wizard-summary p{display:flex;align-items:center;gap:8px;margin:0}
+/* ---- Yuklenme saati kolonu ve "son yuklenen" vurgusu ---- */
+.uploaded-cell{white-space:nowrap}
+.uploaded-cell time{font-size:12px;color:var(--ar-muted);display:block}
+.newest-badge{display:inline-block;margin-top:3px;padding:2px 7px;border-radius:99px;background:var(--ar-green-soft);color:var(--ar-green);font-size:10.5px;font-weight:700}
+tr.newest-row td{background:color-mix(in srgb,var(--ar-green-soft) 35%,transparent)}
+@media(max-width:540px){.wizard-fields{grid-template-columns:1fr}.wizard-steps li span{display:none}.wizard-steps li{justify-content:center}}
