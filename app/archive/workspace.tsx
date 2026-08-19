@@ -32,7 +32,7 @@ const sessionStatusLabels: Record<string,string> = {
   REJECTED:"Reddedildi", DUPLICATE:"Mükerrer — bu belge zaten arşivde",
   EXPIRED:"Süresi doldu; yeniden yükleyin", FAILED:"Başarısız",
 };
-type HealthChecks = Record<string,{ok:boolean}>;
+type HealthChecks = Record<string,{ok:boolean; configured?:boolean}>;
 type Overview = {
   scope:string;
   documents:{ total:number; today:number; queued:number; processing:number; review:number; ready:number; archived:number; archivedToday:number; failed:number };
@@ -110,7 +110,9 @@ function Metric({icon:Icon,label,value,note,tone}:{icon:typeof Files,label:strin
 
 function Dashboard({rows,overview,health,open,onUpload,userName,canUpload}:{rows:DocumentRow[],overview:Overview|null,health:HealthChecks|null,open:(id:string)=>void,onUpload:()=>void,userName:string,canUpload:boolean}) {
   const documents=overview?.documents;
-  const healthEntries=Object.values(health??{});
+  // Yapılandırılmamış servis (örn. yerelde PDF türev üreticisi) arızalı
+  // sayılmaz; sayaç yalnız ölçülebilen servisleri anlatır.
+  const healthEntries=Object.values(health??{}).filter((check)=>check.configured!==false);
   const healthyCount=healthEntries.filter((check)=>check.ok).length;
   const healthTotal=healthEntries.length;
   const pending=overview?.pending;
