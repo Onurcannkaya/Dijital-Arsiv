@@ -5,6 +5,16 @@ from typing import Any
 
 TR_UPPER = str.maketrans({"i": "İ", "ı": "I"})
 
+"""Satır ayırıcısı.
+
+Sayfa metni satırları BOŞLUKLA değil satır sonuyla birleştirir. `\\s` ve `\\D`
+satır sonunu da eşlediği için ada/parsel ve karar numarası satır sınırını yine
+aşabilir; ama muhatap adı gibi boşluğu yutan bir karakter sınıfı aşamaz.
+Ölçülen kusur buydu: `Muhatap: MEHMET ÖZTEMEL` ifadesinden
+`MEHMET ÖZTEMEL AZA BELEDİYE BŞK` üretiliyordu.
+"""
+LINE_BREAK = "\n"
+
 
 def _upper(value: str) -> str:
     return value.translate(TR_UPPER).upper()
@@ -184,7 +194,15 @@ BELGE_SAYISI = re.compile(
     r"(?:KARAR\s*(?:NO|NUMARASI)|\bSAY\s*[IİL1])\s*[:.]?\s*(?P<no>\d{1,5})(?!\d)"
 )
 
-MUHATAP = re.compile(r"(?:İLGİLİSİ|MUHATAP)\s*[:\-]?\s*(?P<ad>[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ\s]{2,60})")
+"""Muhatap adı — SATIR SONUNDA durur.
+
+Ölçülen kusur: desen boşlukla birlikte satır sonunu da yutuyordu ve sayfa
+geneli eşleştirmeye geçildikten sonra ad, yanındaki satırı da içine alıyordu.
+`Muhatap: MEHMET ÖZTEMEL` ifadesinden `MEHMET ÖZTEMEL AZA BELEDİYE BŞK`
+değeri üretildi: kişi adı alanına kurul başlığı yazılıyordu. Sınıf artık
+boşluk kabul eder ama satır sonu kabul etmez.
+"""
+MUHATAP = re.compile(r"(?:İLGİLİSİ|MUHATAP)\s*[:\-]?[ 	]*(?P<ad>[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ ]{2,40})")
 
 
 """Başlık bölgesinin genişliği.
@@ -235,7 +253,10 @@ def _page_text(page: dict[str, Any]) -> tuple[list[dict[str, Any]], str, list[in
     for index, word in enumerate(words):
         text = str(word["text"]).strip()
         if pieces:
-            pieces.append(" ")
+            # Ayırıcı SATIR SONU'dur, boşluk değil. `\s` ve `\D` satır sonunu da
+            # eşlediği için ada/parsel ve karar numarası satır sınırını yine
+            # aşabilir; ama muhatap adı gibi boşluk yutan bir sınıf aşamaz.
+            pieces.append(LINE_BREAK)
             owners.append(index)
         pieces.append(text)
         owners.extend([index] * len(text))

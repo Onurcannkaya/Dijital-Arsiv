@@ -281,6 +281,60 @@ Kalan sınır: başlıkta hiçbir işaret eşleşmezse gövde yedeği yine yanl�
 seçebilir. Eskiye göre daha iyi (başlık artık gövdeyi yeniyor) ama tespit hâlâ
 `VERIFY_REQUIRED` bir öneridir; memur onaylamadan belge arşive girmez.
 
+## 6.d Kendi çıktımı denetleyerek bulunan iki kusur
+
+§6.b ve §6.c'deki düzeltmelerden sonra çıkarılan değerleri tek tek okudum. İki
+kusur çıktı ve ikisi de **benim değişikliklerimin ürünüydü** — ikisi de sessiz
+sınıftan, çünkü mahalle ve muhatap kritik alan değil: riskleri `LOW` kalıyor,
+yani uydurma değer personel doğrulaması zorlanmadan arşive girebiliyor.
+
+**Bozuk tarama uydurma mahalle üretiyordu.** Tek kelime kuralı (§6.b) eski aşırı
+yakalamayı düzeltti ama kendi kusurunu getirdi:
+
+| Girdi (gerçek OCR bozması) | Üretilen |
+|---|---|
+| `Kizilir mak Mh.` + `Kizilirmak Mh.` (ad bölünmüş) | **`Mak`** |
+| `Kizil1rmak Mh.` (rakam bulaşmış) | **`Rmak`** |
+
+Çözüm iki kurallı: bir jetonun ORTASINDAN başlayan eşleşme reddedilir (rakam
+durumu), ve sayfa içinde başka bir adayın gerçek son eki olan aday düşürülür
+(bölünme durumu). `Emek` ile `Kizilirmak` birbirinin parçası olmadığı için ikisi
+de korunur. Son ek kuralı kontrollü mahalle listesindeki adlara uygulanmaz:
+sözlük yüklendiğinde `Yenişehir` yüzünden gerçek bir `Şehir` atılmaz.
+
+**Muhatap adı satır sınırını aşıyordu.** Bu kusur sayfa geneli eşleştirmeye
+geçmenin (§6.b) yan etkisiydi; desenler satır satır çalışırken görünmüyordu:
+
+| Girdi | Üretilen `addressee` |
+|---|---|
+| `İlgilisi: AHMET YILMAZ` + büyük harfli satır | `AHMET YILMAZ KARAR VERİLDİ VE EVRAKIN TEVDİİNE` |
+| `Muhatap: MEHMET ÖZTEMEL` + imza satırı | `MEHMET ÖZTEMEL AZA BELEDİYE BŞK` |
+
+Kişi adı alanına kurul başlığı yazmak KVKK açısından da kabul edilemez. Sayfa
+metni artık satırları boşlukla değil **satır sonuyla** birleştiriyor: `\s` ve
+`\D` satır sonunu da eşlediği için ada/parsel ve karar numarası satır sınırını
+yine aşabiliyor, ama boşluk yutan muhatap sınıfı aşamıyor.
+
+Tetik kelimeler (`İlgilisi`, `Muhatap`) arşivde seyrek — 7.029 sayfanın
+**9'unda** geçiyor — ama gerçek; alan bu yüzden nadiren doluyor.
+
+Düzeltme sonrası 21 gerçek OCR sayfasında yeniden çıkarım, aşırı yakalama
+sınıfının tümüyle kapandığını gösteriyor:
+
+| Alan | Değer | En uzun değer |
+|---|---:|---:|
+| `ada` | 15 | 4 karakter |
+| `document_date` | 69 | 10 |
+| `document_number` | 27 | 4 |
+| `document_type` | 27 | 20 |
+| `neighborhood` | 25 | 14 |
+| `parcel` | 25 | 2 |
+| `unit` | 16 | 27 |
+
+Ders kayda değer: her iki kusur da **düzeltmenin kendisinden** doğdu ve
+yalnızca çıktıyı gerçek veriyle okuyarak bulundu. Testler geçiyordu, tip
+denetimi temizdi, hat çalışıyordu.
+
 ## 7. Uygulanan düzeltmeler (1 ve 2)
 
 İlk iki madde uygulandı ve gerçek arşiv dosyasıyla doğrulandı; ayrıntı §9'da.

@@ -216,6 +216,59 @@ class NeighborhoodTests(unittest.TestCase):
         self.assertEqual(sorted(values(fields, "neighborhood")), ["Emek", "Kizilirmak"])
 
 
+class AddresseeTests(unittest.TestCase):
+    """Muhatap adı satır sonunda durur.
+
+    Ölçülen kusur: desen boşlukla birlikte satır sonunu da yutuyordu. Desenler
+    satır satır çalışırken bu görünmüyordu; sayfa geneli eşleştirmeye geçince
+    ad, yanındaki satırı içine almaya başladı ve `Muhatap: MEHMET ÖZTEMEL`
+    ifadesinden `MEHMET ÖZTEMEL AZA BELEDİYE BŞK` üretildi — kişi adı alanına
+    kurul başlığı yazılıyordu.
+
+    Tetik kelimeler arşivde seyrek (7.029 sayfanın 9'unda) ama gerçek; kişi
+    adı alanına yanlış değer yazmak KVKK açısından da kabul edilemez.
+    """
+
+    def test_name_is_read_from_a_single_line(self):
+        fields = extract_fields(page_of("İlgilisi: AHMET YILMAZ"))
+        self.assertEqual(values(fields, "addressee"), ["AHMET YILMAZ"])
+
+    def test_name_does_not_swallow_the_next_line(self):
+        fields = extract_fields(page_of(
+            "İlgilisi: AHMET YILMAZ",
+            "KARAR VERİLDİ VE EVRAKIN TEVDİİNE",
+        ))
+        self.assertEqual(values(fields, "addressee"), ["AHMET YILMAZ"])
+
+    def test_signature_block_does_not_contaminate_the_name(self):
+        # 1975 cildinin sayfa sonlarındaki imza satırlarının gerçek biçimi.
+        fields = extract_fields(page_of(
+            "Muhatap: MEHMET ÖZTEMEL",
+            "Aza  Belediye Bşk. V.",
+            "S.TİRKEŞ  A.KURTOĞLU",
+        ))
+        self.assertEqual(values(fields, "addressee"), ["MEHMET ÖZTEMEL"])
+
+
+class LineBoundaryTests(unittest.TestCase):
+    """Satır sınırını AŞMASI gereken desenler aşmaya devam eder.
+
+    Ayırıcı boşluktan satır sonuna çevrildi; `\\s` ve `\\D` satır sonunu da
+    eşlediği için bu desenler etkilenmemelidir. Etkilenirse eski kusurlar geri
+    döner: satır sonunda bölünen ada/parsel çifti ve başlığın alt satırındaki
+    karar numarası yine kaybolur.
+    """
+
+    def test_block_and_parcel_still_cross_the_line(self):
+        fields = extract_fields(page_of("152 ada", "44 nolu parselden 5.64 m2 Sivas Belediyesi"))
+        self.assertEqual(values(fields, "ada"), ["152"])
+        self.assertEqual(values(fields, "parcel"), ["44"])
+
+    def test_decision_number_still_found_on_the_next_line(self):
+        fields = extract_fields(page_of("Sayi", "595", "uhasebe müdürlüğünden verilen"))
+        self.assertEqual(values(fields, "document_number"), ["595"])
+
+
 class DocumentNumberTests(unittest.TestCase):
     """Karar/belge sayısı — VERI_SOZLUGU.md §5 `document_number`.
 
