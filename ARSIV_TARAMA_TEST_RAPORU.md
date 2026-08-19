@@ -467,12 +467,21 @@ dilim ≈ ~7 saat kesintisiz işlem; başlatma kararı işletimindir.
 
 ## 10. Toplu dosya yükleme denemesi
 
-**Böyle bir özellik yok.** Üç yüzeyin hepsi tek dosya alıyor:
+> **Kapanış (2026-08-19):** Bu bölümün tespit ettiği boşluk hızlı kabul
+> sihirbazıyla kapandı (PR #66). Masaüstü diyaloğu artık çoklu dosya alıyor
+> (seçici + sürükle-bırak); dosyalar istemcide SIRAYLA kabul hattına verilir
+> ki tarayıcı ve hat boğulmasın, ve `POST /api/pipeline/advance` cron
+> beklemeden tarama + terfi + OCR'ı memurun kendi belgeleri için ilerletir.
+> Mobil tarama bilinçli olarak tek sayfa kaldı (§4.4). Aşağıdaki gözlem
+> deneme günündeki durumu belgeliyor; arka uç bulgusu bugün de geçerli.
 
-- `app/archive/upload-dialog.tsx` — `type="file"` girişinde `multiple` yok ve
-  `files?.item(0)` ile yalnız ilk dosya alınıyor;
+**Deneme tarihinde böyle bir özellik yoktu.** Üç yüzeyin hepsi tek dosya
+alıyordu:
+
+- `app/archive/upload-dialog.tsx` — `type="file"` girişinde `multiple` yoktu
+  ve `files?.item(0)` ile yalnız ilk dosya alınıyordu;
 - aynı dosyada sürükle-bırak da `dataTransfer.files.item(0)` — beş dosya
-  bırakıldığında dördü **sessizce** düşer;
+  bırakıldığında dördü **sessizce** düşüyordu;
 - `app/archive/mobile-scan.tsx` — kamera ve galeri girişleri de tekil.
 
 Arayüzde geçen "toplu" ifadeleri toplu **parsel onayı** paneline aittir.
