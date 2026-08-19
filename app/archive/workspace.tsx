@@ -197,6 +197,44 @@ function PendingUploads({sessions,canAdvance,advancing,onAdvance,onOpenDocument}
   </section>;
 }
 
+/** ADR-013 kurtarma görünümü: terfi aşamasında FAILED kalmış oturumlar. */
+type FailedSession = { id:string; uploadedBy:string; unit:string; originalName:string; documentType:string;
+  failureCode:string|null; previousRetryReason:string|null; failedAt:string|null; updatedAt:string; retryable:boolean };
+
+/**
+ * Kurtarma paneli. Panodaki "başarısız" sayısının arkasındaki oturumları
+ * gösterir ve ADR-013 komutunu çağırır: kurtarma gerekçesiz gönderilemez,
+ * gerekçe denetim zincirine yazılır. `retryable=false` satırlar düğmesiz
+ * kalır ve nedeni söylenir — operatör 409 okumak için düğmeye basmasın.
+ */
+function FailedUploads({sessions,busyId,onRetry}:{sessions:FailedSession[],busyId:string|null,onRetry:(id:string,reason:string)=>Promise<string|null>}) {
+  const [openId,setOpenId]=useState<string|null>(null);
+  const [reason,setReason]=useState("");
+  const [error,setError]=useState("");
+  if(!sessions.length) return null;
+  return <section className="panel pending-uploads failed-uploads">
+    <header><div><h2>Kurtarma bekleyen yüklemeler</h2><p>Kasa aktarımında başarısız olan oturumlar. Karantina kanıtı geçerliyken gerekçeyle terfiye geri alınabilir; gerekçe denetim zincirine yazılır.</p></div></header>
+    <ul>{sessions.map(session=><li key={session.id} className="pending-failed">
+      <b>{session.originalName}</b>
+      <span>{session.uploadedBy} · {session.failureCode??"PROMOTION_FAILED"} · {formatUploadedAt(session.failedAt??session.updatedAt)}
+        {session.retryable?"":" · yeniden deneme penceresi kapalı ya da karantina kanıtı eksik; dosya yeniden yüklenmeli"}</span>
+      {session.retryable?(openId===session.id
+        ? <span className="retry-form">
+            <input value={reason} onChange={event=>setReason(event.target.value)} placeholder="Kurtarma gerekçesi (zorunlu)" aria-label={`${session.originalName} için kurtarma gerekçesi`}/>
+            <button className="outline" type="button" onClick={()=>{setOpenId(null);setReason("");setError("")}}>Vazgeç</button>
+            <button className="primary" type="button" disabled={!reason.trim()||busyId===session.id} onClick={()=>{void (async()=>{
+              const failureMessage=await onRetry(session.id,reason.trim());
+              if(failureMessage) setError(failureMessage);
+              else {setOpenId(null);setReason("");setError("")}
+            })()}}>{busyId===session.id?<LoaderCircle className="spin" size={15}/>:null} Terfiye geri al</button>
+          </span>
+        : <button className="outline" type="button" onClick={()=>{setOpenId(session.id);setReason("");setError("")}}>Kurtar</button>)
+      : null}
+    </li>)}</ul>
+    {error?<p className="retry-error" role="alert">{error}</p>:null}
+  </section>;
+}
+
 function toDocumentRow(document: StoredDocument): DocumentRow {
   // Ada ve parsel çok değerli alanlardır; sunucu değerleri ` / ` ile birleştirir.
   const parcel=[document.ada,document.parcel].filter(Boolean).join(" · ")||"—";
@@ -310,6 +348,36 @@ export function ArchiveWorkspace(){
       if(response.ok) setPendingSessions(payload.sessions??[]);
     } catch { /* Ağ hatasında mevcut şerit korunur. */ }
   },[]);
+  /** ADR-013 kurtarma görünümü; yetkisiz kullanıcıda sunucu 403 döner, panel boş kalır. */
+  const [failedSessions,setFailedSessions]=useState<FailedSession[]>([]);
+  const [retryingId,setRetryingId]=useState<string|null>(null);
+  const loadFailed=useCallback(async()=>{
+    try {
+      const response=await fetch("/api/uploads?scope=failed");
+      const payload=await response.json() as {sessions?:FailedSession[]};
+      setFailedSessions(response.ok?(payload.sessions??[]):[]);
+    } catch { /* Ağ hatasında mevcut panel korunur. */ }
+  },[]);
+  const retrySession=useCallback(async(id:string,reason:string):Promise<string|null>=>{
+    setRetryingId(id);
+    try {
+      const response=await fetch(`/api/uploads/${id}/retry`,{
+        method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({reason}),
+      });
+      const payload=await response.json() as {session?:{status:string};error?:string};
+      if(!response.ok) return payload.error??"Kurtarma komutu çalıştırılamadı.";
+      setToast(payload.session?.status==="ACCEPTED"
+        ?"Oturum kurtarıldı ve kasaya alındı"
+        :"Oturum terfiye geri alındı; kasa aktarımı sırada");
+      await Promise.all([loadFailed(),loadPending(),loadList(),loadContext()]);
+      return null;
+    } catch {
+      return "Kurtarma komutu çalıştırılamadı; ağ bağlantısını kontrol edin.";
+    } finally {
+      setRetryingId(null);
+    }
+  },[loadFailed,loadPending,loadList,loadContext]);
   /** Yerelde cron ateşlenmez; tarama+terfi turu buradan elle ilerletilir. */
   const advanceScan=async()=>{
     setAdvancingScan(true);
@@ -322,7 +390,7 @@ export function ArchiveWorkspace(){
     } catch { /* Tur ilerletilemezse şerit eski durumu göstermeye devam eder. */ }
     finally { setAdvancingScan(false); }
   };
-  const refresh=useCallback(async()=>{await Promise.all([loadContext(),loadList(),loadPending()])},[loadContext,loadList,loadPending]);
+  const refresh=useCallback(async()=>{await Promise.all([loadContext(),loadList(),loadPending(),loadFailed()])},[loadContext,loadList,loadPending,loadFailed]);
   // Oturum ve operasyon özeti liste sorgusundan bağımsızdır; arama yazılırken
   // tekrar yüklenmez ve eski liste yanıtı yeni sonucu ezemez.
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -338,8 +406,8 @@ export function ArchiveWorkspace(){
   // Bekleyen yüklemeler Gelen Evrak açıkken ve yükleme diyaloğu kapanınca tazelenir.
   useEffect(()=>{
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if(view==="inbox"&&!uploadOpen) void loadPending();
-  },[view,uploadOpen,loadPending]);
+    if(view==="inbox"&&!uploadOpen){ void loadPending(); void loadFailed(); }
+  },[view,uploadOpen,loadPending,loadFailed]);
 
   const loadMore=async()=>{
     if(!nextCursor||loadingMore) return;
@@ -378,13 +446,13 @@ export function ArchiveWorkspace(){
       :view==="activity"?<ActivityScreen onOpenDocument={openDocument}/>
       :view==="settings"?<SettingsScreen/>
       :view==="dashboard"?<Dashboard rows={rows.slice(0,5)} overview={overview} health={health} open={openDocument} onUpload={()=>setUploadOpen(true)} userName={user?.displayName??""} canUpload={canUpload}/>
-      :<>{view==="inbox"?<PendingUploads
+      :<>{view==="inbox"?<><PendingUploads
         sessions={pendingSessions}
         canAdvance={canManageUsers}
         advancing={advancingScan}
         onAdvance={()=>{void advanceScan()}}
         onOpenDocument={openDocument}
-      />:null}<List
+      /><FailedUploads sessions={failedSessions} busyId={retryingId} onRetry={retrySession}/></>:null}<List
         rows={rows}
         title={view==="inbox"?"Gelen Evrak":view==="review"?"Doğrulama":"Dijital Arşiv"}
         subtitle={view==="inbox"?"Yeni belgeleri, OCR durumunu ve hataları yönetin."

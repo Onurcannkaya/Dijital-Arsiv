@@ -13,7 +13,7 @@ import {
   getUploadSession,
   ingestErrorResponse,
 } from "../../../lib/ingest-service";
-import { ACCEPTED_FILE_EXTENSIONS, isAcceptedMediaType } from "../../../lib/ingest-contract";
+import { ACCEPTED_FILE_EXTENSIONS, isAcceptedMediaType, isOperatorRetryWindowOpen } from "../../../lib/ingest-contract";
 import { failure } from "../../../lib/errors";
 
 export const dynamic = "force-dynamic";
@@ -82,9 +82,57 @@ export async function GET(request: Request) {
     const bindings = getArchiveBindings();
     const schemaError = await requireArchiveSchema(request, bindings.DB);
     if (schemaError) return schemaError;
+    const url = new URL(request.url);
+    /*
+     * `scope=failed` operatör görünümüdür: ADR-013 kurtarma komutunun hedefi
+     * olan FAILED oturumları KULLANICI süzgeci olmadan, müdürlük kapsamıyla
+     * listeler. Kendi oturum listesi `document.upload` ile yetinirken bu
+     * görünüm kurtarma yetkisini ister — başkasının yüklemesini görmek,
+     * onu kurtarabilecek role aittir.
+     */
+    if (url.searchParams.get("scope") === "failed") {
+      const operator = await authorizeRequest(request, bindings.DB, "ingest.retry", bindings.ARCHIVE_ADMIN_EMAILS);
+      if (operator instanceof Response) return operator;
+      const failed = await bindings.DB.prepare(`SELECT s.id, s.user_id, s.unit, s.original_name,
+          s.requested_document_type, s.failure_code, s.operator_retry_reason, s.updated_at,
+          (SELECT e.created_at FROM upload_session_events e
+            WHERE e.upload_session_id = s.id AND e.to_status = 'FAILED'
+            ORDER BY e.event_number DESC LIMIT 1) AS failed_at,
+          (SELECT 1 FROM ingest_receipts r
+            WHERE r.upload_session_id = s.id AND r.result = 'VERIFIED' AND r.scanner_result = 'CLEAN'
+            LIMIT 1) AS has_receipt,
+          (SELECT 1 FROM ingest_objects o
+            WHERE o.upload_session_id = s.id AND o.object_class = 'quarantine' AND o.deleted_at IS NULL
+            LIMIT 1) AS has_quarantine
+        FROM upload_sessions s
+        WHERE s.status = 'FAILED' AND (? = '*' OR s.unit = ?)
+        ORDER BY s.updated_at DESC LIMIT 50`)
+        .bind(operator.unit, operator.unit)
+        .all<{ id: string; user_id: string; unit: string; original_name: string;
+          requested_document_type: string; failure_code: string | null;
+          operator_retry_reason: string | null; updated_at: string; failed_at: string | null;
+          has_receipt: number | null; has_quarantine: number | null }>();
+      const now = new Date();
+      return Response.json({
+        sessions: failed.results.map((row) => ({
+          id: row.id,
+          uploadedBy: row.user_id,
+          unit: row.unit,
+          originalName: row.original_name,
+          documentType: row.requested_document_type,
+          failureCode: row.failure_code,
+          previousRetryReason: row.operator_retry_reason,
+          failedAt: row.failed_at,
+          updatedAt: row.updated_at,
+          // Kurtarma komutunun ön koşulları listede söylenir ki operatör
+          // düğmeye basıp 409 okumak yerine neyin eksik olduğunu baştan görsün.
+          retryable: Boolean(row.has_receipt) && Boolean(row.has_quarantine)
+            && Boolean(row.failed_at) && isOperatorRetryWindowOpen(row.failed_at!, now),
+        })),
+      });
+    }
     const principal = await authorizeRequest(request, bindings.DB, "document.upload", bindings.ARCHIVE_ADMIN_EMAILS);
     if (principal instanceof Response) return principal;
-    const url = new URL(request.url);
     const id = url.searchParams.get("id");
     /*
      * `ids` ile istenen oturumlar hızlı kabul sihirbazının yoklamasıdır:

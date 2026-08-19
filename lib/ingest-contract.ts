@@ -9,6 +9,22 @@ export const MAX_INGEST_BYTES = 2 * 1024 * 1024 * 1024;
 export const MAX_MULTIPART_PARTS = 10_000;
 
 /**
+ * ADR-013 / ADR-014: FAILED terfinin karantina nesnesi "yetkili yeniden
+ * deneme penceresi için 7 gün" tutulur; pencere dolduğunda kurtarma kapanır
+ * ve memurun yeni oturum açması gerekir. Süre karantina yaşam döngüsüyle
+ * AYNI kaynaktan gelmelidir — pencere burada uzatılıp temizlik 7 günde
+ * silmeye devam ederse operatör var olmayan nesneye yeniden deneme başlatır.
+ */
+export const OPERATOR_RETRY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** FAILED anından bu yana geçen süre pencereyi aşmadıysa kurtarma açıktır. */
+export function isOperatorRetryWindowOpen(failedAtIso: string, now: Date): boolean {
+  const failedAt = new Date(failedAtIso.includes("T") ? failedAtIso : `${failedAtIso.replace(" ", "T")}Z`);
+  if (Number.isNaN(failedAt.getTime())) return false;
+  return now.getTime() - failedAt.getTime() <= OPERATOR_RETRY_WINDOW_MS;
+}
+
+/**
  * Kabul edilen belge biçimleri — tek tanım.
  *
  * İçeriğe bakan asıl denetim tarama servisindedir
