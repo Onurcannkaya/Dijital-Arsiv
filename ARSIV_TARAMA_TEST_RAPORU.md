@@ -430,6 +430,41 @@ rota + gerçek şema + SQLite) ve `services/ocr/tests/test_page_window.py`
 (10 test: pencere sınırı, bütçe, mutlak sayfa numarası, tek uçuş koruması).
 `npm run verify` 440 testle temiz geçiyor.
 
+### 9.b Uzun koşu doğrulaması — 8 dilim art arda (2026-08-19)
+
+Önceki doğrulamalar 1–3 dilimlikti; üretimde mekanizma 623 sayfada ~100 dilim
+üst üste koşacak. Sızıntı, sayaç kayması ve takas belirtisi ancak seri koşuda
+görünür. Bu yüzden aynı 1975 belgesinin işi gerçek hattan **8 dilim art arda**
+ilerletildi (sayfa 22→68, 31 dakika) ve her dilimden sonra ölçüm alındı:
+
+| Dilim | Süre | Sayfa | OCR RSS |
+|---:|---:|---|---:|
+| 1 | 254,9 sn | 22–26 | 175 MB |
+| 2 | 280,3 sn | 27–32 | 323 MB |
+| 3 | 277,6 sn | 33–38 | 335 MB |
+| 4 | 276,8 sn | 39–44 | 334 MB |
+| 5 | 242,4 sn | 45–49 | 341 MB |
+| 6 | 259,8 sn | 50–55 | 344 MB |
+| 7 | 245,6 sn | 56–61 | 349 MB |
+| 8 | 272,4 sn | 62–68 | 351 MB |
+
+- **Sayaç:** `attempt = 0` sekiz dilim boyunca — ilerleyen dilim bütçe tüketmiyor.
+- **Bütünlük:** 68 sayfa, boşluksuz ve çift kayıtsız; `next_page` tekdüze 22→69.
+- **Önbellek:** koşu boyunca tek büyük kopya — hiçbir dilim aslı yeniden indirmedi.
+- **Süreler kararlı:** 242–280 sn bandı, yükselen eğilim yok; bütçe ~240 sn'de
+  kesip 5–7 sayfa/dilim veriyor (sayfa başına ~45 sn — 1975 en yavaş külliyat).
+- **Kalite:** yeni 47 sayfanın ortalama güveni %92,05 (en düşük sayfa %76,4).
+  Yeni ilişki 0: bu sayfalar personel/bütçe kararları, ada/parsel geçmiyor.
+- **İzlenecek nokta:** RSS 2. dilimden sonra 323→351 MB (~5 MB/dilim) tırmandı.
+  Bu hızla kalan ~93 dilim +440 MB eder — sızıntı hükmü için erken, tehlikesiz
+  sayıp geçmek için de erken; belgenin kalanı koşulursa eğri izlenmelidir.
+  (İlk okumadaki 175 MB, Windows'un çalışma kümesi kırpması; işletim
+  kurallarındaki işçi başına ~5 GB boyutlandırma eşzamanlı yük ölçümüdür ve
+  geçerliliğini korur.)
+
+Sonuç: dilim mekanizması seri yükte kararlı. Belgenin kalanı 555 sayfa ≈ 93
+dilim ≈ ~7 saat kesintisiz işlem; başlatma kararı işletimindir.
+
 ## 10. Toplu dosya yükleme denemesi
 
 **Böyle bir özellik yok.** Üç yüzeyin hepsi tek dosya alıyor:
