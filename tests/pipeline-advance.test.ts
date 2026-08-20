@@ -61,7 +61,7 @@ function startOcrStub(): Promise<{ url: string; hits: () => number; close: () =>
   });
 }
 
-async function withServer(ocrUrl: string | null, run: (server: NodeServer) => Promise<void>) {
+async function withServer(ocrUrl: string | null, run: (server: NodeServer) => Promise<void>, extraEnv: Record<string, string> = {}) {
   const server = await startNodeServer({
     runtime: {
       dbPath: ":memory:",
@@ -71,6 +71,7 @@ async function withServer(ocrUrl: string | null, run: (server: NodeServer) => Pr
         ARCHIVE_ADMIN_EMAILS: ADMIN,
         APP_ENV: "staging",
         ...(ocrUrl ? { OCR_SERVICE_URL: ocrUrl } : {}),
+        ...extraEnv,
       },
     },
     host: "127.0.0.1",
@@ -181,6 +182,41 @@ test("süren OCR işi varken yeni tetik atlanır (tek uçuş)", async () => {
     });
   } finally {
     await stub.close();
+  }
+});
+
+test("sihirbaz yoklamasıyla azami denemeyi tüketen iş de alarma bağlanır", async () => {
+  const ocrStub = await startOcrStub();
+  const alerts: Array<Record<string, unknown>> = [];
+  const alertStub = createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => { alerts.push(JSON.parse(body) as Record<string, unknown>); response.writeHead(200); response.end(); });
+  });
+  await new Promise<void>((resolve) => { alertStub.listen(0, "127.0.0.1", () => resolve()); });
+  const alertUrl = `http://127.0.0.1:${(alertStub.address() as { port: number }).port}`;
+  try {
+    await withServer(ocrStub.url, async (server) => {
+      // Son hakkını kullanacak iş: bir sonraki arıza dead-letter demektir.
+      const doomed = await seedDocumentWithJob(server, { key: "c6", uploadedBy: ADMIN, createdAt: "2026-08-20T09:00:00.000Z" });
+      await server.db.prepare("UPDATE processing_jobs SET attempt = 2 WHERE id = ?").bind(doomed.jobId).run();
+
+      const response = await fetch(`${server.url}/api/pipeline/advance`, {
+        method: "POST", headers: { "oai-authenticated-user-email": ADMIN },
+      });
+      assert.equal(response.status, 200, "OCR arızası advance turunu düşürmez");
+
+      const job = await jobState(server, doomed.jobId);
+      assert.equal(job?.status, "failed", "iş dead-letter'a düşmeli");
+      // Alarm cron'u beklemeden, olayın kaynağından gitti.
+      assert.equal(alerts.length, 1, "dead-letter alarmı advance yolunda da atılmalı");
+      assert.equal(alerts[0].event, "ocr.dead-letter");
+      assert.equal(alerts[0].severity, "critical");
+      assert.equal((alerts[0].detail as { documentId: string }).documentId, doomed.id);
+    }, { ALARM_WEBHOOK_URL: alertUrl });
+  } finally {
+    await ocrStub.close();
+    await new Promise<void>((resolve) => { alertStub.close(() => resolve()); });
   }
 });
 

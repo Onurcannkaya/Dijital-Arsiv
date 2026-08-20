@@ -119,11 +119,11 @@ async function runIncremental(bindings: BackupDependencies, now: Date, previousC
     let cursor = previousCursor;
     for (const object of batch.results) {
       /*
-       * Kopya `promote` ile DEĞİL, oku + if-absent yaz ile yapılır: yerel
-       * dosya sürücüsünün promote'u kaynak okuyucuyu yok sayıp kendi ad
-       * alanında arıyor (sözleşme ihlali, ayrı düzeltme işi). Okuma+yazma
-       * her sürücüde aynı davranır; if-absent koşulu kopyayı idempotent tutar
-       * ve yedekteki nesnenin üzerine asla yazılmaz.
+       * Kopya oku + if-absent yaz ile yapılır: `promote` karantina→kasa terfi
+       * sözleşmesidir ve sağlayıcı tarafında ek doğrulamalar taşır; yedek
+       * kopyası için gereken tek şey kaynağı okuyup hedefe bir kez yazmaktır.
+       * If-absent koşulu kopyayı idempotent tutar; yedekteki nesnenin üzerine
+       * asla yazılmaz.
        */
       const source = await reader.get(object.object_key);
       if (!source || source.range !== null) {

@@ -154,18 +154,10 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
         deadLetter: after.deadLetter,
       });
       /*
-       * Dead-letter ARTIŞI alarm olayıdır: iş azami denemesini tüketti ve
-       * artık kendi kendine düzelmeyecek. Mevcut birikinti her turda yeniden
-       * bildirilmez — alarm sayaç deltasına bağlıdır, spam üretmez.
+       * Dead-letter alarmı burada DEĞİL, olayın kaynağında atılır
+       * (`releaseFailedJob`, jobs/process): iş cron, sihirbaz yoklaması ya da
+       * elle tetikleme — hangi yoldan düşerse düşsün tek noktadan haber verilir.
        */
-      if (after.deadLetter > before.deadLetter) {
-        await dispatchAlert(bindings, {
-          severity: "critical",
-          event: "ocr.dead-letter",
-          title: `${after.deadLetter - before.deadLetter} OCR işi azami denemeyi tüketti; işletim incelemesi gerekiyor.`,
-          detail: { deadLetter: after.deadLetter, queueDepth: after.depth },
-        });
-      }
     });
     return;
   }

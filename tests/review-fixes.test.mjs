@@ -126,8 +126,9 @@ test("iç hata ayrıntısı istemciye sızmaz", async () => {
   assert.match(processor, /throw new PublicError\("OCR işine ait belge bulunamadı\."/);
   assert.match(processor, /isPublicError\(error\)/);
   assert.match(processor, /failure\(error, "ocr\.process"/);
-  // Ayrıntı yine de işe kaydedilir.
-  assert.match(processor, /releaseFailedJob\(bindings\.DB, job, detail\)/);
+  // Ayrıntı yine de işe kaydedilir (imza bindings alır: dead-letter alarmı
+  // olayın kaynağında atılır, bkz. releaseFailedJob içindeki gerekçe).
+  assert.match(processor, /releaseFailedJob\(bindings, job, detail\)/);
 });
 
 test("varlık doğrulama mesajları kullanıcıya açık kalır", async () => {

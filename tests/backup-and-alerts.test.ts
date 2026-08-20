@@ -187,8 +187,14 @@ test("alarm taşıyıcısı: teslim, kanalsızlık ve uç arızası ayrı sonuç
 test("cron dikişi yedek dilimini ve alarmları gerçekten çağırır", async () => {
   const source = await readFile(new URL("../lib/scheduled-jobs.ts", import.meta.url), "utf8");
   assert.match(source, /runBackupSlice\(bindings\)/);
-  assert.match(source, /event: "ocr\.dead-letter"/);
   assert.match(source, /event: "integrity\.finding"/);
-  // Dead-letter alarmı sayaç ARTIŞINA bağlıdır; her turda birikintiyi yeniden bildirmez.
-  assert.match(source, /after\.deadLetter > before\.deadLetter/);
+  /*
+   * Dead-letter alarmı cron turunda DEĞİL, olayın kaynağında atılır
+   * (releaseFailedJob): sihirbaz yoklaması ya da elle tetiklemeyle düşen iş
+   * de alarmsız kalmaz. Cron'da ikinci bir kopyası olmamalı — çift alarm.
+   */
+  assert.doesNotMatch(source, /ocr\.dead-letter/);
+  const jobs = await readFile(new URL("../app/api/jobs/process/route.ts", import.meta.url), "utf8");
+  assert.match(jobs, /event: "ocr\.dead-letter"/);
+  assert.match(jobs, /status === "failed"/);
 });
