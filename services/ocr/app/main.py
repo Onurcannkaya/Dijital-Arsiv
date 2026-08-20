@@ -56,9 +56,36 @@ TEXT_LAYER_GATE = os.getenv("OCR_TEXT_LAYER_GATE", "true").strip().lower() == "t
 LAYER_MIN_WORDS = int(os.getenv("OCR_LAYER_MIN_WORDS", "40"))
 LAYER_MIN_TR_RATIO = float(os.getenv("OCR_LAYER_MIN_TR_RATIO", "0.03"))
 LAYER_MAX_MIXED_RATIO = float(os.getenv("OCR_LAYER_MAX_MIXED_RATIO", "0.02"))
+"""Kısa sayfa bandı: 15-39 kelimelik sayfalar SIKILAŞTIRILMIŞ eşikle değerlendirilir.
+
+Eski davranış 40 kelimenin altını ölçmeden reddediyordu; ölçümde (2021 meclis
+cildi, 34 kısa sayfa — tamamı karar sonu/imza sayfası) bu sayfaların Türkçe
+harf oranı 0,076-0,123 bandında, karışma 0 çıktı: katman dijital kalitede.
+Düşük örtüşen iki sayfada fark kelimeleri tek tek incelendi ve eksik görünen
+kelimeler Paddle'ın KENDİ yanlış okumalarıydı ('Dentim', 'Fii', 'Krar');
+katmanda doğruları vardı. Kısa sayfayı Paddle'a göndermek hem ~35-65 sn
+harcıyor hem de metni bozuyordu.
+
+Az kanıtla karar verildiği için eşikler sıkıdır: Türkçe harf oranı normal
+bandın (0,03) kabaca iki katı aranır ve 40 kelime altında TEK karışık kelime
+bile oranı 0,02'nin üstüne taşıyıp sayfayı Paddle'a düşürür — bilinçli olarak
+böyle bırakıldı (ölçümde karışmalı iki kısa sayfa vardı; ikisi de Paddle'a
+gider, maliyeti ~2 dk, güvenlik payı tam).
+"""
+LAYER_SHORT_MIN_WORDS = int(os.getenv("OCR_LAYER_SHORT_MIN_WORDS", "15"))
+LAYER_SHORT_MIN_TR_RATIO = float(os.getenv("OCR_LAYER_SHORT_MIN_TR_RATIO", "0.05"))
 TEXT_LAYER_MODEL = "pdf-text-layer"
 
 MAX_PAGES_PER_REQUEST = max(1, int(os.getenv("OCR_MAX_PAGES_PER_REQUEST", "8")))
+"""Pencere tavanı PAHALI sayfaları sınırlar; katman sayfası pencereyi doldurmaz.
+
+Sekiz sayfalık tavanın gerekçesi sayfa başına ~35-65 sn'lik Paddle maliyetidir.
+Katmandan okunan sayfa milisaniye mertebesindedir; onu da aynı tavana saymak
+178 sayfalık, %70'i katmandan geçen bir cildi 22 isteğe bölüyordu — her istek
+yeniden indirme + kuyruk turu demek. Katman sayfaları artık yalnız toplam
+tavana sayılır; toplam tavan da yanıt gövdesi ile D1 yazma yığınını sınırlar.
+"""
+MAX_TOTAL_PAGES_PER_REQUEST = max(MAX_PAGES_PER_REQUEST, int(os.getenv("OCR_MAX_TOTAL_PAGES_PER_REQUEST", "64")))
 REQUEST_BUDGET_SECONDS = max(30.0, float(os.getenv("OCR_REQUEST_BUDGET_SECONDS", "240")))
 PDF_RENDER_DPI = max(72, int(os.getenv("OCR_PDF_RENDER_DPI", "200")))
 # Kilit başka bir belgede meşgulse hızlı 503: istemcinin bütçesini boş
@@ -399,7 +426,7 @@ def layer_quality(text: str) -> tuple[dict[str, float], bool]:
     """
     letters = [character for character in text if character.isalpha()]
     words = _LAYER_WORD.findall(text)
-    if len(words) < LAYER_MIN_WORDS or not letters:
+    if len(words) < min(LAYER_SHORT_MIN_WORDS, LAYER_MIN_WORDS) or not letters:
         return {"words": len(words), "trRatio": 0.0, "mixedRatio": 0.0}, False
     tr_ratio = sum(1 for character in letters if character in _TR_LETTERS) / len(letters)
     mixed = [
@@ -412,6 +439,11 @@ def layer_quality(text: str) -> tuple[dict[str, float], bool]:
         "trRatio": round(tr_ratio, 4),
         "mixedRatio": round(mixed_ratio, 4),
     }
+    if len(words) < LAYER_MIN_WORDS:
+        # Kısa sayfa bandı (gerekçe LAYER_SHORT_MIN_WORDS üstünde): az kanıt,
+        # sıkı eşik. Karışma eşiği aynı kalır; bu bantta tek karışık kelime
+        # bile sayfayı Paddle'a düşürür.
+        return metrics, tr_ratio > LAYER_SHORT_MIN_TR_RATIO and mixed_ratio < LAYER_MAX_MIXED_RATIO
     return metrics, tr_ratio > LAYER_MIN_TR_RATIO and mixed_ratio < LAYER_MAX_MIXED_RATIO
 
 
@@ -516,8 +548,14 @@ def render_pdf_page(document: Any, page_number: int) -> tuple[Any, bool, dict[st
         return array, False, {}
 
 
-def predict_pages(document: Any, page_count: int, first_page: int, window: int, started: float) -> tuple[list[dict[str, Any]], int | None, bool, int]:
-    """Sayfa penceresini işler; bütçe dolduğunda kalan ilk sayfayı bildirir.
+def predict_pages(document: Any, page_count: int, first_page: int, window: int, started: float, total_cap: int | None = None) -> tuple[list[dict[str, Any]], int | None, bool, int]:
+    """Sayfa dilimini işler; bütçe dolduğunda kalan ilk sayfayı bildirir.
+
+    `window` yalnız PAHALI (Paddle) sayfaları sınırlar; katmandan okunan sayfa
+    milisaniyelik olduğundan pencereyi doldurmaz, yalnız toplam tavana sayılır
+    (gerekçe MAX_TOTAL_PAGES_PER_REQUEST üstünde). Pencere dolduktan sonra
+    gelen katman sayfaları da dilime alınır: dilim ancak toplam tavanda, bütçede
+    veya Paddle gerektiren bir sayfada kapanır.
 
     Kilit pencerenin tamamı için BİR kez alınır: pencere kısa olduğundan bu
     diğer belgeleri uzun süre bekletmez, sayfa başına yeniden kilitlenmek ise
@@ -529,12 +567,14 @@ def predict_pages(document: Any, page_count: int, first_page: int, window: int, 
     koymak, kuyruktaki başka belgeleri bedelsiz biçimde bekletirdi. Kilit bu
     yüzden ilk gerçek çıkarıma kadar alınmaz.
     """
+    cap = min(total_cap or MAX_TOTAL_PAGES_PER_REQUEST, MAX_TOTAL_PAGES_PER_REQUEST)
     pages: list[dict[str, Any]] = []
     enhanced_any = False
     layer_pages = 0
+    paddle_pages = 0
     locked = False
     try:
-        for offset in range(window):
+        for offset in range(cap):
             number = first_page + offset
             if number > page_count:
                 break
@@ -544,6 +584,10 @@ def predict_pages(document: Any, page_count: int, first_page: int, window: int, 
                     pages.append(from_layer)
                     layer_pages += 1
                     continue
+            if paddle_pages >= window:
+                # Pencere dolu ve sayfa Paddle istiyor: dilim burada kapanır,
+                # sayfa bir sonraki isteğin ilk sayfası olur.
+                break
             if not locked:
                 if not _predict_lock.acquire(timeout=LOCK_WAIT_SECONDS):
                     raise HTTPException(status_code=503, detail="OCR çıkarımı başka bir belgeyle meşgul; iş kuyrukta kalmalı")
@@ -557,6 +601,7 @@ def predict_pages(document: Any, page_count: int, first_page: int, window: int, 
             }
             page["height"], page["width"] = int(image.shape[0]), int(image.shape[1])
             pages.append(page)
+            paddle_pages += 1
             # Bütçe denetimi sayfa BİTTİKTEN sonra yapılır: yarım sayfa
             # sonucu yoktur ve her istek en az bir sayfa ilerlemek zorundadır,
             # aksi halde iş hiç ilerlemeden sonsuza dek yeniden kuyruğa girer.
@@ -737,7 +782,10 @@ def ocr_pdf_window(reference: OcrObjectRequest, source_path: str, started: float
         if reference.pageFrom > page_count:
             raise HTTPException(status_code=400, detail=f"İstenen sayfa {reference.pageFrom}, belge {page_count} sayfa")
         window = min(reference.maxPages or MAX_PAGES_PER_REQUEST, MAX_PAGES_PER_REQUEST)
-        pages, next_page, enhanced, layer_pages = predict_pages(document, page_count, reference.pageFrom, window, started)
+        # İstemci açıkça sayfa sayısı istediyse bu TOPLAM tavandır: katman
+        # sayfaları da ona sayılır, istemciye istediğinden fazlası dönmez.
+        pages, next_page, enhanced, layer_pages = predict_pages(
+            document, page_count, reference.pageFrom, window, started, total_cap=reference.maxPages)
         return pages, next_page, page_count, enhanced, layer_pages
     finally:
         document.close()

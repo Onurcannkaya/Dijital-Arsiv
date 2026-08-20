@@ -53,6 +53,48 @@ class LayerQualityTests(unittest.TestCase):
         self.assertLess(metrics["words"], main.LAYER_MIN_WORDS)
 
 
+class ShortPageBandTests(unittest.TestCase):
+    """Kısa sayfa bandı (15-39 kelime): sıkı eşikle katmandan geçebilir.
+
+    Ölçüm (2021 meclis cildi, 34 kısa sayfa — tamamı karar sonu/imza sayfası):
+    Türkçe harf oranı 0,076-0,123, karışma 0; katman dijital kalitede. Düşük
+    örtüşen sayfalarda eksik görünen kelimeler Paddle'ın KENDİ yanlış
+    okumalarıydı ('Dentim', 'Fii', 'Krar' — katmanda doğruları var). Bu
+    sayfaları ölçmeden Paddle'a göndermek hem süre hem doğruluk kaybıydı.
+    """
+
+    # 2021 cildindeki imza sayfalarının görünümünde, 20 kelimelik gerçekçi metin.
+    SHORT_DIGITAL = ("Belediye Meclisinin yukarıda tarih ve sayısı yazılı kararı okunarak "
+                     "imza altına alındı Meclis Başkanı Katip Üye Katip Üye")
+
+    def test_short_digital_page_passes_with_stricter_threshold(self):
+        metrics, passed = main.layer_quality(self.SHORT_DIGITAL)
+        self.assertLess(metrics["words"], main.LAYER_MIN_WORDS, "test metni kısa bantta değil")
+        self.assertGreaterEqual(metrics["words"], main.LAYER_SHORT_MIN_WORDS)
+        self.assertTrue(passed, f"dijital kalitedeki kısa sayfa kapıdan geçmedi: {metrics}")
+        self.assertGreater(metrics["trRatio"], main.LAYER_SHORT_MIN_TR_RATIO)
+
+    def test_single_mixed_word_rejects_a_short_page(self):
+        # Kısa bantta TEK karışık kelime bile oranı eşiğin üstüne taşır ve
+        # sayfa Paddle'a düşer; az kanıtla toleranssız karar bilinçlidir.
+        text = self.SHORT_DIGITAL.replace("kararı", "karar1")
+        metrics, passed = main.layer_quality(text)
+        self.assertFalse(passed, f"karışmalı kısa sayfa kabul edildi: {metrics}")
+
+    def test_short_page_without_turkish_letters_is_rejected(self):
+        # Diakritiksiz kısa katman: eski OCR turu kalıntısı, güvenilmez.
+        text = ("Belediye Encumeni tarafindan verilen karar okundu ve imza altina "
+                "alindi baskan katip uye katip uye teslim fisi idare")
+        metrics, passed = main.layer_quality(text)
+        self.assertFalse(passed, f"diakritiksiz kısa sayfa kabul edildi: {metrics}")
+
+    def test_below_the_short_floor_is_rejected_unmeasured(self):
+        # 15 kelimenin altında karar verecek kanıt yok: damga, başlık, boş sayfa.
+        metrics, passed = main.layer_quality("Sivas Belediyesi Meclis Karar Defteri sayfası imza tarih mühür")
+        self.assertFalse(passed)
+        self.assertEqual(metrics["trRatio"], 0.0, "taban altındaki sayfa ölçülmemeli")
+
+
 class GateWiringTests(unittest.TestCase):
     """Kapının hattaki yeri: karar sayfa başına, kilit gereksiz alınmaz."""
 

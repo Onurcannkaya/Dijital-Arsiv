@@ -53,6 +53,61 @@ class FakeDocument:
         return FakePage(self._pages[index])
 
 
+# Kapıdan geçecek kalitede katman metni: ≥40 kelime, diakritik yerinde, karışma yok.
+DIGITAL_LAYER_TEXT = (
+    "Başkanlığın tarihinde Encümene havaleli Emlak ve İstimlak Müdürlüğünden verilen "
+    "aynı tarih ve sayılı yazı ile ekleri incelendi gereği görüşüldü belediye meclisinin "
+    "kararı okunarak imza altına alındı başkan katip üye olarak görev yapan üyelerin "
+    "huzurunda karar defterine işlendi ve onaylanarak yürürlüğe girdi müdürlüğe gönderildi "
+    "gereğinin yapılması için ilgili birime tebliğ edildi"
+)
+
+
+class FakeLayerTextPage:
+    """Güvenilir gömülü katmanı olan sayfanın metin yüzü."""
+
+    def __init__(self, text):
+        self._text = text
+
+    def count_chars(self):
+        return len(self._text)
+
+    def get_text_range(self, start, count):
+        return self._text[start:start + count]
+
+    def get_charbox(self, _index):
+        return (0.0, 0.0, 5.0, 10.0)
+
+    def close(self):
+        pass
+
+
+class FakeLayerPage:
+    def get_textpage(self):
+        return FakeLayerTextPage(DIGITAL_LAYER_TEXT)
+
+    def get_size(self):
+        return (600.0, 800.0)
+
+
+class FakeMixedDocument:
+    """Katman ve tarama sayfaları yan yana: gerçek ciltlerin görünümü.
+
+    `kinds` her sayfa için "layer" ya da "scan" içerir.
+    """
+
+    def __init__(self, kinds):
+        import numpy as np
+        self._kinds = list(kinds)
+        self._scan = np.zeros((8, 6, 3), dtype="uint8")
+
+    def __len__(self):
+        return len(self._kinds)
+
+    def __getitem__(self, index):
+        return FakeLayerPage() if self._kinds[index] == "layer" else FakePage(self._scan)
+
+
 class FakeEngine:
     """Her çağrıda tek sayfalık sonuç döndürür; süresi ayarlanabilir."""
 
@@ -80,12 +135,14 @@ class PageWindowTests(unittest.TestCase):
         self._engine = main._engine
         self._budget = main.REQUEST_BUDGET_SECONDS
         self._window = main.MAX_PAGES_PER_REQUEST
+        self._total = main.MAX_TOTAL_PAGES_PER_REQUEST
         self._lock_wait = main.LOCK_WAIT_SECONDS
 
     def tearDown(self):
         main._engine = self._engine
         main.REQUEST_BUDGET_SECONDS = self._budget
         main.MAX_PAGES_PER_REQUEST = self._window
+        main.MAX_TOTAL_PAGES_PER_REQUEST = self._total
         main.LOCK_WAIT_SECONDS = self._lock_wait
 
     def test_window_cap_limits_pages_and_reports_remainder(self):
@@ -122,6 +179,46 @@ class PageWindowTests(unittest.TestCase):
                                               started=time.perf_counter() - 100)
         self.assertEqual(len(pages), 1)
         self.assertEqual(next_page, 2)
+
+    def test_layer_pages_do_not_consume_the_paddle_window(self):
+        """Katman sayfası pencereyi doldurmaz; pencere yalnız Paddle'ı sınırlar.
+
+        Ölçüm (2021 meclis cildi, 178 sayfa, %70'i katmandan): katman sayfaları
+        da pencereye sayıldığında belge 22 isteğe bölünüyordu — her istek
+        yeniden indirme + kuyruk turu. Milisaniyelik sayfayı ~35-65 sn'lik
+        sayfayla aynı tavana saymanın gerekçesi yoktur.
+        """
+        engine = FakeEngine()
+        main._engine = engine
+        # 5 katman + 1 tarama + 5 katman + 1 tarama: pencere 1 Paddle sayfası.
+        kinds = ["layer"] * 5 + ["scan"] + ["layer"] * 5 + ["scan"]
+        pages, next_page, _, layer_pages = main.predict_pages(
+            FakeMixedDocument(kinds), len(kinds), first_page=1, window=1, started=time.perf_counter())
+        self.assertEqual(len(pages), 11, "pencere dolunca katman sayfaları da kesildi")
+        self.assertEqual(next_page, 12, "Paddle isteyen ikinci sayfa dilimi kapatmalıydı")
+        self.assertEqual(layer_pages, 10)
+        self.assertEqual(engine.calls, 1, "pencere Paddle sayfasını sınırlamadı")
+
+    def test_total_cap_bounds_a_pure_layer_document(self):
+        # Toplam tavan yanıt gövdesini ve D1 yazma yığınını sınırlar; katman
+        # sayfaları sınırsız akamaz.
+        main._engine = FakeEngine()
+        main.MAX_TOTAL_PAGES_PER_REQUEST = 5
+        pages, next_page, _, layer_pages = main.predict_pages(
+            FakeMixedDocument(["layer"] * 9), 9, first_page=1, window=1, started=time.perf_counter())
+        self.assertEqual(len(pages), 5)
+        self.assertEqual(layer_pages, 5)
+        self.assertEqual(next_page, 6)
+
+    def test_client_max_pages_caps_total_including_layer_pages(self):
+        # İstemci açıkça sayfa sayısı istediyse fazlası dönmez: sözleşme
+        # istemcinin istediği kadar sayfadır, kaynağı ne olursa olsun.
+        main._engine = FakeEngine()
+        pages, next_page, _, _ = main.predict_pages(
+            FakeMixedDocument(["layer"] * 6), 6, first_page=1, window=1,
+            started=time.perf_counter(), total_cap=2)
+        self.assertEqual(len(pages), 2)
+        self.assertEqual(next_page, 3)
 
     def test_absolute_page_numbers_are_preserved(self):
         # Dilim numaraları belge genelinde mutlaktır; yeniden numaralandırma
