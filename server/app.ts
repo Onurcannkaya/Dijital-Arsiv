@@ -28,6 +28,7 @@ import {
 import * as health from "../app/api/health/route.ts";
 import * as me from "../app/api/me/route.ts";
 import * as overview from "../app/api/overview/route.ts";
+import * as operations from "../app/api/operations/route.ts";
 import * as profiles from "../app/api/profiles/route.ts";
 import * as documents from "../app/api/documents/route.ts";
 import * as documentDetail from "../app/api/documents/[id]/route.ts";
@@ -61,6 +62,7 @@ const ROUTES: Array<{ pattern: RegExp; module: RouteModule }> = [
   { pattern: /^\/api\/health$/, module: health },
   { pattern: /^\/api\/me$/, module: me },
   { pattern: /^\/api\/overview$/, module: overview },
+  { pattern: /^\/api\/operations$/, module: operations },
   { pattern: /^\/api\/profiles$/, module: profiles },
   { pattern: /^\/api\/activity$/, module: activity },
   // Yalnız yerel geliştirmede açılır (ARCHIVE_INTERNAL_OBJECT_FETCH); rota

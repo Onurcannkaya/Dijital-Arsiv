@@ -29,9 +29,35 @@ const serviceLabels: Record<string,string> = {
   contentScan:"İçerik tarama", documentRender:"PDF görüntüleme türevi", schema:"Şema",
 };
 
+/** YOL_HARITASI §11 işletim ölçümleri; sayılar mevcut defterlerden türetilir. */
+type OperationsMetrics = {
+  sessions:{ active:number; inPipeline:number; accepted7d:number; expired7d:number;
+    rejected7d:number; duplicate7d:number; failedOpen:number };
+  multipart:{ parts7d:number; retriedParts7d:number; retryRate7d:number };
+  contentScan:{ typeMismatch7d:number; malware7d:number; scanFailed7d:number };
+  promotion:{ verified7d:number; failed7d:number; vaultMismatch7d:number; writeConflict7d:number };
+  access:{ denied24h:number; denied7d:number; ticketsIssued7d:number };
+  intake:{ sampled7d:number; durationP50Seconds:number|null; durationP95Seconds:number|null;
+    byteSizeP50:number|null; byteSizeP95:number|null };
+};
+
+function formatSeconds(value:number|null) {
+  if(value===null) return "örnek yok";
+  if(value<60) return `${value} sn`;
+  if(value<3600) return `${Math.round(value/60)} dk`;
+  return `${(value/3600).toFixed(1)} sa`;
+}
+function formatBytes(value:number|null) {
+  if(value===null) return "örnek yok";
+  if(value<1024*1024) return `${Math.max(1,Math.round(value/1024))} KB`;
+  if(value<1024*1024*1024) return `${(value/1024/1024).toFixed(1)} MB`;
+  return `${(value/1024/1024/1024).toFixed(2)} GB`;
+}
+
 export function SettingsScreen() {
   const [settings,setSettings]=useState<Settings|null>(null);
   const [health,setHealth]=useState<Health|null>(null);
+  const [operations,setOperations]=useState<OperationsMetrics|null>(null);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
@@ -45,14 +71,18 @@ export function SettingsScreen() {
 
   const load=useCallback(async(signal?:AbortSignal)=>{
     try {
-      const [settingsResponse,healthResponse]=await Promise.all([
+      const [settingsResponse,healthResponse,operationsResponse]=await Promise.all([
         fetch("/api/settings",{signal}),
         fetch("/api/health",{signal}),
+        fetch("/api/operations",{signal}),
       ]);
       const payload=await settingsResponse.json() as Settings&{error?:string};
       if(!settingsResponse.ok){setError(payload.error??"Ayarlar alınamadı.");setSettings(null);return}
       setSettings(payload);
       setHealth(await healthResponse.json().catch(()=>null) as Health|null);
+      setOperations(operationsResponse.ok
+        ? await operationsResponse.json().catch(()=>null) as OperationsMetrics|null
+        : null);
       setError("");
     } catch(cause) {
       if((cause as Error)?.name!=="AbortError") setError("Ayarlar alınamadı; bağlantıyı kontrol edin.");
@@ -167,6 +197,38 @@ export function SettingsScreen() {
         </button>
       </div>
     </section>
+
+    {/* YOL_HARITASI §11: işletim ölçümleri. Sayılar defterlerden türetilir;
+        imza yaşı gibi servis tarafında kalanlar burada uydurulmaz. */}
+    {operations?<section className="panel">
+      <header><div><h2>İşletim ölçümleri</h2>
+        <p>Son 7 günün kabul hattı sayıları; kabul süresi ve dosya boyutu yüzdelikleri kabul edilen oturumlardan ölçülür.</p></div></header>
+      <div className="ops-grid">
+        <article><h3>Yükleme oturumları</h3><ul>
+          <li><span>Aktif yükleme</span><b>{operations.sessions.active}</b></li>
+          <li><span>Hatta (tarama/terfi)</span><b>{operations.sessions.inPipeline}</b></li>
+          <li><span>Kabul (7 gün)</span><b>{operations.sessions.accepted7d}</b></li>
+          <li><span>Mükerrer / ret / süresi dolan (7 gün)</span><b>{operations.sessions.duplicate7d} / {operations.sessions.rejected7d} / {operations.sessions.expired7d}</b></li>
+          <li><span>Kurtarma bekleyen FAILED</span><b className={operations.sessions.failedOpen?"pending":""}>{operations.sessions.failedOpen}</b></li>
+        </ul></article>
+        <article><h3>Kabul süresi ve boyut</h3><ul>
+          <li><span>Örneklem (7 gün)</span><b>{operations.intake.sampled7d} oturum</b></li>
+          <li><span>Süre P50 / P95</span><b>{formatSeconds(operations.intake.durationP50Seconds)} / {formatSeconds(operations.intake.durationP95Seconds)}</b></li>
+          <li><span>Boyut P50 / P95</span><b>{formatBytes(operations.intake.byteSizeP50)} / {formatBytes(operations.intake.byteSizeP95)}</b></li>
+          <li><span>Yeniden denenen parça (7 gün)</span><b className={operations.multipart.retriedParts7d?"pending":""}>{operations.multipart.retriedParts7d}/{operations.multipart.parts7d} (%{Math.round(operations.multipart.retryRate7d*100)})</b></li>
+        </ul></article>
+        <article><h3>Tarama ve kasa</h3><ul>
+          <li><span>Tür uyuşmazlığı reddi (7 gün)</span><b className={operations.contentScan.typeMismatch7d?"pending":""}>{operations.contentScan.typeMismatch7d}</b></li>
+          <li><span>Zararlı içerik reddi (7 gün)</span><b className={operations.contentScan.malware7d?"pending":""}>{operations.contentScan.malware7d}</b></li>
+          <li><span>Yazma sonrası doğrulama (7 gün)</span><b>{operations.promotion.verified7d} başarılı / {operations.promotion.failed7d} arızalı</b></li>
+          <li><span>Kasa özet uyuşmazlığı / yazma çakışması</span><b className={operations.promotion.vaultMismatch7d?"pending":""}>{operations.promotion.vaultMismatch7d} / {operations.promotion.writeConflict7d}</b></li>
+        </ul></article>
+        <article><h3>Erişim</h3><ul>
+          <li><span>Verilen bilet (7 gün)</span><b>{operations.access.ticketsIssued7d}</b></li>
+          <li><span>Erişim reddi (24 saat / 7 gün)</span><b className={operations.access.denied7d?"pending":""}>{operations.access.denied24h} / {operations.access.denied7d}</b></li>
+        </ul></article>
+      </div>
+    </section>:null}
 
     <section className="panel">
       <header><div><h2>Müdürlükler</h2>
