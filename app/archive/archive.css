@@ -526,3 +526,5 @@ tr.newest-row td{background:color-mix(in srgb,var(--ar-green-soft) 35%,transpare
 .preview-pending p{margin:0;font-size:12.5px;line-height:1.6;max-width:420px}
 .preview-pending svg{color:var(--ar-blue)}
 .preview-pending button{margin-top:6px;display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 14px}
+
+.preview-pending-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:6px}

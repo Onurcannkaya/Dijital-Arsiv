@@ -673,8 +673,14 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
               ?<><AlertTriangle size={26}/><b>Belge görüntüsü açılamadı</b><p>{previewError}</p></>
               :<><LoaderCircle className="spin" size={26}/><b>Belge görüntüsü hazırlanıyor</b>
                 <p>Güvenli görüntüleme kopyası üretiliyor; hazır olduğunda burada kendiliğinden açılacak. Beklemenize gerek yok — diğer işlerinize dönebilirsiniz.</p></>}
-            {detail.pages.length?<button type="button" className="outline" onClick={()=>setPreviewMode("text")}>
-              <FileText size={14}/> Bu sırada okunabilir metne bakın</button>:null}
+            {/* Görüntü beklerken belgeye bakmanın iki gerçek yolu: okunan
+                metin ve (yetkiliyse) aslın kendisi. Kart çıkmaz sokak olmasın. */}
+            <div className="preview-pending-actions">
+              {detail.pages.length?<button type="button" className="outline" onClick={()=>setPreviewMode("text")}>
+                <FileText size={14}/> Bu sırada okunabilir metne bakın</button>:null}
+              {canDownload?<button type="button" className="outline" onClick={()=>{void downloadOriginal()}}>
+                <Download size={14}/> Aslını indirip bilgisayarınızda açın</button>:null}
+            </div>
           </div>
         :isImage?<div className="image-evidence"><img src={fileSrc} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&hasEvidenceBox(selected.box)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}>{/* design.md §3.3: bitişik altın ad etiketi — yalnız alan adı, yüzde yok. */}<b>{selected.label}</b></span>:null}</div>:<object data={fileSrc} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Güvenli görüntüleme kopyası bu tarayıcıda gösterilemiyor.</p></object>}</div>
         {/* §9.2 kararı: toplu karar paneli belge alanının üzerine kayar —
