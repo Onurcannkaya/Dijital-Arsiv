@@ -215,13 +215,6 @@ export class LocalFsStorage {
     return this.buildStat(meta);
   }
 
-  async promote(sourceKey: string, targetKey: string, options: PutObjectOptions): Promise<ObjectStat> {
-    const source = this.readMeta(sourceKey);
-    if (!source) throw new ObjectStorageError("OBJECT_NOT_FOUND", "Terfi kaynağı karantina alanında bulunamadı.");
-    const bytes = await readFile(this.bytePath(sourceKey));
-    return this.putIfAbsent(targetKey, new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), options);
-  }
-
   async createMultipartUpload(key: string, options: PutObjectOptions): Promise<MultipartUploadToken> {
     const uploadId = randomUUID();
     this.uploads.set(uploadId, { key, contentType: options.contentType, customMetadata: options.customMetadata });
@@ -315,16 +308,31 @@ export function createLocalFsNamespace(root: string): StorageNamespaceHandle {
   };
   const inventory: StorageInventory = { list: (options) => store.list(options) };
   const disposition: DispositionStorage = { delete: (key) => store.delete(key) };
-  const vaultWriter: ImmutableVaultWriter = {
+  /*
+   * Sözleşme düzeltmesi: terfi kaynağı, enjekte edilen `stagingReader`dan
+   * okunur — S3 uygulamasıyla (NodeS3ImmutableVaultWriter) aynı davranış.
+   * Önceki sürüm parametreyi yok sayıp kaynağı HEDEF ad alanının kendi
+   * deposunda arıyordu; karantina→kasa ve kasa→yedek gibi ad alanları ARASI
+   * terfiler yerel sürücüde "kaynak bulunamadı" ile düşüyordu ve aynı ad
+   * alanı içinde çalıştığı için fark edilmemişti.
+   */
+  const vaultWriter = (stagingReader: ObjectReader): ImmutableVaultWriter => ({
     putIfAbsent: (key, value, options) => store.putIfAbsent(key, value, options),
-    promote: (sourceKey, targetKey, options) => store.promote(sourceKey, targetKey, options),
-  };
+    promote: async (sourceKey, targetKey, options) => {
+      const source = await stagingReader.get(sourceKey);
+      if (!source || source.range !== null) {
+        throw new ObjectStorageError("OBJECT_NOT_FOUND", "Terfi kaynağı karantina alanında bulunamadı.");
+      }
+      const bytes = await toBytes(source.body);
+      return store.putIfAbsent(targetKey, bytes, options);
+    },
+  });
   return makeStorageNamespace({
     reader,
     staging,
     inventory,
     disposition,
     objectStorage: new RoleBackedObjectStorage(reader, staging, inventory),
-    vaultWriter: () => vaultWriter,
+    vaultWriter,
   });
 }
