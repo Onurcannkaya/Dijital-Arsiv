@@ -879,8 +879,22 @@ export const backupRuns = sqliteTable("backup_runs", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   index("backup_runs_kind_status_idx").on(table.kind, table.status, table.completedAt),
-  check("backup_runs_kind_check", sql`${table.kind} IN ('metadata_export', 'originals_incremental', 'manifest_daily')`),
+  check("backup_runs_kind_check", sql`${table.kind} IN ('metadata_export', 'originals_incremental', 'manifest_daily', 'consistency_check')`),
   check("backup_runs_status_check", sql`${table.status} IN ('RUNNING', 'COMPLETED', 'FAILED')`),
   check("backup_runs_sha_check", sql`${table.sha256} IS NULL OR length(${table.sha256}) = 64`),
   check("backup_runs_copied_check", sql`${table.copiedCount} >= 0`),
+]);
+
+/** Kapasite kotası alarm defteri; eşik alarmı günde bir kez, kanıtı bu tablo. */
+export const capacityAlerts = sqliteTable("capacity_alerts", {
+  id: text("id").primaryKey(),
+  thresholdPercent: integer("threshold_percent").notNull(),
+  usedBytes: integer("used_bytes").notNull(),
+  limitBytes: integer("limit_bytes").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("capacity_alerts_threshold_created_idx").on(table.thresholdPercent, table.createdAt),
+  check("capacity_alerts_threshold_check", sql`${table.thresholdPercent} BETWEEN 1 AND 100`),
+  check("capacity_alerts_used_check", sql`${table.usedBytes} >= 0`),
+  check("capacity_alerts_limit_check", sql`${table.limitBytes} > 0`),
 ]);

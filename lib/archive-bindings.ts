@@ -59,6 +59,13 @@ export type ArchiveBindings = {
    */
   ALARM_WEBHOOK_URL?: string;
   ALARM_WEBHOOK_TOKEN?: string;
+  /**
+   * Depolama kapasite kotası, GB cinsinden (İş Etki Analizi kararına bağlanır).
+   * Tanımlıysa pano doluluk oranını gösterir ve eşik aşımında alarm gider;
+   * tanımlı değilse kota "tanımlı değil" olarak raporlanır — kullanım her
+   * durumda ölçülür, yalnız tavan kurum kararıdır.
+   */
+  ARCHIVE_STORAGE_QUOTA_GB?: string;
 };
 
 export type ArchiveBindingsProvider = () => Partial<ArchiveBindings>;
@@ -114,6 +121,7 @@ const NODE_CONFIG_KEYS = [
   "ARCHIVE_INTERNAL_OBJECT_FETCH",
   "ALARM_WEBHOOK_URL",
   "ALARM_WEBHOOK_TOKEN",
+  "ARCHIVE_STORAGE_QUOTA_GB",
 ] as const;
 
 /**
