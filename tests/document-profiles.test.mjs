@@ -114,7 +114,9 @@ test("arayüz seçenekleri sabit liste yerine API'den gelir", async () => {
   assert.doesNotMatch(upload, /<option>Yapı kullanma izin belgesi<\/option>/);
   assert.doesNotMatch(upload, /<option>İtfaiye Müdürlüğü<\/option>/);
   assert.match(review, /profile-strip/);
-  assert.match(review, /profileStatusLabels/);
+  // Profil yaşam döngüsü etiketi (Hipotez/Gözlendi...) arayüzden kaldırıldı
+  // (2026-08-20 sadelik kararı): iç terim memura gösterilmez.
+  assert.doesNotMatch(review, /profileStatusLabels/);
   assert.match(review, /detail\.vocabularies/);
   assert.match(profiles, /document\.read/);
   assert.match(profiles, /listActiveProfiles/);

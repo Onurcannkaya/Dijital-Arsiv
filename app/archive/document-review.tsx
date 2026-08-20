@@ -11,7 +11,7 @@ import {
   RELATION_REJECTION_VOCABULARY_CODE, type RejectionReason,
 } from "../../lib/rejection-reasons";
 import { FILE_PLAN_VOCABULARY_CODE, RETENTION_RULE_VOCABULARY_CODE } from "../../lib/file-plan";
-import { confidencePhrase, technicalConfidence } from "../../lib/confidence-language";
+import { confidencePhrase } from "../../lib/confidence-language";
 import { evidenceCropStyle, hasEvidenceBox } from "../../lib/evidence-crop";
 import { RelationBulkPanel } from "./relation-bulk-panel";
 
@@ -58,16 +58,11 @@ type RejectionDraft = { code:string; note:string };
  * memurun gördüğü durum, belgenin OKUNMA hâlidir.
  */
 const statusLabels: Record<string,string> = { queued:"Okunmayı bekliyor", processing:"Belge okunuyor", review:"Doğrulama bekliyor", ready:"Doğrulamaya hazır", archived:"Arşivlendi", ocr_failed:"Okuma başarısız" };
-const riskLabels: Record<string,string> = { LOW:"Düşük risk", MEDIUM:"Orta risk", HIGH:"Yüksek risk", CRITICAL:"Kritik" };
-const profileStatusLabels: Record<string,string> = {
-  HYPOTHESIS:"Hipotez", DISCOVERED:"Gözlendi", VALIDATED:"Doğrulandı",
-  PILOT:"Pilot", ACTIVE:"Yürürlükte", RETIRED:"Kapatıldı",
-};
 /* Karar durumu memurun kendi eylemiyle anlatılır: "Öneri" makinenin
  * bakışıdır, "Kontrol edilmedi" memurun yapılacak işidir. */
 const valueStatusLabels: Record<VerificationStatus,string> = { SUGGESTED:"Kontrol edilmedi", CONFIRMED:"Kontrol edildi", CORRECTED:"Düzeltildi", REJECTED:"Reddedildi" };
 
-export function DocumentReview({ documentId, onBack, onOpenDocument, permissions }: { documentId:string; onBack:()=>void; onOpenDocument?:(id:string)=>void; permissions:string[] }) {
+export function DocumentReview({ documentId, onBack, permissions }: { documentId:string; onBack:()=>void; permissions:string[] }) {
   const [detail,setDetail]=useState<DetailPayload|null>(null);
   const [drafts,setDrafts]=useState<Record<string,string>>({});
   const [rejections,setRejections]=useState<Record<string,boolean>>({});
@@ -98,57 +93,13 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
   /** §9.2: çok önerili belgede toplu karar paneli belge alanının üzerine kayar. */
   const [bulkOpen,setBulkOpen]=useState(false);
   /*
-   * design.md §9.3 kararı: teknik gösterimler yetkiyle ERİŞİLİR, tercihle
-   * AÇILIR. Yetki anahtarın görünmesini sağlar; açık/kapalı durumu kişisel
-   * tercihtir ve yalnız bu tarayıcıda saklanır — kurumsal kayıt değildir.
+   * Kullanıcı kararı (2026-08-20): "Teknik görünüm" ve "Yoğun düzen" kipleri
+   * kaldırıldı — ekran, teknoloji bilgisi olmayan memurun da anlayacağı TEK
+   * sade düzende çalışır. design.md §9.3/§4.3'ün öngördüğü teknik gösterimler
+   * (ham yüzde, kanıt koordinatı, SHA, profil sürümü) arayüzden çıkarıldı;
+   * bu ölçüler denetim/işletim tarafında (API, log, denetim zinciri) durmaya
+   * devam eder. `technical.view` yetkisi ileri bir API kapısı için duruyor.
    */
-  const canTechnical=permissions.includes("technical.view");
-  const [techView,setTechView]=useState(()=>{
-    try { return typeof window!=="undefined"&&window.localStorage.getItem("arsiv-teknik-gorunum")==="acik"; }
-    catch { return false; }
-  });
-  const toggleTechView=()=>setTechView(current=>{
-    const next=!current;
-    try { window.localStorage.setItem("arsiv-teknik-gorunum",next?"acik":"kapali"); } catch { /* tercih tutulamazsa görünüm yine değişir */ }
-    return next;
-  });
-  /*
-   * design.md §4.3 (1a): yoğun düzen — kalıcı kuyruk paneli, sıkışık alan
-   * kolonu, alt ilişki/denetim şeridi. Erişim teknik görünümle aynı kapıdan
-   * (technical.view + tercih) geçer; §4.3 gereği yoğun düzen teknik
-   * gösterimleri de AÇAR. 1b ayrıca kurulmaz: ayırt edici özellikleri
-   * (kanıt kırpması, sekmeli belge, soy zinciri) zenginleşmiş 2a'da mevcuttur.
-   */
-  const [denseView,setDenseView]=useState(()=>{
-    try { return typeof window!=="undefined"&&window.localStorage.getItem("arsiv-yogun-duzen")==="acik"; }
-    catch { return false; }
-  });
-  const toggleDenseView=()=>setDenseView(current=>{
-    const next=!current;
-    try { window.localStorage.setItem("arsiv-yogun-duzen",next?"acik":"kapali"); } catch { /* tercih tutulamazsa kip yine değişir */ }
-    return next;
-  });
-  const dense=canTechnical&&denseView;
-  const technical=canTechnical&&(techView||dense);
-  /** Yoğun kipte uygulama rayı 60px'e iner (gövde sınıfıyla, §4.3). */
-  useEffect(()=>{
-    if(typeof document==="undefined") return;
-    document.body.classList.toggle("dense-review",dense);
-    return ()=>document.body.classList.remove("dense-review");
-  },[dense]);
-  /** Kuyruk paneli: doğrulama bekleyen belgeler arasında geri dönmeden geçiş. */
-  const [queue,setQueue]=useState<Array<{id:string;referenceNo:string;documentType:string;status:string}>>([]);
-  useEffect(()=>{
-    if(!dense) return;
-    let active=true;
-    fetch("/api/documents?status=review,ready&limit=30")
-      .then(async response=>{
-        const payload=await response.json() as {documents?:Array<{id:string;referenceNo:string;documentType:string;status:string}>};
-        if(response.ok&&active) setQueue(payload.documents??[]);
-      })
-      .catch(()=>undefined);
-    return ()=>{ active=false; };
-  },[dense,documentId]);
   const [fileSrc,setFileSrc]=useState("");
   /*
    * Önizleme hatası kendi durumunda tutulur. Ortak `error` kullanıldığında,
@@ -158,6 +109,21 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
    * OCR bekleyen belgelerde çakışır, çünkü onların türevi henüz yoktur.
    */
   const [previewError,setPreviewError]=useState("");
+  /**
+   * Görüntüleme kopyası arka planda üretilir; "hazırlanıyor" yanıtı bir hata
+   * değil bir SÜREÇTİR. Memurdan "daha sonra yeniden deneyin" istemek yerine
+   * ekran kendisi 20 saniyede bir yeniden dener ve kopya hazır olunca
+   * kendiliğinden açar. Tavan (20 deneme ≈ 7 dk) sonsuz döngüyü keser;
+   * gerçek hatalar (yetki, kayıp nesne) yeniden denenmez, açıkça gösterilir.
+   */
+  const [previewRetry,setPreviewRetry]=useState(0);
+  useEffect(()=>{
+    if(!previewError||fileSrc) return;
+    if(!previewError.includes("hazırlanıyor")) return;
+    if(previewRetry>=20) return;
+    const timer=setTimeout(()=>setPreviewRetry(current=>current+1),20_000);
+    return()=>clearTimeout(timer);
+  },[previewError,fileSrc,previewRetry]);
 
   /**
    * Dosya isteği başarısızsa sunucunun verdiği sebebi okur.
@@ -207,7 +173,7 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
       }
     })();
     return()=>{cancelled=true;if(objectUrl) URL.revokeObjectURL(objectUrl);};
-  },[detail,requestTicket]);
+  },[detail,requestTicket,previewRetry]);
 
   const downloadOriginal=async()=>{
     if(!detail) return;
@@ -229,6 +195,7 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
   const load=useCallback(async()=>{
     setLoading(true);
     setError("");
+    setPreviewRetry(0);
     try {
       const response=await fetch(`/api/documents/${documentId}`);
       const payload=await response.json() as DetailPayload&{error?:string};
@@ -367,18 +334,19 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
   const evidencePage=selected?pageByNumber.get(selected.pageNumber)??null:null;
   const isImage=detail?.document.mediaType.startsWith("image/")??false;
   const needsOcr=detail?.document.status==="queued"||detail?.document.status==="ocr_failed";
-  /**
-   * OCR işinin son durumu: personel yeniden çalıştırmadan önce nedenini ve
-   * kaçıncı denemede olduğunu görür. Dead-letter, azami denemenin aşıldığını
-   * ve işletim incelemesi gerektiğini söyler.
+  /*
+   * Okuma işinin durumu yalnız SÖYLENECEK BİR ŞEY VARKEN gösterilir: hiç
+   * denenmemiş bir işin "Deneme 0/3" sayacı memura bilgi değil jargon taşır.
+   * Not, önceki deneme başarısız olduğunda ya da iş azami denemeyi
+   * tükettiğinde görünür ve eylem cümlesiyle biter.
    */
   const ocrJob=detail?.ocrJob??null;
-  const ocrJobNote=ocrJob?[
-    ocrJob.deadLettered?`Azami deneme sayısı aşıldı (${ocrJob.attempt}/${ocrJob.maxAttempts})`
-      :`Deneme ${ocrJob.attempt}/${ocrJob.maxAttempts}`,
-    ocrJob.nextAttemptAt&&ocrJob.status==="queued"
-      ?`sıradaki deneme ${new Date(ocrJob.nextAttemptAt.replace(" ","T")+"Z").toLocaleString("tr-TR")}`:null,
-  ].filter(Boolean).join(" · "):null;
+  const ocrJobTroubled=Boolean(ocrJob&&(ocrJob.deadLettered||ocrJob.attempt>0||ocrJob.errorMessage));
+  const ocrJobNote=ocrJob&&ocrJobTroubled?(ocrJob.deadLettered
+    ?"Okuma tekrar tekrar başarısız oldu; yetkili, Gelen Evrak'taki Okuma arızaları panelinden yeniden kuyruğa alabilir."
+    :`Önceki okuma denemesi başarısız oldu${ocrJob.nextAttemptAt&&ocrJob.status==="queued"
+      ?`; sistem ${new Date(ocrJob.nextAttemptAt.replace(" ","T")+"Z").toLocaleString("tr-TR")} itibarıyla kendiliğinden yeniden deneyecek`
+      :""}.`):null;
   const canProcess=Boolean(needsOcr&&permissions.includes("ocr.run"));
   const canReview=permissions.includes("document.review");
   const canArchive=permissions.includes("document.archive");
@@ -510,13 +478,10 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
               {pending?<i className="task-medallion">{taskNumber}</i>:null}
               <b>{group.label}</b>
               <span>
-                {/* design.md §3.4 kart anatomisi rozet kalabalığı içermez;
+                {/* Memura gereken tek işaret alanın zorunlu olduğudur;
                     "kritik" ve "çok değerli" iç politika terimleridir ve
-                    yalnız teknik görünümde kalır. Memura gereken tek işaret
-                    alanın zorunlu olduğudur. */}
-                {technical&&group.critical?<em className="tag-critical">kritik</em>:null}
+                    ekranda hiç gösterilmez. */}
                 {group.required?<em className="tag-required">zorunlu</em>:null}
-                {technical&&group.multiValue?<em className="tag-multi">çok değerli</em>:null}
               </span>
             </div>
             {group.formatHint?<p className="field-hint">{group.formatHint}</p>:null}
@@ -530,11 +495,9 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
               >
                 <span>
                   <b>{group.multiValue?`${group.label} ${value.valueIndex+1}`:group.label}</b>
-                  {/* §3.4: memur yalnız düz Türkçe eylem cümlesini okur; risk
-                      sınıfı iç ölçüdür ve teknik görünümde öne gelir. Renk,
-                      risk sınıfından türemeye devam eder — görsel uyarı kalır,
-                      sözel jargon kalkar. */}
-                  <em className={`risk-${value.riskLevel.toLowerCase()}`}>{technical?`${riskLabels[value.riskLevel]} · `:""}{confidencePhrase(value.confidence,value.origin)}</em>
+                  {/* Memur yalnız düz Türkçe eylem cümlesini okur; renk risk
+                      sınıfından türer — görsel uyarı kalır, jargon yoktur. */}
+                  <em className={`risk-${value.riskLevel.toLowerCase()}`}>{confidencePhrase(value.confidence,value.origin)}</em>
                 </span>
                 {/* design.md §3.4: iddia kanıtıyla yan yana durur — değerin
                     belgede okunduğu yerin kırpması, girişin hemen üstünde.
@@ -567,14 +530,9 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
                     disabled={archived||!canReview||rejected}
                   />}
                 <small>
-                  {valueStatusLabels[value.verificationStatus]} · Sayfa {value.pageNumber}
+                  {valueStatusLabels[value.verificationStatus]} · {value.pageNumber}. sayfada
                   {value.verifiedBy?` · ${value.verifiedBy}`:""}
                 </small>
-                {/* §9.3 teknik görünüm: ham ölçüm, kanıt koordinatı ve model —
-                    yalnız yetkili rolün açtığı görünümde. */}
-                {technical&&value.origin==="OCR"?<small className="tech-readout">
-                  {technicalConfidence(value.confidence)} · [{value.box.map(v=>Math.round(v)).join(", ")}] · {value.model}
-                </small>:null}
                 {canReview&&!archived&&group.multiValue?<div className="value-actions">
                   {rejected
                     ?<button type="button" onClick={event=>{event.preventDefault();setRejections(current=>({...current,[valueId]:false}));setRejectionDrafts(current=>{const next={...current};delete next[valueId];return next;});}} disabled={value.verificationStatus==="REJECTED"}><RotateCcw size={12}/> Geri al</button>
@@ -623,10 +581,10 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
         archived?<span className="archived-lock"><LockKeyhole size={15}/> Salt okunur</span>:
         <>{canReview?<button className="outline save-fields" onClick={saveFields} disabled={saving||incompleteRejections.length>0||(!pendingValues&&!hasFieldChanges&&!hasAdditions)} title={incompleteRejections.length?"Reddedilen her değer için gerekçe seçilmelidir.":undefined}>{saving?<LoaderCircle className="spin" size={15}/>:<Save size={15}/>} {pendingValues?"Alanları onayla":"Düzeltmeleri kaydet"}</button>:null}{canArchive?<button className="approve" onClick={()=>{setError("");setArchiveDialog(true);}} disabled={saving||savingText||archiveBlocked} title={archiveBlockers.length?`Arşivlemeden önce tamamlanmalı: ${archiveBlockers.join(", ")}.`:undefined}><CheckCircle2 size={17}/> Doğrula ve arşivle</button>:null}{!canReview&&!canArchive?<span className="archived-lock restricted"><LockKeyhole size={15}/> Görüntüleme yetkisi</span>:null}</>}
       </div>
-      {ocrJob&&(needsOcr||ocrJob.status==="failed")
-        ?<p className={`ocr-job-note ${ocrJob.deadLettered?"blocked":""}`}>
+      {ocrJobNote&&(needsOcr||ocrJob?.status==="failed")
+        ?<p className={`ocr-job-note ${ocrJob?.deadLettered?"blocked":""}`}>
           <FileClock size={14}/>
-          <span><b>{ocrJobNote}</b>{ocrJob.errorMessage?<small>Son hata: {ocrJob.errorMessage}</small>:null}</span>
+          <span><b>{ocrJobNote}</b>{ocrJob?.errorMessage?<small>Son hata: {ocrJob.errorMessage}</small>:null}</span>
         </p>
         :null}
       {/* Dört adımlık iş sırası: memur neyin bittiğini ve sıranın nerede
@@ -686,36 +644,14 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
           onClick={()=>setActiveTab(key)}>
           {label}{count?<b>{count}</b>:null}
         </button>)}
-      {/* §9.3: anahtar yalnız yetkili role görünür; durumu kişisel tercihtir. */}
-      {canTechnical?<button type="button" className={`tech-toggle ${techView||dense?"on":""}`}
-        aria-pressed={techView||dense} onClick={toggleTechView} disabled={dense}
-        title={dense?"Yoğun düzen teknik gösterimleri zaten açar (§4.3).":"Güven yüzdesi, kanıt koordinatı, SHA-256 ve sürüm bilgilerini gösterir"}>
-        <Gauge size={13}/> Teknik görünüm{techView||dense?" açık":""}
-      </button>:null}
-      {/* §4.3 (1a): yoğun düzen — uzman kipi; kuyruk paneli ve alt şerit. */}
-      {canTechnical?<button type="button" className={`tech-toggle dense-toggle ${dense?"on":""}`}
-        aria-pressed={dense} onClick={toggleDenseView}
-        title="Kuyruk paneli, sıkışık alan kolonu ve alt ilişki/denetim şeridiyle uzman düzeni">
-        <History size={13}/> Yoğun düzen{dense?" açık":""}
-      </button>:null}
     </nav>
-    <div className={`review-grid ${dense?"dense":""}`}>
-      {/* §4.3 (1a): koyu kuyruk paneli — belgeden belgeye listeye dönmeden geçiş. */}
-      {dense?<aside className="queue-panel" aria-label="Doğrulama kuyruğu">
-        <p>Doğrulama kuyruğu · {queue.length}</p>
-        <ul>{queue.map(item=><li key={item.id}>
-          <button type="button" className={item.id===documentId?"active":""}
-            onClick={()=>{if(item.id!==documentId) onOpenDocument?.(item.id);}}
-            disabled={item.id!==documentId&&!onOpenDocument}>
-            <b>{item.referenceNo}</b>
-            <small>{item.documentType}</small>
-          </button>
-        </li>)}</ul>
-      </aside>:null}
-      <aside className="thumbs">{(detail.pages.length?detail.pages:[{pageNumber:1}]).map((page,index)=><button className={index===0?"active":""} key={page.pageNumber}><span>{page.pageNumber}</span><i/></button>)}</aside>
+    {/* Tek ve sade düzen: solda belge, sağda kararlar. Sahte sayfa şeridi ve
+        uzman kipleri kaldırıldı (2026-08-20 kullanıcı kararı) — ekranda ne
+        varsa gerçektir ve herkes için aynıdır. */}
+    <div className="review-grid">
       <section className="document">
         <div className="document-tools"><span>{detail.document.originalName}</span>{canDownload?<button className="download-original" onClick={()=>{void downloadOriginal()}} type="button"><Download size={14}/> Aslını indir</button>:null}<div className="preview-switch"><button className={previewMode==="image"?"active":""} onClick={()=>setPreviewMode("image")} aria-label="Belge görüntüsü"><ImageIcon size={15}/> Görüntü</button><button className={previewMode==="text"?"active":""} onClick={()=>setPreviewMode("text")} disabled={!detail.pages.length} aria-label="Okunabilir OCR metni"><FileText size={15}/> Okunabilir metin</button></div></div>
-        <div className="real-preview">{previewError&&previewMode!=="text"?<p className="preview-error"><AlertTriangle size={15}/>{previewError}</p>:null}{previewMode==="text"?<article className="ocr-transcript"><header><div><span><FileText size={17}/><b>Onaylı ve aranabilir belge metni</b><em className={textPending?"pending":"verified"}>{textPending?"Kontrol bekliyor":"Personel onaylı"}</em></span><small>Otomatik metni asıl belgeyle karşılaştırın. Kaydedilen her düzeltme sürüm ve SHA-256 denetim iziyle korunur.</small></div>{canReview&&!archived?<button className="text-confirm" onClick={saveText} disabled={savingText||(!textPending&&!hasTextChanges)}>{savingText?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {hasTextChanges?"Düzeltmeleri kaydet":"Metni onayla"}</button>:null}</header>{detail.pages.map(page=><section key={page.pageNumber}><h3><span>Sayfa {page.pageNumber}</span>{page.confirmedBy
+        <div className="real-preview">{previewMode==="text"?<article className="ocr-transcript"><header><div><span><FileText size={17}/><b>Onaylı ve aranabilir belge metni</b><em className={textPending?"pending":"verified"}>{textPending?"Kontrol bekliyor":"Personel onaylı"}</em></span><small>Otomatik metni asıl belgeyle karşılaştırın. Kaydedilen her düzeltme sürüm ve SHA-256 denetim iziyle korunur.</small></div>{canReview&&!archived?<button className="text-confirm" onClick={saveText} disabled={savingText||(!textPending&&!hasTextChanges)}>{savingText?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {hasTextChanges?"Düzeltmeleri kaydet":"Metni onayla"}</button>:null}</header>{detail.pages.map(page=><section key={page.pageNumber}><h3><span>Sayfa {page.pageNumber}</span>{page.confirmedBy
                   ?<small>{page.confirmedBy} · {page.confirmedAt?new Date(page.confirmedAt).toLocaleString("tr-TR"):"Onaylandı"}{page.confirmedText!==null&&page.confirmedText!==page.fullText?" · personel düzeltmesi":" · olduğu gibi onaylandı"}</small>
                   :<small>Henüz personel onayı yok</small>}</h3>
                 {/* Arşivlenen metin, insanların arayıp alıntılayacağı metindir.
@@ -724,7 +660,23 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
                     Makinenin ne okuduğu da erişilebilir kalmalıdır. */}
                 {page.confirmedText!==null&&page.confirmedText!==page.fullText
                   ?<details className="ocr-original"><summary>OCR&apos;ın okuduğu özgün metni göster</summary><p>{page.fullText||"OCR bu sayfada metin üretmedi."}</p></details>
-                  :null}{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:isImage?<div className="image-evidence"><img src={fileSrc||undefined} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&hasEvidenceBox(selected.box)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}>{/* design.md §3.3: bitişik altın ad etiketi — yalnız alan adı, yüzde yok. */}<b>{selected.label}</b></span>:null}</div>:<object data={fileSrc||undefined} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Güvenli görüntüleme kopyası bu tarayıcıda gösterilemiyor.</p></object>}</div>
+                  :null}{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:!fileSrc?
+          /*
+           * Görüntü henüz yokken boş bir çerçeve göstermek memura "bozuk"
+           * der. Kart, sürecin işlediğini söyler ve kopya hazır olunca ekran
+           * kendiliğinden açar (previewRetry). Okunmuş belgede bu arada
+           * metne geçiş önerilir; gerçek hatalar (yetki, kayıp nesne) ise
+           * yeniden denenmez, açıkça gösterilir.
+           */
+          <div className="preview-pending" role="status" aria-live="polite">
+            {previewError&&!previewError.includes("hazırlanıyor")
+              ?<><AlertTriangle size={26}/><b>Belge görüntüsü açılamadı</b><p>{previewError}</p></>
+              :<><LoaderCircle className="spin" size={26}/><b>Belge görüntüsü hazırlanıyor</b>
+                <p>Güvenli görüntüleme kopyası üretiliyor; hazır olduğunda burada kendiliğinden açılacak. Beklemenize gerek yok — diğer işlerinize dönebilirsiniz.</p></>}
+            {detail.pages.length?<button type="button" className="outline" onClick={()=>setPreviewMode("text")}>
+              <FileText size={14}/> Bu sırada okunabilir metne bakın</button>:null}
+          </div>
+        :isImage?<div className="image-evidence"><img src={fileSrc} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&hasEvidenceBox(selected.box)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}>{/* design.md §3.3: bitişik altın ad etiketi — yalnız alan adı, yüzde yok. */}<b>{selected.label}</b></span>:null}</div>:<object data={fileSrc} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Güvenli görüntüleme kopyası bu tarayıcıda gösterilemiyor.</p></object>}</div>
         {/* §9.2 kararı: toplu karar paneli belge alanının üzerine kayar —
             geniş yer, bağlamdan kopmadan. Kapanınca belge yine görünür. */}
         {bulkOpen&&canReview&&!archived?<RelationBulkPanel
@@ -745,19 +697,13 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
           <FileCog size={15}/>
           <span>
             <b>{detail.profile.name}</b>
-            {/* Profil kodu ve sürümü teknik gösterimdir (design.md §4.3);
-                personel düzeninde belge türünün adı ve sahibi müdürlük yeter.
-                §9.3 teknik görünümde kod ve sürüm geri gelir. */}
+            {/* Profil kodu, sürümü ve yaşam döngüsü iç terimlerdir; memura
+                belge türünün adı yeter (kullanıcı kararı 2026-08-20). */}
             <small>Bu belge türünde beklenen alanlar aşağıda listelendi</small>
-            {technical?<small className="tech-readout">{detail.profile.code} v{detail.profile.version}
-              {detail.profile.recordedVersion&&detail.profile.recordedVersion!==detail.profile.version?` · belgede v${detail.profile.recordedVersion}`:""}</small>:null}
             {/* §9.5: arşivlenmiş belgenin tasnifi karar anının anlık görüntüsüdür. */}
             {detail.document.filePlan?<small className="classification-line">
               {detail.document.filePlan.label} · {detail.document.retentionRule?.label??""}</small>:null}
           </span>
-          {/* "Hipotez/Gözlendi" profil yaşam döngüsü terimidir; memura bir şey
-              söylemez, teknik görünümde kalır. */}
-          {technical?<em className={`profile-status ${detail.profile.status.toLowerCase()}`}>{profileStatusLabels[detail.profile.status]??detail.profile.status}</em>:null}
         </div>:null}
         {detail.fields.length?<>
           {activeTab==="fields"?<div className={`quality ${pendingValues?"":"quality-good"}`}><Gauge size={17}/><span><b>{archived?"Personel tarafından arşivlendi":pendingValues?`${pendingValues} bilgi kontrolünüzü bekliyor`:"Bütün bilgiler karara bağlandı"}</b>{/* §6: saklama tekniği değil yapılacak iş anlatılır. */}<small>{archived?"Kayıt salt okunur; düzeltme yeni sürüm açar.":"Her bilgiyi belgedeki yazıyla karşılaştırın; yanlışsa üzerine doğrusunu yazın."}</small></span></div>:null}
@@ -784,15 +730,14 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
             canReview={canReview}
             archived={archived}
             onOpenBulk={()=>setBulkOpen(true)}
-            technical={technical}
             onChanged={relations=>setDetail(current=>current?{...current,relations}:current)}
             onError={setError}
             onNotice={setNotice}
           />:null}
 
-          {activeTab==="relations"?<section className="objects"><header><ShieldCheck size={15}/><span><b>Nesne kayıtları</b><small>Asıl dosya ve türevler</small></span></header>{detail.objects.map(object=><article key={object.id}><b>{object.objectClass}</b><small>{Math.max(1,Math.round(object.byteSize/1024))} KB</small><small>{object.generator??"—"} · {object.legalHoldStatus==="HELD"?"Yasal bekletme":object.retentionStatus}</small>{technical?<small className="tech-readout">SHA-256 {object.sha256.slice(0,16)}… · {object.mediaType}</small>:null}</article>)}</section>:null}
+          {activeTab==="relations"?<section className="objects"><header><ShieldCheck size={15}/><span><b>Nesne kayıtları</b><small>Asıl dosya ve türevler</small></span></header>{detail.objects.map(object=><article key={object.id}><b>{object.objectClass}</b><small>{Math.max(1,Math.round(object.byteSize/1024))} KB</small><small>{object.generator??"—"} · {object.legalHoldStatus==="HELD"?"Yasal bekletme":object.retentionStatus}</small></article>)}</section>:null}
 
-          {activeTab==="audit"?<section className="audit-trail"><header><History size={15}/><span><b>Değiştirilemez işlem kaydı</b><small>Her işlem eklendiği anda kilitlenir</small></span><ShieldCheck size={15}/></header>{detail.audit.length?detail.audit.map(event=><article key={event.eventNumber}><i/><span><b>{auditLabels[event.action]||event.action}</b><small>{event.actor} · {new Date(event.createdAt).toLocaleString("tr-TR")}</small>{technical?<small className="tech-readout">#{event.eventNumber} · {event.action} · {event.eventHash.slice(0,16)}…{event.previousHash?` ← ${event.previousHash.slice(0,8)}…`:""}</small>:null}</span></article>):<p>Henüz personel işlemi kaydedilmedi.</p>}
+          {activeTab==="audit"?<section className="audit-trail"><header><History size={15}/><span><b>Değiştirilemez işlem kaydı</b><small>Her işlem eklendiği anda kilitlenir</small></span><ShieldCheck size={15}/></header>{detail.audit.length?detail.audit.map(event=><article key={event.eventNumber}><i/><span><b>{auditLabels[event.action]||event.action}</b><small>{event.actor} · {new Date(event.createdAt).toLocaleString("tr-TR")}</small></span></article>):<p>Henüz personel işlemi kaydedilmedi.</p>}
             {auditChain.length>1?<p className={`chain-state ${chainBroken?"broken":"intact"}`}>
               {chainBroken
                 ?<><AlertTriangle size={14}/> İşlem kaydı zinciri kopuk; işletim ekibine bildirin.</>
@@ -817,26 +762,5 @@ export function DocumentReview({ documentId, onBack, onOpenDocument, permissions
           :<div className="empty-ocr"><FileClock size={28}/><b>Belge henüz okunmadı</b><p>Asıl dosya güvenli kasada. Belge okunduğunda yazılar ve alan bilgileri burada görünecek.</p>{canProcess?<button className="primary" onClick={process}><Play size={16}/> Belgeyi okut</button>:null}</div>}
       </aside>
     </div>
-    {/* §4.3 (1a): alt ilişki/denetim şeridi — özet her an gözün önünde;
-        kararlar yine sekmelerden (ve toplu panelden) verilir. */}
-    {dense?<footer className="dense-strip">
-      <div className="dense-strip-relations">
-        <b>İlişkiler · {detail.relations.length}</b>
-        {detail.relations.slice(0,8).map(relation=><em key={relation.id}
-          className={`relation-chip ${relation.verificationStatus.toLowerCase()}`}>
-          {relation.displayLabel}
-        </em>)}
-        {detail.relations.length>8?<small>+{detail.relations.length-8}</small>:null}
-      </div>
-      <div className="dense-strip-audit">
-        <b className={chainBroken?"broken":""}>
-          {chainBroken?<AlertTriangle size={13}/>:<ShieldCheck size={13}/>}
-          {detail.audit.length} olay · zincir {chainBroken?"KOPUK":"kopuksuz"}
-        </b>
-        {detail.audit.slice(0,3).map(event=><small key={event.eventNumber}>
-          #{event.eventNumber} {auditLabels[event.action]||event.action} · {event.actor}
-        </small>)}
-      </div>
-    </footer>:null}
   </div>;
 }
