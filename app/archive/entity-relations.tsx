@@ -3,7 +3,7 @@
 import { CheckCircle2, ListChecks, LoaderCircle, MapPin, Plus, ShieldCheck, Signpost, ThumbsDown, X } from "lucide-react";
 import { useState } from "react";
 import { OTHER_REASON_CODE, type RejectionReason } from "../../lib/rejection-reasons";
-import { confidencePhrase, technicalConfidence } from "../../lib/confidence-language";
+import { confidencePhrase } from "../../lib/confidence-language";
 
 export type EntityRelation = {
   id: string;
@@ -49,8 +49,6 @@ type Props = {
   archived: boolean;
   /** Verilirse çok önerili belgede toplu onay panelini açan giriş görünür (§9.2). */
   onOpenBulk?: () => void;
-  /** §9.3 teknik görünüm: ham güven yüzdesi de satırda gösterilir. */
-  technical?: boolean;
   onChanged: (relations: EntityRelation[]) => void;
   onError: (message: string) => void;
   onNotice: (message: string) => void;
@@ -61,7 +59,7 @@ type FormMode = "none" | "parcel" | "address";
 const emptyParcel = { blockNo: "", parcelNo: "", districtCode: "", cadastralNeighborhood: "", externalId: "" };
 const emptyAddress = { neighborhood: "", street: "", doorNo: "", unitNo: "", externalId: "" };
 
-export function EntityRelations({ documentId, relations, rejectionReasons, canReview, archived, onOpenBulk, technical, onChanged, onError, onNotice }: Props) {
+export function EntityRelations({ documentId, relations, rejectionReasons, canReview, archived, onOpenBulk, onChanged, onError, onNotice }: Props) {
   const [mode, setMode] = useState<FormMode>("none");
   const [parcel, setParcel] = useState(emptyParcel);
   const [address, setAddress] = useState(emptyAddress);
@@ -159,8 +157,6 @@ export function EntityRelations({ documentId, relations, rejectionReasons, canRe
           {relationTypeLabels[relation.relationType] ?? relation.relationType} · {sourceLabels[relation.relationSource] ?? relation.relationSource}
           {relation.relationConfidence !== null && relation.relationSource === "OCR"
             ? ` · ${confidencePhrase(relation.relationConfidence, "OCR")}` : ""}
-          {technical && relation.relationConfidence !== null && relation.relationSource === "OCR"
-            ? ` · ${technicalConfidence(relation.relationConfidence)}` : ""}
           {" · "}{entityStatusLabels[relation.entityStatus] ?? relation.entityStatus}
           {relation.externalId ? ` · ${relation.authoritySource}:${relation.externalId}` : ""}
         </small>
