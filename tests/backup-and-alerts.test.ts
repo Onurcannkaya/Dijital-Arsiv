@@ -116,9 +116,12 @@ test("dilimler sırayla koşar: artımlı kopya, günlük döküm, günlük mani
   // ADR-017: sağlayıcı anahtarı taşınabilir kanıt değildir; manifeste girmez.
   assert.ok(!("objectKey" in manifestBody.objects[0]) && !("object_key" in manifestBody.objects[0]));
 
-  // 4. tur: her şey güncel, dilim boş döner.
+  // 4. tur: ilk manifest üretildiği için İLK tutarlılık kontrolü hemen koşar
+  // (sonrakiler aylıktır); 5. tur boş döner.
   const fourth = await runBackupSlice(bindings, { now });
-  assert.deepEqual(fourth, { skipped: true, reason: "idle" });
+  assert.equal((fourth as { kind: string }).kind, "consistency_check");
+  const fifth = await runBackupSlice(bindings, { now });
+  assert.deepEqual(fifth, { skipped: true, reason: "idle" });
 
   const summary = await readBackupSummary(bindings);
   assert.equal(summary.configured, true);

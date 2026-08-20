@@ -1,6 +1,7 @@
 import { processNextOcrJob } from "../app/api/jobs/process/route.ts";
 import { dispatchAlert } from "./alerts.ts";
 import { runBackupSlice } from "./backup.ts";
+import { runQuotaCheck } from "./capacity.ts";
 import { processNextContentScanJob } from "./content-scan.ts";
 import { assertSchemaReady, runMaintenanceSlice } from "./archive-schema.ts";
 import { getPromotionStorages, type ArchiveBindings } from "./archive-storage.ts";
@@ -230,8 +231,11 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
         if (!progress) break;
       }
       // ADR-017: yedek dilimi bakım turuna bağlıdır; hızını backup_runs
-      // defterinden alır (saatlik artımlı, günlük döküm + manifest).
+      // defterinden alır (saatlik artımlı, günlük döküm + manifest, aylık
+      // tutarlılık kontrolü).
       const backup = await runBackupSlice(bindings);
+      // Kapasite kotası: eşik aşımı günde bir kez alarma bağlanır.
+      const quota = await runQuotaCheck(bindings);
 
       logEvent("info", "cron.maintenance-result", {
         ...result,
@@ -239,6 +243,7 @@ export async function runScheduledJob(bindings: ArchiveBindings, cron: string) {
         keyInventory: { checked: inventory.checked, enqueued: inventory.enqueued, done: inventory.done },
         keyMigrationsProcessed: migrated,
         backup,
+        quota,
       });
     });
     return;

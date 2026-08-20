@@ -22,10 +22,12 @@ test("arayüz uydurma belge ve sabit gösterge değeri içermez", async () => {
   assert.doesNotMatch(source, /03:15/);
   assert.doesNotMatch(source, /Tümü çalışıyor/);
   assert.doesNotMatch(source, /16 Temmuz 2026/);
-  // Sayımlar gerçek uçtan gelir ve ölçülmeyenler açıkça bildirilir.
+  // Sayımlar gerçek uçtan gelir. Kota kullanımı artık ölçülür; tavan kurum
+  // kararı olduğundan tanımsızken "Tanımlı değil" denir, uydurma oran gösterilmez.
   assert.match(source, /\/api\/overview/);
-  assert.match(source, /Henüz ölçülmüyor/);
+  assert.match(source, /Tanımlı değil/);
   assert.match(source, /kapasite kotası tanımlı değil/);
+  assert.doesNotMatch(source, /Henüz ölçülmüyor/);
 });
 
 test("PWA shell and design tokens are present", async () => {

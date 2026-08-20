@@ -119,8 +119,11 @@ test("genel bakış sayıları gerçek sorgudan gelir ve kapsamla süzülür", a
   assert.match(overview, /FROM archive_documents WHERE \(\? = '\*' OR unit = \?\)/);
   assert.match(overview, /FROM processing_jobs/);
   assert.match(overview, /FROM binary_objects/);
-  // Ölçülmeyen göstergeler uydurulmaz, açıkça bildirilir. Servis sağlığı
-  // /api/health, yedek durumu backup_runs defteriyle ölçüldüğünden ikisi
-  // listede değildir; kota hâlâ ölçülmüyor ve listede kalır.
-  assert.match(overview, /unmeasured: \["storageQuota"\]/);
+  // Ölçülmeyen gösterge kalmadı: servis sağlığını /api/health, yedeği
+  // backup_runs defteri, kota kullanımını storage.quota ölçer. `unmeasured`
+  // listesi bu yüzden kalktı; uydurma tavan da üretilmez (configured:false).
+  assert.match(overview, /readStorageQuota/);
+  assert.match(overview, /readBackupSummary/);
+  // Alan olarak dönmemeli; deseni anlatan yorum satırı serbesttir.
+  assert.doesNotMatch(overview, /unmeasured:/);
 });

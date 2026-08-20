@@ -39,10 +39,14 @@ import { storageReader, storageVaultWriter } from "./storage-roles.ts";
 export const BACKUP_EXPORT_VERSION = "backup-export-v1";
 export const INCREMENTAL_INTERVAL_MS = 60 * 60 * 1000;
 export const DAILY_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** ADR-017 tatbikat maddesi: "Aylık: yedek işi ve manifest tutarlılığı otomatik kontrolü". */
+export const CONSISTENCY_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000;
 /** Dilim başına kopyalanan asıl nesne; bakım bütçesini korur. */
 export const INCREMENTAL_BATCH = 25;
+/** Tutarlılık kontrolünün yedekte varlığını doğruladığı asıl örneklem boyutu. */
+export const CONSISTENCY_SAMPLE = 20;
 
-type BackupKind = "originals_incremental" | "metadata_export" | "manifest_daily";
+type BackupKind = "originals_incremental" | "metadata_export" | "manifest_daily" | "consistency_check";
 
 type LastRun = { completed_at: string | null; cursor: string | null };
 
@@ -230,6 +234,72 @@ async function runDailyManifest(bindings: BackupDependencies, now: Date) {
   }
 }
 
+/**
+ * Aylık tutarlılık kontrolü (ADR-017 tatbikatının otomatik ayağı): yedeğin
+ * VAR OLDUĞUNU değil, OKUNABİLİR ve DOĞRU olduğunu ölçer.
+ *
+ * - Son üst veri dökümü ve son manifest yedekten geri okunur, SHA-256 yeniden
+ *   hesaplanıp defterdeki değerle karşılaştırılır (bit çürümesi/eksik yazım).
+ * - Artımlı kopyanın imleç gerisindeki son N aslı yedekte aranır ve boyutu
+ *   doğrulanır (kopya atlaması).
+ *
+ * Uyuşmazlık koşuyu FAILED bırakır ve alarm tetikler; yedeğin bozuk olduğunu
+ * geri yükleme gününde öğrenmek en pahalı öğrenme biçimidir.
+ */
+async function runConsistencyCheck(bindings: BackupDependencies, now: Date) {
+  const runId = await openRun(bindings.DB, "consistency_check", now);
+  try {
+    const reader = storageReader(bindings.BACKUP_FILES!);
+    const problems: string[] = [];
+    let checked = 0;
+
+    // 1) Defterdeki son döküm ve manifest, yedekten geri okunup özetlenir.
+    for (const kind of ["metadata_export", "manifest_daily"] as const) {
+      const last = await bindings.DB.prepare(`SELECT object_key, sha256, byte_size FROM backup_runs
+        WHERE kind = ? AND status = 'COMPLETED' AND object_key IS NOT NULL
+        ORDER BY completed_at DESC LIMIT 1`).bind(kind)
+        .first<{ object_key: string; sha256: string; byte_size: number }>();
+      if (!last) continue;
+      checked += 1;
+      const object = await reader.get(last.object_key);
+      if (!object || object.range !== null) {
+        problems.push(`${kind}: ${last.object_key} yedekten okunamadı`);
+        continue;
+      }
+      const bytes = await new Response(object.body).arrayBuffer();
+      const digest = digestToHex(await crypto.subtle.digest("SHA-256", bytes));
+      if (digest !== last.sha256 || bytes.byteLength !== last.byte_size) {
+        problems.push(`${kind}: ${last.object_key} özeti defterle uyuşmuyor (beklenen ${last.sha256.slice(0, 12)}…, okunan ${digest.slice(0, 12)}…)`);
+      }
+    }
+
+    // 2) İmleç gerisindeki son N asıl yedekte var mı ve boyutu doğru mu?
+    const incremental = await lastCompleted(bindings.DB, "originals_incremental");
+    const [cursorAt] = (incremental?.cursor ?? "").split("|");
+    if (cursorAt) {
+      const sample = await bindings.DB.prepare(`SELECT id, object_key, byte_size FROM binary_objects
+        WHERE object_class = 'original' AND created_at <= ?
+        ORDER BY created_at DESC, id DESC LIMIT ${CONSISTENCY_SAMPLE}`)
+        .bind(cursorAt)
+        .all<{ id: string; object_key: string; byte_size: number }>();
+      for (const object of sample.results) {
+        checked += 1;
+        const stat = await reader.head(object.object_key);
+        if (!stat) problems.push(`asıl kopya eksik: ${object.id}`);
+        else if (stat.size !== object.byte_size) problems.push(`asıl kopya boyutu uyuşmuyor: ${object.id}`);
+      }
+    }
+
+    if (problems.length) throw new Error(`Yedek tutarlılık kontrolü ${problems.length} uyuşmazlık buldu: ${problems.join("; ")}`);
+    await closeRun(bindings.DB, runId, now, { status: "COMPLETED", copiedCount: checked });
+    return { kind: "consistency_check" as const, checked };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await closeRun(bindings.DB, runId, now, { status: "FAILED", error: message.slice(0, 1000) });
+    throw error;
+  }
+}
+
 export type BackupSliceResult =
   | { skipped: true; reason: "unconfigured" | "idle" }
   | { skipped: false; kind: BackupKind; detail: Record<string, unknown> };
@@ -246,10 +316,11 @@ export async function runBackupSlice(
 ): Promise<BackupSliceResult> {
   if (!bindings.BACKUP_FILES) return { skipped: true, reason: "unconfigured" };
   const now = options.now ?? new Date();
-  const [incremental, metadata, manifest] = await Promise.all([
+  const [incremental, metadata, manifest, consistency] = await Promise.all([
     lastCompleted(bindings.DB, "originals_incremental"),
     lastCompleted(bindings.DB, "metadata_export"),
     lastCompleted(bindings.DB, "manifest_daily"),
+    lastCompleted(bindings.DB, "consistency_check"),
   ]);
   try {
     if (due(incremental, INCREMENTAL_INTERVAL_MS, now)) {
@@ -265,6 +336,13 @@ export async function runBackupSlice(
     if (due(manifest, DAILY_INTERVAL_MS, now)) {
       const result = await runDailyManifest(bindings, now);
       logEvent("info", "backup.slice", { kind: result.kind, objectKey: result.objectKey, objectCount: result.objectCount });
+      return { skipped: false, kind: result.kind, detail: result };
+    }
+    // Tutarlılık ancak doğrulanacak bir yedek varken anlamlıdır; ilk manifest
+    // üretilmeden koşarsa "hiçbir şey kontrol etmedim" satırı COMPLETED görünürdü.
+    if (manifest && due(consistency, CONSISTENCY_INTERVAL_MS, now)) {
+      const result = await runConsistencyCheck(bindings, now);
+      logEvent("info", "backup.slice", { kind: result.kind, checked: result.checked });
       return { skipped: false, kind: result.kind, detail: result };
     }
     return { skipped: true, reason: "idle" };
@@ -284,18 +362,22 @@ export async function runBackupSlice(
 /** Genel bakış için yedek durumu: son başarılı koşular + son 24 saat arızaları. */
 export async function readBackupSummary(bindings: Pick<ArchiveBindings, "DB" | "BACKUP_FILES">) {
   if (!bindings.BACKUP_FILES) return { configured: false as const };
-  const [incremental, metadata, manifest, failures] = await Promise.all([
+  const [incremental, metadata, manifest, consistency, failures] = await Promise.all([
     lastCompleted(bindings.DB, "originals_incremental"),
     lastCompleted(bindings.DB, "metadata_export"),
     lastCompleted(bindings.DB, "manifest_daily"),
+    lastCompleted(bindings.DB, "consistency_check"),
+    // İki taraf da datetime() ile normalleştirilir; kolon ISO ('T'li) yazılır
+    // ve ham TEXT karşılaştırmasında 'T' > ' ' her satırı "son 24 saat" yapardı.
     bindings.DB.prepare(`SELECT COUNT(*) AS n FROM backup_runs
-      WHERE status = 'FAILED' AND started_at >= datetime('now', '-1 day')`).first<{ n: number }>(),
+      WHERE status = 'FAILED' AND datetime(started_at) >= datetime('now', '-1 day')`).first<{ n: number }>(),
   ]);
   return {
     configured: true as const,
     lastIncrementalAt: incremental?.completed_at ?? null,
     lastMetadataExportAt: metadata?.completed_at ?? null,
     lastManifestAt: manifest?.completed_at ?? null,
+    lastConsistencyAt: consistency?.completed_at ?? null,
     failures24h: Number(failures?.n ?? 0),
   };
 }

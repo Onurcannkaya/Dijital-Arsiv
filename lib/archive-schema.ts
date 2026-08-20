@@ -45,7 +45,7 @@ export { DEFAULT_DOCUMENT_TYPE_CODE };
  * çalıştıktan sonra aynı tabloya yeni kolon eklenirse, kolon sniffing yapan bir
  * kapı adımı bir daha çalıştırmaz ve şema sessizce eksik kalır.
  */
-export const ARCHIVE_SCHEMA_VERSION = 32;
+export const ARCHIVE_SCHEMA_VERSION = 33;
 
 /**
  * Bağımlılık sırasına göre tablo ve indeks tanımları.
@@ -542,7 +542,7 @@ const tableStatements: string[] = [
     started_at TEXT NOT NULL,
     completed_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CHECK (kind IN ('metadata_export', 'originals_incremental', 'manifest_daily')),
+    CHECK (kind IN ('metadata_export', 'originals_incremental', 'manifest_daily', 'consistency_check')),
     CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED')),
     CHECK (sha256 IS NULL OR length(sha256) = 64),
     CHECK (copied_count >= 0)
@@ -550,6 +550,26 @@ const tableStatements: string[] = [
   "CREATE INDEX IF NOT EXISTS backup_runs_kind_status_idx ON backup_runs (kind, status, completed_at)",
   `CREATE TRIGGER IF NOT EXISTS backup_runs_no_delete
     BEFORE DELETE ON backup_runs BEGIN SELECT RAISE(ABORT, 'Yedek koşusu kaydı silinemez'); END`,
+
+  /*
+   * Kapasite kotası alarm defteri. Alarm eşiği aşıldığında günde bir kez haber
+   * verilir; "bir kez"in kanıtı bu tablodur — bellekte sayaç tutulsaydı her
+   * süreç yeniden başlatmada alarm tekrarlanırdı. Satırlar alarm geçmişidir ve
+   * silinmez; kota göstergesinin kendisi anlık ölçümdür, burada tutulmaz.
+   */
+  `CREATE TABLE IF NOT EXISTS capacity_alerts (
+    id TEXT PRIMARY KEY NOT NULL,
+    threshold_percent INTEGER NOT NULL,
+    used_bytes INTEGER NOT NULL,
+    limit_bytes INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (threshold_percent BETWEEN 1 AND 100),
+    CHECK (used_bytes >= 0),
+    CHECK (limit_bytes > 0)
+  )`,
+  "CREATE INDEX IF NOT EXISTS capacity_alerts_threshold_created_idx ON capacity_alerts (threshold_percent, created_at)",
+  `CREATE TRIGGER IF NOT EXISTS capacity_alerts_no_delete
+    BEFORE DELETE ON capacity_alerts BEGIN SELECT RAISE(ABORT, 'Kapasite alarm kaydı silinemez'); END`,
 ];
 
 const MIGRATE_HINT = "göçü `POST /api/admin/migrate` ile çalıştırın.";
@@ -1520,11 +1540,47 @@ const dataMigrations: MigrationStep[] = [
   { version: 30, run: resyncSeedFieldOrder },
   // 31 → 32: ADR-017 yedekleme defteri mevcut kurulumlara eklenir.
   { version: 32, run: createBackupRunsTable },
+  // 32 → 33: yedek defterine aylık tutarlılık kontrolü türü girer (CHECK
+  // genişletme = tablo yeniden kurulumu) ve kapasite alarm defteri eklenir.
+  { version: 33, run: migrateOpsLedgers },
 ];
 
 /** ADR-017: yedek koşusu defteri mevcut kurulumlara eklenir. */
 async function createBackupRunsTable(db: D1Database) {
   for (const statement of tableStatements.filter((sql) => sql.includes("backup_runs"))) {
+    await db.prepare(statement).run();
+  }
+}
+
+/**
+ * v33: `backup_runs.kind` CHECK kısıtına `consistency_check` eklenir. SQLite
+ * CHECK değiştirmeyi desteklemez; tablo yeniden kurulur ve satırlar taşınır
+ * (yedek geçmişi denetim kanıtıdır, kaybolmaz). Kapasite alarm defteri de
+ * burada açılır.
+ */
+async function migrateOpsLedgers(db: D1Database) {
+  if (await tableExists(db, "backup_runs")) {
+    const guard = await db.prepare(`SELECT sql FROM sqlite_master
+      WHERE type = 'table' AND name = 'backup_runs'`).first<{ sql: string }>();
+    if (guard && !guard.sql.includes("consistency_check")) {
+      await db.prepare("DROP TRIGGER IF EXISTS backup_runs_no_delete").run();
+      await db.prepare("ALTER TABLE backup_runs RENAME TO backup_runs_v32").run();
+      for (const statement of tableStatements.filter((sql) => sql.includes("backup_runs"))) {
+        await db.prepare(statement).run();
+      }
+      await db.prepare(`INSERT INTO backup_runs (id, kind, status, object_key, byte_size, sha256,
+          copied_count, cursor, error, started_at, completed_at, created_at)
+        SELECT id, kind, status, object_key, byte_size, sha256,
+          copied_count, cursor, error, started_at, completed_at, created_at
+        FROM backup_runs_v32`).run();
+      await db.prepare("DROP TABLE backup_runs_v32").run();
+    }
+  } else {
+    for (const statement of tableStatements.filter((sql) => sql.includes("backup_runs"))) {
+      await db.prepare(statement).run();
+    }
+  }
+  for (const statement of tableStatements.filter((sql) => sql.includes("capacity_alerts"))) {
     await db.prepare(statement).run();
   }
 }

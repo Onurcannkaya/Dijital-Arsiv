@@ -5,6 +5,7 @@ import {
   requireArchiveSchema, getArchiveBindings,
 } from "../../../lib/archive-storage";
 import { readBackupSummary } from "../../../lib/backup";
+import { readStorageQuota } from "../../../lib/capacity";
 import { failure } from "../../../lib/errors";
 
 export const dynamic = "force-dynamic";
@@ -112,6 +113,12 @@ export async function GET(request: Request) {
         legacyKeys: count(storage, "legacy_keys"),
         /** Erişim türevi olmayan belge sayısı; görüntülemede asıl sunulur. */
         withoutAccessDerivative: count(storage, "without_access"),
+        /*
+         * Kota kullanım oranı KÜRESEL ölçülür (fiziksel kapasite müdürlük
+         * süzgecine tabi değildir: disk dolunca herkes durur). Tavan tanımlı
+         * değilse configured:false döner — uydurma tavan üretilmez.
+         */
+        quota: await readStorageQuota(bindings),
       },
       // Bekleyen bakım işi (arama dizini yenilemesi) görünür kalır: yarım kalmış
       // bir yenileme aramayı sessizce eksik bırakır.
@@ -129,10 +136,12 @@ export async function GET(request: Request) {
       // ADR-017: yedek durumu backup_runs defterinden ölçülür; hedef
       // yapılandırılmamışsa configured:false döner, uydurma zaman dönmez.
       backup: await readBackupSummary(bindings),
-      // Kapasite kotası henüz ölçülmüyor; uydurma değer döndürmek yerine
-      // açıkça bildirilmez. Servis sağlığını /api/health, yedeği `backup`
-      // bloğu ölçtüğünden ikisi listeden çıktı.
-      unmeasured: ["storageQuota"],
+      /*
+       * Eski `unmeasured` listesi kalktı: son kalemi olan kapasite kotası da
+       * artık ölçülüyor (`storage.quota`). Yeni bir gösterge ölçülemeden
+       * eklenecekse bu dürüstlük deseni geri getirilmelidir — uydurma değer
+       * döndürmek yerine ölçülmeyen açıkça bildirilir.
+       */
     });
   } catch (error) {
     return failure(error, "overview.read", "Genel bakış alınamadı.", request);
