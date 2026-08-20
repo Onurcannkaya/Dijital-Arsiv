@@ -541,3 +541,19 @@ tr.newest-row td{background:color-mix(in srgb,var(--ar-green-soft) 35%,transpare
 .ops-grid li span{color:var(--ar-muted)}
 .ops-grid li b{white-space:nowrap}
 .ops-grid li b.pending{color:var(--ar-amber)}
+
+/* ---- Yardim ve destek (help.tsx) ---- */
+.sidebar footer button.help-entry:hover,.sidebar footer button.help-entry.active{background:rgba(255,255,255,.075);color:#fff;cursor:pointer}
+.help-section{margin-bottom:14px}
+.help-section header{padding:14px 20px;border-bottom:1px solid var(--ar-border)}
+.help-section header div{display:flex;align-items:center;gap:11px}
+.help-section h2{margin:0;font-size:14px}
+.help-body{padding:14px 20px 18px;font-size:12.5px;line-height:1.65;color:var(--ar-text)}
+.help-body p{margin:0 0 10px}
+.help-body p:last-child{margin-bottom:0}
+.help-body ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:7px}
+.help-body table{width:100%;border-collapse:collapse;margin:6px 0 14px}
+.help-body td{padding:7px 10px;border:1px solid var(--ar-border);vertical-align:top;font-size:12px}
+.help-body td:first-child{width:34%;background:var(--ar-surface-2);white-space:normal}
+.help-mono{font:12px "IBM Plex Mono",Consolas,monospace;background:var(--ar-surface-2);border:1px solid var(--ar-border);border-radius:6px;padding:8px 10px;display:inline-block}
+.help-footnote{display:flex;align-items:center;gap:7px;margin:0 0 8px;font-size:12px;color:var(--ar-muted)}

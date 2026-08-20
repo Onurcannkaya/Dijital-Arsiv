@@ -13,9 +13,10 @@ import { MobileScan } from "./mobile-scan";
 import { UsersScreen } from "./users";
 import { ActivityScreen } from "./activity";
 import { SettingsScreen } from "./settings";
+import { HelpScreen } from "./help";
 import { confidenceBadge } from "../../lib/confidence-language";
 
-type View = "dashboard" | "inbox" | "review" | "archive" | "users" | "activity" | "settings";
+type View = "dashboard" | "inbox" | "review" | "archive" | "users" | "activity" | "settings" | "help";
 type DocumentRow = { id:string; referenceNo?:string; title:string; unit:string; place:string; parcel:string; status:string; rawStatus:string; confidence:number; contentMatch?:boolean; pending?:number; relations?:number; createdAt:string };
 type CurrentUser = { email:string; displayName:string; role:string; roleLabel:string; unit:string; permissions:string[] };
 /** §3.10 hızlı sorgu: sunucunun sorgudan çıkardığı hedefli süzgeçler. */
@@ -308,10 +309,11 @@ const viewStatuses: Record<View, string[]> = {
   // Doğrulama kuyruğu `review` ve `ready` içerir; gösterge de aynı ikisini sayar.
   review: ["review", "ready"],
   archive: ["archived"],
-  // Kullanıcı yönetimi ve işlem geçmişi belge listesi kullanmaz.
+  // Kullanıcı yönetimi, işlem geçmişi ve yardım belge listesi kullanmaz.
   users: [],
   activity: [],
   settings: [],
+  help: [],
 };
 
 export function ArchiveWorkspace(){
@@ -511,7 +513,8 @@ export function ArchiveWorkspace(){
   const backToList=()=>{setSelectedId(null);setView("inbox");void refresh()};
 
   return <div className={`archive-app ${dark?"dark":""}`}><aside className={`sidebar ${mobile?"open":""}`}><div className="brand">{/* eslint-disable-next-line @next/next/no-img-element -- Kurum amblemi statik varlıktır; iyileştirme katmanı gerekmez. */}
-    <img className="brand-logo" src="/logo-sivas.png" alt="Sivas Belediyesi amblemi"/><span><strong>SİVAS</strong><small>Dijital Arşiv</small></span><button onClick={()=>setMobile(false)}><X size={19}/></button></div><nav><p>ÇALIŞMA ALANI</p>{nav.map(([id,label,Icon])=><button className={view===id?"active":""} onClick={()=>go(id)} key={id}><Icon size={18}/><span>{label}</span>{id==="inbox"&&overview?.documents.total?<b>{overview.documents.total}</b>:null}{id==="review"&&reviewPending?<b>{reviewPending}</b>:null}</button>)}<p>YÖNETİM</p><button className={view==="activity"?"active":""} onClick={()=>go("activity")}><History size={18}/><span>İşlem Geçmişi</span></button>{canManageUsers?<><button className={view==="users"?"active":""} onClick={()=>go("users")}><UserRound size={18}/><span>Kullanıcılar</span></button><button className={view==="settings"?"active":""} onClick={()=>go("settings")}><Settings size={18}/><span>Ayarlar</span></button></>:null}</nav><footer><span>Depolanan <b>{overview?formatBytes(overview.storage.bytes):"—"}</b></span><small>{overview?`${overview.storage.objects} nesne kaydı · ${overview.storage.quota?.configured?`kota %${Math.round((overview.storage.quota.usedRatio??0)*100)} dolu`:"kapasite kotası tanımlı değil"}`:"Ölçülüyor"}</small><button className="upcoming" disabled title="Yardım ve destek içeriği henüz hazırlanmadı."><CircleHelp size={18}/>Yardım ve destek<em>Yakında</em></button></footer></aside>{mobile&&<button className="backdrop" onClick={()=>setMobile(false)}/>}<section className="workspace"><header className="appbar"><button className="menu" onClick={()=>setMobile(true)}><Menu size={20}/></button><label className="search"><Search size={18}/><input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Belge, muhatap, ada / parsel ara..."/><kbd>Ctrl K</kbd>{results.length>0&&<div className="results">{results.slice(0,4).map(d=><button key={d.id} onClick={()=>openDocument(d.id)}><FileSearch size={17}/><span><b>{d.title}</b><small>{d.referenceNo??d.id} · {d.parcel}{d.contentMatch?" · Tam metin eşleşmesi":""}</small></span><ChevronRight size={15}/></button>)}</div>}</label><div className="actions"><button onClick={()=>setDark(!dark)} aria-label={dark?"Aydınlık temaya geç":"Karanlık temaya geç"}>{dark?<Sun size={18}/>:<Moon size={18}/>}</button>
+    <img className="brand-logo" src="/logo-sivas.png" alt="Sivas Belediyesi amblemi"/><span><strong>SİVAS</strong><small>Dijital Arşiv</small></span><button onClick={()=>setMobile(false)}><X size={19}/></button></div><nav><p>ÇALIŞMA ALANI</p>{nav.map(([id,label,Icon])=><button className={view===id?"active":""} onClick={()=>go(id)} key={id}><Icon size={18}/><span>{label}</span>{id==="inbox"&&overview?.documents.total?<b>{overview.documents.total}</b>:null}{id==="review"&&reviewPending?<b>{reviewPending}</b>:null}</button>)}<p>YÖNETİM</p><button className={view==="activity"?"active":""} onClick={()=>go("activity")}><History size={18}/><span>İşlem Geçmişi</span></button>{canManageUsers?<><button className={view==="users"?"active":""} onClick={()=>go("users")}><UserRound size={18}/><span>Kullanıcılar</span></button><button className={view==="settings"?"active":""} onClick={()=>go("settings")}><Settings size={18}/><span>Ayarlar</span></button></>:null}</nav><footer><span>Depolanan <b>{overview?formatBytes(overview.storage.bytes):"—"}</b></span><small>{overview?`${overview.storage.objects} nesne kaydı · ${overview.storage.quota?.configured?`kota %${Math.round((overview.storage.quota.usedRatio??0)*100)} dolu`:"kapasite kotası tanımlı değil"}`:"Ölçülüyor"}</small>{/* El kitabı app/archive/help.tsx içinde; içerik uygulamanın gerçek davranışından derlenir. */}
+    <button className={view==="help"?"active help-entry":"help-entry"} onClick={()=>go("help")}><CircleHelp size={18}/>Yardım ve destek</button></footer></aside>{mobile&&<button className="backdrop" onClick={()=>setMobile(false)}/>}<section className="workspace"><header className="appbar"><button className="menu" onClick={()=>setMobile(true)}><Menu size={20}/></button><label className="search"><Search size={18}/><input ref={searchRef} value={query} onChange={e=>setQuery(e.target.value)} placeholder="Belge, muhatap, ada / parsel ara..."/><kbd>Ctrl K</kbd>{results.length>0&&<div className="results">{results.slice(0,4).map(d=><button key={d.id} onClick={()=>openDocument(d.id)}><FileSearch size={17}/><span><b>{d.title}</b><small>{d.referenceNo??d.id} · {d.parcel}{d.contentMatch?" · Tam metin eşleşmesi":""}</small></span><ChevronRight size={15}/></button>)}</div>}</label><div className="actions"><button onClick={()=>setDark(!dark)} aria-label={dark?"Aydınlık temaya geç":"Karanlık temaya geç"}>{dark?<Sun size={18}/>:<Moon size={18}/>}</button>
     {/* Zil, bekleyen doğrulama kuyruğuna götürür; kuyruk boşken tıklanamaz. */}
     <button className="bell" onClick={()=>go("review")} disabled={!reviewPending} title={reviewPending?`${reviewPending} belge doğrulama bekliyor`:"Doğrulama bekleyen belge yok"} aria-label={reviewPending?`${reviewPending} belge doğrulama bekliyor; kuyruğu aç`:"Doğrulama bekleyen belge yok"}><Bell size={18}/>{reviewPending?<i/>:null}</button>
     <span className="avatar">{initials}</span><div><b>{user?.displayName??"Oturum bekleniyor"}</b><small>{user?.roleLabel??"Yetki doğrulanıyor"}{user&&user.unit!=="*"?` · ${user.unit}`:""}</small></div></div></header><main id="main-content" className={selectedId?"review-main":"main"}>
@@ -520,6 +523,7 @@ export function ArchiveWorkspace(){
       :view==="users"?<UsersScreen/>
       :view==="activity"?<ActivityScreen onOpenDocument={openDocument}/>
       :view==="settings"?<SettingsScreen/>
+      :view==="help"?<HelpScreen/>
       :view==="dashboard"?<Dashboard rows={rows.slice(0,5)} overview={overview} health={health} open={openDocument} onUpload={()=>setUploadOpen(true)} userName={user?.displayName??""} canUpload={canUpload}/>
       :<>{view==="inbox"?<><PendingUploads
         sessions={pendingSessions}
