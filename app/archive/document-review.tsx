@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- Özel R2 dosya rotası Next Image iyileştirmesine uygun değildir. */
 
 import { AlertTriangle, ArrowLeft, CheckCircle2, Download, FileClock, FileCog, FileText, Gauge, History, Image as ImageIcon, LoaderCircle, LockKeyhole, Play, Plus, RotateCcw, Save, ScanLine, ShieldCheck, Sparkles, ThumbsDown, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { EntityRelation, EntityRelations } from "./entity-relations";
 import { auditLabels } from "./audit-labels";
 import {
@@ -13,9 +13,27 @@ import {
 import { FILE_PLAN_VOCABULARY_CODE, RETENTION_RULE_VOCABULARY_CODE } from "../../lib/file-plan";
 import { confidencePhrase } from "../../lib/confidence-language";
 import { evidenceCropStyle, hasEvidenceBox } from "../../lib/evidence-crop";
+import { parseQuickQuery } from "../../lib/quick-query";
+import {
+  findHighlightRanges, matchesAnyToken, matchSnippets, searchTokens, type HighlightRange,
+} from "../../lib/search-highlight";
 import { RelationBulkPanel } from "./relation-bulk-panel";
 
 const MISSING_VALUE = "Belirlenmedi";
+
+/** Vurgu aralıklarını <mark> düğümlerine çevirir; aralık yoksa metin olduğu gibi döner. */
+function renderMarks(text:string,ranges:HighlightRange[]){
+  if(!ranges.length) return text;
+  const nodes:Array<string|ReactElement>=[];
+  let cursor=0;
+  ranges.forEach(([start,end],index)=>{
+    if(start>cursor) nodes.push(text.slice(cursor,start));
+    nodes.push(<mark key={index}>{text.slice(start,end)}</mark>);
+    cursor=end;
+  });
+  if(cursor<text.length) nodes.push(text.slice(cursor));
+  return nodes;
+}
 
 type VerificationStatus = "SUGGESTED" | "CONFIRMED" | "CORRECTED" | "REJECTED";
 
@@ -62,7 +80,7 @@ const statusLabels: Record<string,string> = { queued:"Okunmayı bekliyor", proce
  * bakışıdır, "Kontrol edilmedi" memurun yapılacak işidir. */
 const valueStatusLabels: Record<VerificationStatus,string> = { SUGGESTED:"Kontrol edilmedi", CONFIRMED:"Kontrol edildi", CORRECTED:"Düzeltildi", REJECTED:"Reddedildi" };
 
-export function DocumentReview({ documentId, onBack, permissions }: { documentId:string; onBack:()=>void; permissions:string[] }) {
+export function DocumentReview({ documentId, onBack, permissions, searchTerm }: { documentId:string; onBack:()=>void; permissions:string[]; searchTerm?:string }) {
   const [detail,setDetail]=useState<DetailPayload|null>(null);
   const [drafts,setDrafts]=useState<Record<string,string>>({});
   const [rejections,setRejections]=useState<Record<string,boolean>>({});
@@ -362,6 +380,38 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
     finally { setSaving(false); }
   };
 
+  /*
+   * Arama vurgusu (kullanıcı isteği 2026-08-21): sonuç listesinden açılan
+   * belgede aranan kelimenin YERİ gösterilir — "belge bulundu" demek 160+
+   * sayfalık ciltte yetmez. Eşleşme sunucuyla aynı biçimle hesaplanır
+   * (lib/search-highlight.ts); anahtarlı süzgeçler (`ada:32`) zaten hedefli
+   * olduğundan yalnız serbest metin vurgulanır.
+   */
+  const activeSearch=useMemo(()=>parseQuickQuery(searchTerm??"").freeText,[searchTerm]);
+  const activeTokens=useMemo(()=>searchTokens(activeSearch),[activeSearch]);
+  const matchingPages=useMemo(()=>activeTokens.length
+    ?(detail?.pages??[]).filter(page=>matchesAnyToken(page.confirmedText??page.fullText,activeTokens)).map(page=>page.pageNumber)
+    :[],[detail,activeTokens]);
+  const matchingFieldIds=useMemo(()=>activeTokens.length
+    ?new Set((detail?.fields??[]).filter(value=>matchesAnyToken(
+      `${value.value} ${value.normalizedValue??""} ${value.evidenceText}`,activeTokens)).map(value=>value.id))
+    :new Set<string>(),[detail,activeTokens]);
+  const jumpToPage=useCallback((pageNumber:number)=>{
+    setPreviewMode("text");
+    // Metin sekmesi henüz çizilmemiş olabilir; kaydırma bir sonraki kareye
+    // bırakılır. Atlama ANINDA yapılır: 170+ sayfalık ciltte on binlerce
+    // piksellik yumuşak kaydırma animasyonu yolculuk değil bekleme olur.
+    setTimeout(()=>document.getElementById(`okuma-sayfa-${pageNumber}`)?.scrollIntoView({block:"start"}),90);
+  },[]);
+  /** Aramadan gelen memur ilk eşleşmeye kendisi tıklamak zorunda kalmaz. */
+  const [searchJumped,setSearchJumped]=useState(false);
+  useEffect(()=>{setSearchJumped(false);},[documentId]);
+  useEffect(()=>{
+    if(searchJumped||loading||!matchingPages.length) return;
+    setSearchJumped(true);
+    jumpToPage(matchingPages[0]);
+  },[searchJumped,loading,matchingPages,jumpToPage]);
+
   const valuesById=useMemo(()=>new Map((detail?.fields??[]).map(value=>[value.id,value])),[detail]);
   const selected=activeValueId?valuesById.get(activeValueId)??null:null;
   const pageByNumber=useMemo(()=>new Map((detail?.pages??[]).map(page=>[page.pageNumber,page])),[detail]);
@@ -524,9 +574,11 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
               const rejected=Boolean(rejections[valueId])||value.verificationStatus==="REJECTED";
               return <label
                 key={valueId}
-                className={`${value.verificationStatus==="SUGGESTED"?"needs-review":""} ${activeValueId===valueId?"active":""} ${rejected?"rejected":""}`}
+                className={`${value.verificationStatus==="SUGGESTED"?"needs-review":""} ${activeValueId===valueId?"active":""} ${rejected?"rejected":""} ${matchingFieldIds.has(valueId)?"search-hit":""}`}
                 onClick={()=>setActiveValueId(valueId)}
               >
+                {/* Aranan kelime bu kayıtlı bilgide geçiyor; memur listede gözle taramaz. */}
+                {matchingFieldIds.has(valueId)?<i className="field-hit">aramanızla eşleşiyor</i>:null}
                 <span>
                   <b>{group.multiValue?`${group.label} ${value.valueIndex+1}`:group.label}</b>
                   {/* Memur yalnız düz Türkçe eylem cümlesini okur; renk risk
@@ -684,13 +736,23 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
         varsa gerçektir ve herkes için aynıdır. */}
     <div className="review-grid">
       <section className="document">
+        {/* Aramadan gelindiyse ekran ilk sorusu sorulmadan cevabı gösterir:
+            kelime nerede geçiyor. Çipler sayfaya atlar; alan eşleşmeleri
+            sağdaki kartlarda ayrıca işaretlidir. */}
+        {activeTokens.length&&(matchingPages.length||matchingFieldIds.size)?<div className="search-hitbar" role="status">
+          <span>Aradığınız <b>&quot;{activeSearch}&quot;</b> bu belgede {matchingPages.length?`${matchingPages.length} sayfada`:""}
+            {matchingPages.length&&matchingFieldIds.size?" ve ":""}
+            {matchingFieldIds.size?`${matchingFieldIds.size} kayıtlı bilgide`:""} geçiyor.</span>
+          {matchingPages.slice(0,10).map(pageNumber=><button key={pageNumber} type="button" onClick={()=>jumpToPage(pageNumber)}>Sayfa {pageNumber}</button>)}
+          {matchingPages.length>10?<em>+{matchingPages.length-10} sayfa daha</em>:null}
+        </div>:null}
         <div className="document-tools"><span>{detail.document.originalName}</span>{canDownload?<button className="download-original" onClick={()=>{void downloadOriginal()}} type="button"><Download size={14}/> Aslını indir</button>:null}<div className="preview-switch"><button className={previewMode==="image"?"active":""} onClick={()=>setPreviewMode("image")} aria-label="Belge görüntüsü"><ImageIcon size={15}/> Görüntü</button><button className={previewMode==="text"?"active":""} onClick={()=>setPreviewMode("text")} disabled={!detail.pages.length} aria-label="Okunabilir OCR metni"><FileText size={15}/> Okunabilir metin</button></div></div>
         {/* Aslı gösterilirken bunun söylenmesi dürüstlük gereğidir: memur
             "görüntüleme kopyası" ile "asıl" arasındaki farkı bilmek zorunda
             değildir ama ekran ne gösterdiğini gizlememelidir. */}
         {showingOriginal&&previewMode==="image"?<p className="original-note" role="status">
           <ShieldCheck size={13}/> Güvenli görüntüleme kopyası hazırlanıyor; bu sırada belgenin aslını görüyorsunuz.</p>:null}
-        <div className="real-preview">{previewMode==="text"?<article className="ocr-transcript"><header><div><span><FileText size={17}/><b>Onaylı ve aranabilir belge metni</b><em className={textPending?"pending":"verified"}>{textPending?"Kontrol bekliyor":"Personel onaylı"}</em></span><small>Otomatik metni asıl belgeyle karşılaştırın. Kaydedilen her düzeltme sürüm ve SHA-256 denetim iziyle korunur.</small></div>{canReview&&!archived?<button className="text-confirm" onClick={saveText} disabled={savingText||(!textPending&&!hasTextChanges)}>{savingText?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {hasTextChanges?"Düzeltmeleri kaydet":"Metni onayla"}</button>:null}</header>{detail.pages.map(page=><section key={page.pageNumber}><h3><span>Sayfa {page.pageNumber}</span>{page.confirmedBy
+        <div className="real-preview">{previewMode==="text"?<article className="ocr-transcript"><header><div><span><FileText size={17}/><b>Onaylı ve aranabilir belge metni</b><em className={textPending?"pending":"verified"}>{textPending?"Kontrol bekliyor":"Personel onaylı"}</em></span><small>Otomatik metni asıl belgeyle karşılaştırın. Kaydedilen her düzeltme sürüm ve SHA-256 denetim iziyle korunur.</small></div>{canReview&&!archived?<button className="text-confirm" onClick={saveText} disabled={savingText||(!textPending&&!hasTextChanges)}>{savingText?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {hasTextChanges?"Düzeltmeleri kaydet":"Metni onayla"}</button>:null}</header>{detail.pages.map(page=><section key={page.pageNumber} id={`okuma-sayfa-${page.pageNumber}`} className={activeTokens.length&&matchingPages.includes(page.pageNumber)?"search-match":undefined}><h3><span>Sayfa {page.pageNumber}{activeTokens.length&&matchingPages.includes(page.pageNumber)?<em className="page-hit">aramanızla eşleşiyor</em>:null}</span>{page.confirmedBy
                   ?<small>{page.confirmedBy} · {page.confirmedAt?new Date(page.confirmedAt).toLocaleString("tr-TR"):"Onaylandı"}{page.confirmedText!==null&&page.confirmedText!==page.fullText?" · personel düzeltmesi":" · olduğu gibi onaylandı"}</small>
                   :<small>Henüz personel onayı yok</small>}</h3>
                 {/* Arşivlenen metin, insanların arayıp alıntılayacağı metindir.
@@ -699,7 +761,24 @@ export function DocumentReview({ documentId, onBack, permissions }: { documentId
                     Makinenin ne okuduğu da erişilebilir kalmalıdır. */}
                 {page.confirmedText!==null&&page.confirmedText!==page.fullText
                   ?<details className="ocr-original"><summary>OCR&apos;ın okuduğu özgün metni göster</summary><p>{page.fullText||"OCR bu sayfada metin üretmedi."}</p></details>
-                  :null}{canReview&&!archived?<textarea value={textDrafts[page.pageNumber]??page.confirmedText??page.fullText} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>:<p>{(page.confirmedText??page.fullText)||"Bu sayfada okunabilir metin bulunamadı."}</p>}</section>)}</article>:!fileSrc?
+                  :null}{(()=>{
+                  /* Vurgu, düzenlenebilir alanda kutunun İÇİNE çizilemez
+                     (textarea içinde işaretleme yoktur); eşleşen cümleler
+                     kutunun üstünde kırpıntı olarak gösterilir. Salt-okunur
+                     metinde vurgu satır içindedir. */
+                  const display=textDrafts[page.pageNumber]??page.confirmedText??page.fullText;
+                  const ranges=activeTokens.length&&matchingPages.includes(page.pageNumber)
+                    ?findHighlightRanges(display,activeTokens):[];
+                  const snippets=canReview&&!archived&&ranges.length?matchSnippets(display,ranges):[];
+                  return <>
+                    {snippets.length?<div className="match-snippets" aria-label="Aramanızla eşleşen satırlar">
+                      {snippets.map((snippet,index)=><p key={index}>{snippet.leading?"… ":""}{renderMarks(snippet.text,snippet.ranges)}{snippet.trailing?" …":""}</p>)}
+                    </div>:null}
+                    {canReview&&!archived
+                      ?<textarea value={display} onChange={event=>setTextDrafts(current=>({...current,[page.pageNumber]:event.target.value}))} aria-label={`Sayfa ${page.pageNumber} onaylı metni`}/>
+                      :<p>{display?renderMarks(display,ranges):"Bu sayfada okunabilir metin bulunamadı."}</p>}
+                  </>;
+                })()}</section>)}</article>:!fileSrc?
           /*
            * Görüntü henüz yokken boş bir çerçeve göstermek memura "bozuk"
            * der. Kart, sürecin işlediğini söyler ve kopya hazır olunca ekran
