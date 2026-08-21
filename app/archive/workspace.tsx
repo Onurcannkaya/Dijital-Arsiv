@@ -519,7 +519,9 @@ export function ArchiveWorkspace(){
     <button className="bell" onClick={()=>go("review")} disabled={!reviewPending} title={reviewPending?`${reviewPending} belge doğrulama bekliyor`:"Doğrulama bekleyen belge yok"} aria-label={reviewPending?`${reviewPending} belge doğrulama bekliyor; kuyruğu aç`:"Doğrulama bekleyen belge yok"}><Bell size={18}/>{reviewPending?<i/>:null}</button>
     <span className="avatar">{initials}</span><div><b>{user?.displayName??"Oturum bekleniyor"}</b><small>{user?.roleLabel??"Yetki doğrulanıyor"}{user&&user.unit!=="*"?` · ${user.unit}`:""}</small></div></div></header><main id="main-content" className={selectedId?"review-main":"main"}>
     {selectedId
-      ?<DocumentReview documentId={selectedId} onBack={backToList} permissions={user?.permissions??[]}/>
+      /* Aramadan açılan belgede aranan kelimenin yeri işaretlenir; sorgu bu
+         yüzden inceleme ekranına taşınır. Arama yokken boş geçer. */
+      ?<DocumentReview documentId={selectedId} onBack={backToList} permissions={user?.permissions??[]} searchTerm={searching?query.trim():""}/>
       :view==="users"?<UsersScreen/>
       :view==="activity"?<ActivityScreen onOpenDocument={openDocument}/>
       :view==="settings"?<SettingsScreen/>

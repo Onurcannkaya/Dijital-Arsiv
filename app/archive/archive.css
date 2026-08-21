@@ -532,3 +532,16 @@ tr.newest-row td{background:color-mix(in srgb,var(--ar-green-soft) 35%,transpare
 /* Kopya hazirlanirken belge asli gosteriliyorsa ekran bunu soyler. */
 .original-note{display:flex;align-items:center;gap:7px;margin:0 0 8px;padding:7px 11px;font-size:12px;color:var(--ar-muted);border:1px solid var(--ar-border);border-radius:8px;background:var(--ar-surface-2)}
 .original-note svg{color:var(--ar-blue);flex-shrink:0}
+
+/* ---- Arama vurgusu (document-review.tsx): kelime nerede geciyor ---- */
+.search-hitbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;padding:9px 12px;font-size:12.5px;border:1px solid var(--gold-600);border-radius:9px;background:color-mix(in srgb,var(--gold-600) 8%,transparent);color:var(--ar-text)}
+.search-hitbar b{color:var(--ar-text)}
+.search-hitbar button{height:26px;padding:0 10px;font-size:12px;border:1px solid var(--ar-border);border-radius:13px;background:var(--ar-surface);color:var(--ar-text);cursor:pointer}
+.search-hitbar button:hover{border-color:var(--gold-600);color:var(--gold-700)}
+.search-hitbar em{font-style:normal;font-size:12px;color:var(--ar-muted)}
+.ocr-transcript mark,.match-snippets mark{background:color-mix(in srgb,var(--gold-600) 26%,transparent);color:inherit;border-radius:3px;padding:0 2px;box-shadow:0 0 0 1px var(--gold-600)}
+.page-hit{margin-left:8px;font-style:normal;font-size:11px;padding:2px 8px;border-radius:10px;background:color-mix(in srgb,var(--gold-600) 12%,transparent);border:1px solid var(--gold-600);color:var(--ar-text)}
+.match-snippets{display:flex;flex-direction:column;gap:6px;margin:0 0 8px;padding:9px 11px;border-left:3px solid var(--gold-600);border-radius:6px;background:var(--ar-surface-2)}
+.match-snippets p{margin:0;font-size:12.5px;line-height:1.6;color:var(--ar-muted)}
+.evidence-fields label.search-hit{border-color:var(--gold-600)}
+.field-hit{align-self:flex-start;font-style:normal;font-size:11px;padding:2px 8px;border-radius:10px;background:color-mix(in srgb,var(--gold-600) 12%,transparent);border:1px solid var(--gold-600);color:var(--ar-text)}
