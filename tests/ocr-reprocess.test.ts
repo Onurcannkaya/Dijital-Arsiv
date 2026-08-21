@@ -178,5 +178,29 @@ test("inceleme ekranı başarısız koşudan sonra paneli bayat bırakmaz", asyn
     "hata mesajı yenilemeden önce yazılıyor; load onu silecektir");
   // Önizleme hatası ayrı durumdadır ve personelin işlemini ezemez.
   assert.match(source, /const \[previewError,setPreviewError\]=useState\(""\)/);
-  assert.match(source, /setPreviewError\(reason instanceof Error/);
+  // Asıl-gösterim geri düşüşü eklendiğinde (2026-08-21) hata mesajı önce
+  // `message` değişkenine alınır oldu; kilidin amacı değişmedi — önizleme
+  // hatası ortak `error` durumuna değil kendi durumuna yazılır.
+  assert.match(source, /setPreviewError\(message\)/);
+  assert.doesNotMatch(process, /setPreviewError\(/);
+});
+
+test("görüntüleme kopyası hazırlanırken yetkili memur belgenin aslını çerçevede görür", async () => {
+  /*
+   * Yerelde render servisi hiç koşmadığı için "hazırlanıyor" kartı süresiz
+   * kalıyor ve memur belgeye bakamıyordu (kullanıcı bunu iki kez bildirdi).
+   * Geri düşüş politika değişikliği DEĞİLDİR: yalnız indirme yetkisi olan
+   * kullanıcıda, zaten alabildiği DOWNLOAD biletiyle çalışır; sunucu tarafı
+   * yetki denetimi document-access-route.test.ts'te ayrıca kilitlidir.
+   */
+  const source = await (await import("node:fs/promises"))
+    .readFile(new URL("../app/archive/document-review.tsx", import.meta.url), "utf8");
+  // Geri düşüş yalnız "hazırlanıyor" SÜREÇ durumunda ve yetkiyle tetiklenir;
+  // gerçek hatalar (yetki reddi, kayıp nesne) aslı göstermeyi denemez.
+  assert.match(source, /message\.includes\("hazırlanıyor"\)&&permissions\.includes\("document\.download"\)/);
+  // Asıl, indirme kapsamının biletiyle alınır — görüntüleme kapsamıyla değil.
+  const fallback = /includes\("hazırlanıyor"\)[\s\S]*?requestTicket\("DOWNLOAD"\)[\s\S]*?"x-archive-access-scope":"DOWNLOAD"/.exec(source);
+  assert.ok(fallback, "geri düşüş DOWNLOAD bileti ve kapsamıyla istekte bulunmalı");
+  // Ekran ne gösterdiğini söyler: aslı sessizce kopya gibi sunmak dürüst değildir.
+  assert.match(source, /bu sırada belgenin aslını görüyorsunuz/);
 });

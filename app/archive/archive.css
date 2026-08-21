@@ -528,3 +528,7 @@ tr.newest-row td{background:color-mix(in srgb,var(--ar-green-soft) 35%,transpare
 .preview-pending button{margin-top:6px;display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 14px}
 
 .preview-pending-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:6px}
+
+/* Kopya hazirlanirken belge asli gosteriliyorsa ekran bunu soyler. */
+.original-note{display:flex;align-items:center;gap:7px;margin:0 0 8px;padding:7px 11px;font-size:12px;color:var(--ar-muted);border:1px solid var(--ar-border);border-radius:8px;background:var(--ar-surface-2)}
+.original-note svg{color:var(--ar-blue);flex-shrink:0}
