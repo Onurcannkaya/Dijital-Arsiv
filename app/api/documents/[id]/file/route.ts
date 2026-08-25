@@ -7,6 +7,7 @@ import {
   type AccessScope, type ViewSession,
 } from "../../../../../lib/archive-storage";
 import { logEvent } from "../../../../../lib/observability";
+import { contentDisposition } from "../../../../../lib/content-disposition";
 
 type RouteContext = { params: Promise<{ id: string }> };
 type FileRecord = { original_name: string; unit: string };
@@ -179,7 +180,6 @@ export async function GET(request: Request, context: RouteContext) {
     return jsonError("Erişim denetim kaydı oluşturulamadı; dosya sunulmadı.", 503);
   }
 
-  const safeName = record.original_name.replace(/[\r\n"\\/]/g, "_");
   const bodySize = range ? object.bodySize : object.size;
   return new Response(object.body, {
     status: range ? 206 : 200,
@@ -188,7 +188,7 @@ export async function GET(request: Request, context: RouteContext) {
       "content-length": String(bodySize),
       ...(range ? { "content-range": `bytes ${range.offset}-${range.offset + range.length - 1}/${servable.byte_size}` } : {}),
       ...(!isDownload ? { "accept-ranges": "bytes" } : {}),
-      "content-disposition": `${isDownload ? "attachment" : "inline"}; filename="${safeName}"`,
+      "content-disposition": contentDisposition(isDownload ? "attachment" : "inline", record.original_name),
       "cache-control": "no-store, private",
       "pragma": "no-cache",
       "referrer-policy": "no-referrer",

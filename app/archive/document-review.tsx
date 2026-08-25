@@ -135,18 +135,6 @@ export function DocumentReview({ documentId, onBack, permissions, searchTerm }: 
    * gerçek hatalar (yetki, kayıp nesne) yeniden denenmez, açıkça gösterilir.
    */
   const [previewRetry,setPreviewRetry]=useState(0);
-  /**
-   * Görüntüleme kopyası HAZIRLANIRKEN indirme yetkisi olan kullanıcıya
-   * belgenin aslı gösterilir. Bu bir politika değişikliği değildir: aynı
-   * kullanıcı aynı belgeyi "Aslını indir" ile zaten alabiliyor; burada da
-   * aynı DOWNLOAD bileti kullanılır ve aynı şekilde denetlenir
-   * (S3_DEPOLAMA_VE_DEGISMEZLIK_POLITIKASI.md §5'in izin verdiği tek asıl
-   * erişim yolu). Değişen yalnız sunumdur — memur dosyayı indirip ayrı
-   * programda açmak yerine aynı çerçevede görür. Yerelde render servisi hiç
-   * koşmadığı için bu tek gerçek önizlemedir; üretimde de kopya üretilene
-   * kadarki boşluğu doldurur.
-   */
-  const [showingOriginal,setShowingOriginal]=useState(false);
   useEffect(()=>{
     if(!previewError||fileSrc) return;
     if(!previewError.includes("hazırlanıyor")) return;
@@ -188,7 +176,6 @@ export function DocumentReview({ documentId, onBack, permissions, searchTerm }: 
       // Temizlik efekt gövdesinde değil burada: eşzamanlı setState basamaklı
       // yeniden çizime yol açar.
       setPreviewError("");
-      setShowingOriginal(false);
       try {
         const ticket=await requestTicket("VIEW");
         const response=await fetch(detail.document.fileUrl,{
@@ -201,31 +188,17 @@ export function DocumentReview({ documentId, onBack, permissions, searchTerm }: 
         setFileSrc(objectUrl);
       } catch(reason) {
         const message=reason instanceof Error?reason.message:"Belge görüntüsü alınamadı.";
-        // Kopya hazırlanırken çıkmaz sokak yok: indirme yetkisi olan memura
-        // belgenin aslı aynı çerçevede gösterilir (yetki notu showingOriginal
-        // üstünde). Asıl da alınamazsa süreç kartına düşülür; asıl gösterimi
-        // bir kolaylıktır, kendi hatasını memura ayrıca taşımaz.
-        if(message.includes("hazırlanıyor")&&permissions.includes("document.download")){
-          try {
-            const downloadTicket=await requestTicket("DOWNLOAD");
-            const original=await fetch(detail.document.fileUrl,{
-              headers:{authorization:`ArchiveTicket ${downloadTicket}`,"x-archive-access-scope":"DOWNLOAD"},
-            });
-            if(original.ok){
-              const blob=await original.blob();
-              if(cancelled) return;
-              objectUrl=URL.createObjectURL(blob);
-              setFileSrc(objectUrl);
-              setShowingOriginal(true);
-              return;
-            }
-          } catch { /* süreç kartı zaten doğru durumu anlatıyor */ }
+        if(!cancelled){
+          // PDF aslı hiçbir zaman önizlemeye geri düşmez. Güvenli türev henüz
+          // hazır değilse personel, varsa OCR metninde çalışmaya devam eder;
+          // asıl indirme yalnız açık düğme eylemiyle ve DOWNLOAD biletiyle olur.
+          if(message.includes("hazırlanıyor")&&detail.pages.length) setPreviewMode("text");
+          setPreviewError(message);
         }
-        if(!cancelled) setPreviewError(message);
       }
     })();
     return()=>{cancelled=true;if(objectUrl) URL.revokeObjectURL(objectUrl);};
-  },[detail,requestTicket,previewRetry,permissions]);
+  },[detail,requestTicket,previewRetry]);
 
   const downloadOriginal=async()=>{
     if(!detail) return;
@@ -747,11 +720,6 @@ export function DocumentReview({ documentId, onBack, permissions, searchTerm }: 
           {matchingPages.length>10?<em>+{matchingPages.length-10} sayfa daha</em>:null}
         </div>:null}
         <div className="document-tools"><span>{detail.document.originalName}</span>{canDownload?<button className="download-original" onClick={()=>{void downloadOriginal()}} type="button"><Download size={14}/> Aslını indir</button>:null}<div className="preview-switch"><button className={previewMode==="image"?"active":""} onClick={()=>setPreviewMode("image")} aria-label="Belge görüntüsü"><ImageIcon size={15}/> Görüntü</button><button className={previewMode==="text"?"active":""} onClick={()=>setPreviewMode("text")} disabled={!detail.pages.length} aria-label="Okunabilir OCR metni"><FileText size={15}/> Okunabilir metin</button></div></div>
-        {/* Aslı gösterilirken bunun söylenmesi dürüstlük gereğidir: memur
-            "görüntüleme kopyası" ile "asıl" arasındaki farkı bilmek zorunda
-            değildir ama ekran ne gösterdiğini gizlememelidir. */}
-        {showingOriginal&&previewMode==="image"?<p className="original-note" role="status">
-          <ShieldCheck size={13}/> Güvenli görüntüleme kopyası hazırlanıyor; bu sırada belgenin aslını görüyorsunuz.</p>:null}
         <div className="real-preview">{previewMode==="text"?<article className="ocr-transcript"><header><div><span><FileText size={17}/><b>Onaylı ve aranabilir belge metni</b><em className={textPending?"pending":"verified"}>{textPending?"Kontrol bekliyor":"Personel onaylı"}</em></span><small>Otomatik metni asıl belgeyle karşılaştırın. Kaydedilen her düzeltme sürüm ve SHA-256 denetim iziyle korunur.</small></div>{canReview&&!archived?<button className="text-confirm" onClick={saveText} disabled={savingText||(!textPending&&!hasTextChanges)}>{savingText?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {hasTextChanges?"Düzeltmeleri kaydet":"Metni onayla"}</button>:null}</header>{detail.pages.map(page=><section key={page.pageNumber} id={`okuma-sayfa-${page.pageNumber}`} className={activeTokens.length&&matchingPages.includes(page.pageNumber)?"search-match":undefined}><h3><span>Sayfa {page.pageNumber}{activeTokens.length&&matchingPages.includes(page.pageNumber)?<em className="page-hit">aramanızla eşleşiyor</em>:null}</span>{page.confirmedBy
                   ?<small>{page.confirmedBy} · {page.confirmedAt?new Date(page.confirmedAt).toLocaleString("tr-TR"):"Onaylandı"}{page.confirmedText!==null&&page.confirmedText!==page.fullText?" · personel düzeltmesi":" · olduğu gibi onaylandı"}</small>
                   :<small>Henüz personel onayı yok</small>}</h3>
@@ -800,7 +768,7 @@ export function DocumentReview({ documentId, onBack, permissions, searchTerm }: 
                 <Download size={14}/> Aslını indirip bilgisayarınızda açın</button>:null}
             </div>
           </div>
-        :isImage?<div className="image-evidence"><img src={fileSrc} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&hasEvidenceBox(selected.box)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}>{/* design.md §3.3: bitişik altın ad etiketi — yalnız alan adı, yüzde yok. */}<b>{selected.label}</b></span>:null}</div>:<object data={fileSrc} type="application/pdf" aria-label={`${detail.document.referenceNo} ${showingOriginal?"belge aslı":"güvenli görüntüleme kopyası"}`}><p>Belge görüntüsü bu tarayıcıda gösterilemiyor.</p></object>}</div>
+        :isImage?<div className="image-evidence"><img src={fileSrc} alt={`${detail.document.referenceNo} belge görüntüsü`}/>{selected&&evidencePage&&hasEvidenceBox(selected.box)?<span className="evidence-box" style={{left:`${selected.box[0]/evidencePage.width*100}%`,top:`${selected.box[1]/evidencePage.height*100}%`,width:`${(selected.box[2]-selected.box[0])/evidencePage.width*100}%`,height:`${(selected.box[3]-selected.box[1])/evidencePage.height*100}%`}}>{/* design.md §3.3: bitişik altın ad etiketi — yalnız alan adı, yüzde yok. */}<b>{selected.label}</b></span>:null}</div>:<object data={fileSrc} type="application/pdf" aria-label={`${detail.document.referenceNo} güvenli görüntüleme kopyası`}><p>Belge görüntüsü bu tarayıcıda gösterilemiyor.</p></object>}</div>
         {/* §9.2 kararı: toplu karar paneli belge alanının üzerine kayar —
             geniş yer, bağlamdan kopmadan. Kapanınca belge yine görünür. */}
         {bulkOpen&&canReview&&!archived?<RelationBulkPanel

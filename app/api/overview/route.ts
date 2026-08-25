@@ -54,11 +54,14 @@ export async function GET(request: Request) {
         WHERE (? = '*' OR d.unit = ?)`).bind(scope, scope).first<Record<string, number>>(),
       bindings.DB.prepare(`SELECT
           (SELECT COUNT(*) FROM extracted_fields f INNER JOIN archive_documents d ON d.id = f.document_id
-            WHERE f.verification_status = 'SUGGESTED' AND (? = '*' OR d.unit = ?)) AS values_pending,
+            WHERE f.verification_status = 'SUGGESTED' AND d.status IN ('review', 'ready')
+              AND (? = '*' OR d.unit = ?)) AS values_pending,
           (SELECT COUNT(*) FROM document_entity_relations r INNER JOIN archive_documents d ON d.id = r.document_id
-            WHERE r.verification_status = 'SUGGESTED' AND (? = '*' OR d.unit = ?)) AS relations_pending,
+            WHERE r.verification_status = 'SUGGESTED' AND d.status IN ('review', 'ready')
+              AND (? = '*' OR d.unit = ?)) AS relations_pending,
           (SELECT COUNT(*) FROM ocr_pages p INNER JOIN archive_documents d ON d.id = p.document_id
-            WHERE p.confirmed_text IS NULL AND (? = '*' OR d.unit = ?)) AS pages_pending`)
+            WHERE p.confirmed_text IS NULL AND d.status IN ('review', 'ready')
+              AND (? = '*' OR d.unit = ?)) AS pages_pending`)
         .bind(scope, scope, scope, scope, scope, scope).first<Record<string, number>>(),
       bindings.DB.prepare(`SELECT COUNT(*) AS objects, COALESCE(SUM(o.byte_size), 0) AS bytes,
           -- Kaba gösterge: nokta içeren anahtarlar. Politika uyumlu render
