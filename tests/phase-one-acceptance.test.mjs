@@ -267,6 +267,11 @@ test("koşu betiği ve workflow tam kalite, preflight, kanıt ve attestation kap
   assert.doesNotMatch(workflow, /pull_request/);
   assert.match(workflow, /npm run verify/);
   assert.match(workflow, /scripts\/verify-deployment\.mjs/);
+  assert.match(workflow, /scripts\/verify-phase-zero-evidence\.mjs/);
+  assert.match(workflow, /gh attestation verify/);
+  assert.match(workflow, /schema_version=\$\{p\.schemaVersion\}/);
+  assert.match(workflow, /ACCEPTANCE_SCHEMA_VERSION: \$\{\{ steps\.preflight\.outputs\.schema_version \}\}/);
+  assert.doesNotMatch(workflow, /ACCEPTANCE_SCHEMA_VERSION: \$\{\{ vars\./);
   assert.match(workflow, /actions\/attest@/);
   assert.match(workflow, /github\.run_attempt/);
   for (const value of RESULTS) assert.equal(typeof value, "string");

@@ -35,8 +35,7 @@ function fakeOcrService() {
   // rota baytları doğrulamadan koyar (görüntü doğrulaması OCR servisindedir).
   const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 7)]);
   const server = createServer((request, response) => {
-    let body = "";
-    request.on("data", (chunk) => { body += chunk; });
+    request.on("data", () => { /* İstek gövdesi tüketilerek akış tamamlanır. */ });
     request.on("end", () => {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({

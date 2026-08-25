@@ -17,7 +17,7 @@ type FieldRow = { id:string; field_name:string; value_index:number; field_value:
   rejection_reason_code:string|null; rejection_reason_label:string|null; rejection_reason_note:string|null };
 type PageRow = { page_number:number; width:number; height:number; raw_text:string; full_text:string; search_text:string; confirmed_text:string|null; confirmed_by:string|null; confirmed_at:string|null; words_json:string; average_confidence:number; model:string };
 type AuditRow = { event_number:number; actor:string; action:string; details_json:string; previous_hash:string|null; event_hash:string; created_at:string };
-type OcrJobRow = { status:string; attempt:number; max_attempts:number; error_message:string|null;
+type OcrJobRow = { id:string; status:string; model:string|null; attempt:number; max_attempts:number; error_message:string|null;
   next_attempt_at:string|null; dead_lettered_at:string|null; last_attempt_at:string|null };
 type ObjectRow = { id:string; object_class:string; media_type:string; byte_size:number; sha256:string; retention_status:string; legal_hold_status:string; generator:string|null; derived_from_id:string|null; created_at:string };
 
@@ -52,7 +52,7 @@ export async function GET(request: Request, context: RouteContext) {
      * "neden başarısız oldu, tekrar denemeli miyim" sorusunu yanıtlar; bu
      * bilgi olmadan yeniden çalıştırma körlemesine yapılır.
      */
-    bindings.DB.prepare(`SELECT status, attempt, max_attempts, error_message,
+    bindings.DB.prepare(`SELECT id, status, model, attempt, max_attempts, error_message,
         next_attempt_at, dead_lettered_at, last_attempt_at FROM processing_jobs
       WHERE document_id = ? AND kind = 'ocr' ORDER BY updated_at DESC LIMIT 1`)
       .bind(id).first<OcrJobRow>(),
@@ -172,7 +172,9 @@ export async function GET(request: Request, context: RouteContext) {
       generator:object.generator, derivedFromId:object.derived_from_id, createdAt:object.created_at,
     })),
     ocrJob: ocrJob ? {
+      id: ocrJob.id,
       status: ocrJob.status,
+      model: ocrJob.model,
       attempt: Number(ocrJob.attempt),
       maxAttempts: Number(ocrJob.max_attempts),
       deadLettered: Boolean(ocrJob.dead_lettered_at),

@@ -11,6 +11,12 @@ Sözleşme kaynakları: yetenek tanımları `scripts/phase-one-acceptance-core.m
 (`resolveCapabilities`), ortam eşlemesi `scripts/run-phase-one-acceptance.mjs`
 (`scopedConfig`), test ölçütleri `FAZ_1_KANIT_REHBERI.md`.
 
+> **Yerleşim notu:** §2'deki `deploy.yml` komutları Cloudflare pilot
+> sağlayıcısına aittir. Kurum içi staging, P8 kapsamında hazırlanacak
+> `.github/workflows/deploy-onprem.yml` ile aynı imzalı
+> `deployment-evidence-<run-id>` sözleşmesini üretmelidir. Bu workflow ve erişen
+> runner kurulmadan kurum içi Faz 0/Faz 1 canlı kapısı açılmış sayılmaz.
+
 ## 0. İlkeler
 
 - **Sırlar environment düzeyine konur, repo düzeyine değil.** Workflow
@@ -87,23 +93,45 @@ gh secret set ACCEPTANCE_UPLOADER_IDENTITY --env phase-one-acceptance # ör. kab
 gh secret set ACCEPTANCE_PROXY_TOKEN --env phase-one-acceptance
 
 gh variable set ACCEPTANCE_UPLOADER_UNIT --env phase-one-acceptance --body "Kabul Testleri"
-gh variable set ACCEPTANCE_SCHEMA_VERSION --env phase-one-acceptance --body "<sema-surumu>"
-gh variable set ACCEPTANCE_ADAPTER_PROFILE --env phase-one-acceptance --body "r2-standard"
+gh variable set ACCEPTANCE_ADAPTER_PROFILE --env phase-one-acceptance --body "minio-onprem-v1"
 ```
+
+Şema sürümü elle girilmez. Workflow, aynı koşudaki `verify-deployment.mjs`
+ön kontrolünün canlı staging'den doğruladığı sürümü kullanır. Eski
+`ACCEPTANCE_SCHEMA_VERSION` değişkeni artık etkisizdir ve kaldırılabilir.
 
 ### 3.1 Kapı girdileri (manifest çıkış ölçütleri)
 
-Bu dört değişken olmadan teknik kapı hiçbir koşuda açılmaz:
+Faz 0 sonucu ve özeti artık elle beyan edilmez. Güvenilir zincir:
+
+1. `.github/workflows/deploy.yml` başarılı koşar ve imzalı
+   `deployment-evidence-<run-id>` kanıtını üretir.
+2. Kullanıcının staging'e yüklediği pilot belge cron OCR'ından geçer, personel
+   tarafından doğrulanır ve arşivlenir.
+3. `.github/workflows/phase-zero-evidence.yml`, dağıtım koşu kimliği ile pilot
+   oturum kimliği verilerek çalıştırılır. Canlı sağlık/şema, tek asıl ve OCR
+   işi, `system:cron` OCR olayı ve `document.archived` olayını doğrulayıp imzalı
+   `phase-zero-evidence-<run-id>` üretir.
+4. Faz 1 elle tetiklenirken bu koşu kimliği `phase_zero_run_id` girdisine
+   verilir. Etiket tetiklemesi kullanılacaksa aynı değer environment'ta tutulur:
 
 ```bash
-gh variable set ACCEPTANCE_PHASE_ZERO_RESULT --env phase-one-acceptance --body "PASS"
-gh variable set ACCEPTANCE_PHASE_ZERO_EVIDENCE_DIGEST --env phase-one-acceptance --body "<faz0-kanit-sha256>"
+gh variable set ACCEPTANCE_PHASE_ZERO_RUN_ID --env phase-one-acceptance --body "<faz0-workflow-run-id>"
+```
+
+Teknik kapının güvenlik bulgusu girdileri ayrıca sıfır olmalıdır:
+
+```bash
 gh variable set ACCEPTANCE_OPEN_CRITICAL_FINDINGS --env phase-one-acceptance --body "0"
 gh variable set ACCEPTANCE_OPEN_HIGH_FINDINGS --env phase-one-acceptance --body "0"
 ```
 
-> Bu değerler beyandır ama manifestte değişmez kanıt olarak saklanır; yanlış
-> beyan denetimde görünür. Faz 0 özeti gerçek kanıt paketinin SHA-256'sıdır.
+Bu değerler yalnız Bilgi Güvenliği'nin kapsamlandırdığı tarama raporundan sonra
+`0` yapılır. 2026-08-25 yerel provasında üretim bağımlılıkları
+`npm audit --omit=dev` ile **0** bulgu vermiştir; tam geliştirme ağacında ise
+Vinext/image-size zincirinde 2 yüksek ve Drizzle/esbuild zincirinde 4 orta,
+yalnız geliştirme zamanı bulgusu kalmıştır. Bunlar kabul kapsamı dışında
+bırakılacaksa gerekçeli risk kaydı, aksi halde uyumlu yükseltme/migrasyon gerekir.
 
 ### 3.2 Yükleyici kimliğinin yetkilendirilmesi
 

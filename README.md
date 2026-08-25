@@ -169,8 +169,8 @@ döndürür. Asıl indirme ayrı `document.download` yetkisi ve denetim olayı i
 
 ## Bilinen açık kalemler
 
-- Depolama kapasitesi kotası, yedekleme durumu ve servis sağlığı **ölçülmüyor**.
-  `/api/overview` bunları uydurmaz, `unmeasured` listesinde bildirir.
+- Depolama kapasitesi, yedekleme ve servis sağlığı kodda ölçülür; gerçek eşik,
+  ikinci hata alanı ve alarm kanalı kurum içi staging pilotunda kanıtlanmalıdır.
 - Politika öncesi yüklenmiş nesne anahtarları dosya adı içerir. Asıl nesne
   değiştirilemez olduğu için bunlar yalnız yetkili yeniden kabulle taşınabilir;
   sayı `/api/overview` içinde `storage.legacyKeys` olarak raporlanır.
@@ -178,11 +178,11 @@ döndürür. Asıl indirme ayrı `document.download` yetkisi ve denetim olayı i
   için saklama-imha iş akışı gerekir; bu ayrı bir iş paketidir.
 - PDF renderer'ının gerçek `DERIVATIVE_FILES` bağı, salt-okunur asıl kimliği,
   registry imaj özeti ve T-03 staging kanıtı henüz canlı ortamda doğrulanmalıdır.
-- PDF türevi için tek kullanımlık görüntüleme bileti ve byte-range oturumu F1.9
-  kapsamındadır; F1.7 bölümlü türevi yetkili API üzerinden fail-closed sunar.
-- Faz 0 staging çıkış testi, gerçek Sites kaynağı ve dışarıdan erişilebilir TLS'li
-  OCR servis adresi sağlandığında tamamlanacaktır; ayrıntılar
-  `FAZ_0_ISLETIM_REHBERI.md` içindedir.
+- Tek kullanımlık görüntüleme bileti, byte-range oturumu ve görev ayrılığı F1.9
+  kapsamında uygulanmıştır; canlı negatif kanıt T-04/T-05/T-06/K-4 koşularını bekler.
+- Faz 0 kod kapısı imzalı dağıtım ve pilot kanıt workflow'larıyla hazırdır;
+  kurum içi staging makinesi/runner/sırlar kurulup gerçek pilot belge cron OCR'ı
+  ve personel arşivlemesinden geçmeden Faz 0 tamamlanmış sayılmaz.
 
 OCR servisi testleri ayrı çalışır (`fastapi` ve `paddleocr` kurulu bir ortam gerekir):
 

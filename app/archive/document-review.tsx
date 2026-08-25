@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- Özel R2 dosya rotası Next Image iyileştirmesine uygun değildir. */
 
 import { AlertTriangle, ArrowLeft, CheckCircle2, Download, FileClock, FileCog, FileText, Gauge, History, Image as ImageIcon, LoaderCircle, LockKeyhole, Play, Plus, RotateCcw, Save, ScanLine, ShieldCheck, Sparkles, ThumbsDown, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { EntityRelation, EntityRelations } from "./entity-relations";
 import { auditLabels } from "./audit-labels";
 import {
@@ -404,13 +404,13 @@ export function DocumentReview({ documentId, onBack, permissions, searchTerm }: 
     setTimeout(()=>document.getElementById(`okuma-sayfa-${pageNumber}`)?.scrollIntoView({block:"start"}),90);
   },[]);
   /** Aramadan gelen memur ilk eşleşmeye kendisi tıklamak zorunda kalmaz. */
-  const [searchJumped,setSearchJumped]=useState(false);
-  useEffect(()=>{setSearchJumped(false);},[documentId]);
+  const searchJumpKey=`${documentId}:${activeSearch}`;
+  const lastSearchJumpRef=useRef<string|null>(null);
   useEffect(()=>{
-    if(searchJumped||loading||!matchingPages.length) return;
-    setSearchJumped(true);
+    if(lastSearchJumpRef.current===searchJumpKey||loading||!matchingPages.length) return;
+    lastSearchJumpRef.current=searchJumpKey;
     jumpToPage(matchingPages[0]);
-  },[searchJumped,loading,matchingPages,jumpToPage]);
+  },[searchJumpKey,loading,matchingPages,jumpToPage]);
 
   const valuesById=useMemo(()=>new Map((detail?.fields??[]).map(value=>[value.id,value])),[detail]);
   const selected=activeValueId?valuesById.get(activeValueId)??null:null;

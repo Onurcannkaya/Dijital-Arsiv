@@ -48,8 +48,12 @@ if (health.status !== "ready") {
 
 console.log(JSON.stringify({
   event: "deployment.verified",
+  environment: process.env.DEPLOY_ENV ?? null,
+  gitCommit: process.env.DEPLOY_GIT_COMMIT ?? null,
   baseUrl,
   migration,
   schemaVersion: migrationState.currentVersion,
   health: health.status,
+  healthChecks: health.checks,
+  correlationId: health.correlationId ?? null,
 }));

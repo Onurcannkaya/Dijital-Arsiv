@@ -43,10 +43,24 @@ type EventRow = {
 };
 
 type CountRow = {
+  document_id: string | null;
   document_count: number;
   original_count: number;
   ocr_job_count: number;
   verified_promotion_count: number;
+};
+
+type PilotLifecycleRow = {
+  document_id: string;
+  document_status: string;
+  uploaded_by: string;
+  ocr_job_id: string | null;
+  ocr_job_status: string | null;
+  ocr_model: string | null;
+  page_count: number;
+  cron_ocr_event: number | null;
+  archive_event: number | null;
+  archive_actor: string | null;
 };
 
 
@@ -240,6 +254,8 @@ export async function readAcceptanceEvidence(db: D1Database, sessionId: string) 
   ).bind(sessionId).all<EventRow>();
   const countQuery = db.prepare(
     "SELECT "
+    + "(SELECT p.document_id FROM promotion_jobs p WHERE p.upload_session_id = ? "
+    + "AND p.status = 'COMPLETED' ORDER BY p.created_at LIMIT 1) AS document_id, "
     + "(SELECT COUNT(DISTINCT d.id) FROM promotion_jobs p INNER JOIN archive_documents d "
     + "ON d.id = p.document_id WHERE p.upload_session_id = ?) AS document_count, "
     + "(SELECT COUNT(DISTINCT b.id) FROM promotion_jobs p INNER JOIN binary_objects b "
@@ -250,7 +266,7 @@ export async function readAcceptanceEvidence(db: D1Database, sessionId: string) 
     + "WHERE p.upload_session_id = ?) AS ocr_job_count, "
     + "(SELECT COUNT(*) FROM promotion_receipts r WHERE r.upload_session_id = ? "
     + "AND r.result = 'VERIFIED') AS verified_promotion_count",
-  ).bind(sessionId, sessionId, sessionId, sessionId).first<CountRow>();
+  ).bind(sessionId, sessionId, sessionId, sessionId, sessionId).first<CountRow>();
   const originalQuery = db.prepare(`SELECT DISTINCT b.id, b.sha256, b.byte_size, b.storage_version_id
     FROM promotion_jobs p INNER JOIN binary_objects b ON b.id = p.binary_object_id
     WHERE p.upload_session_id = ? AND b.object_class = 'original' ORDER BY b.id`)
@@ -275,8 +291,25 @@ export async function readAcceptanceEvidence(db: D1Database, sessionId: string) 
     ORDER BY a.event_number`).bind(sessionId).all<AccessAuditRow>();
   const keyMigrationQuery = db.prepare(
     "SELECT status, COUNT(*) AS count FROM legacy_key_migrations GROUP BY status").all<KeyMigrationCountRow>();
-  const [receiptResult, eventResult, counts, originals, derivatives, derivativeJobs, accessAudit, keyMigrations] = await Promise.all([
-    receiptQuery, eventQuery, countQuery, originalQuery, derivativeQuery, derivativeJobQuery, accessAuditQuery, keyMigrationQuery,
+  const pilotLifecycleQuery = db.prepare(`SELECT d.id AS document_id,
+      d.status AS document_status, d.uploaded_by,
+      j.id AS ocr_job_id, j.status AS ocr_job_status, j.model AS ocr_model,
+      (SELECT COUNT(*) FROM ocr_pages op WHERE op.document_id = d.id) AS page_count,
+      (SELECT a.event_number FROM audit_events a WHERE a.document_id = d.id
+        AND a.action = 'ocr.completed' AND a.actor = 'system:cron'
+        ORDER BY a.event_number DESC LIMIT 1) AS cron_ocr_event,
+      (SELECT a.event_number FROM audit_events a WHERE a.document_id = d.id
+        AND a.action = 'document.archived' ORDER BY a.event_number DESC LIMIT 1) AS archive_event,
+      (SELECT a.actor FROM audit_events a WHERE a.document_id = d.id
+        AND a.action = 'document.archived' ORDER BY a.event_number DESC LIMIT 1) AS archive_actor
+    FROM promotion_jobs p INNER JOIN archive_documents d ON d.id = p.document_id
+    LEFT JOIN processing_jobs j ON j.document_id = d.id AND j.kind = 'ocr'
+    WHERE p.upload_session_id = ? AND p.status = 'COMPLETED'
+    ORDER BY j.updated_at DESC LIMIT 1`).bind(sessionId).first<PilotLifecycleRow>();
+  const [receiptResult, eventResult, counts, originals, derivatives, derivativeJobs,
+    accessAudit, keyMigrations, pilotLifecycle] = await Promise.all([
+    receiptQuery, eventQuery, countQuery, originalQuery, derivativeQuery, derivativeJobQuery,
+    accessAuditQuery, keyMigrationQuery, pilotLifecycleQuery,
   ]);
 
   const receipt = preferredReceipt(session.status, receiptResult.results ?? []);
@@ -286,6 +319,7 @@ export async function readAcceptanceEvidence(db: D1Database, sessionId: string) 
     terminalStatus: session.status,
     decisionCode: decisionCode(session.status, receipt),
     duplicateOfDocumentId: session.duplicate_of_document_id,
+    documentId: counts?.document_id ?? null,
     receipt: safeReceipt(receipt),
     transitionChain: await verifyEventChain(session, eventResult.results ?? []),
     counts: {
@@ -329,6 +363,18 @@ export async function readAcceptanceEvidence(db: D1Database, sessionId: string) 
       byStatus: Object.fromEntries((keyMigrations.results ?? [])
         .map((row) => [row.status, Number(row.count)])),
     },
+    pilotLifecycle: pilotLifecycle ? {
+      documentId: pilotLifecycle.document_id,
+      documentStatus: pilotLifecycle.document_status,
+      uploadedBy: pilotLifecycle.uploaded_by,
+      ocrJobId: pilotLifecycle.ocr_job_id,
+      ocrJobStatus: pilotLifecycle.ocr_job_status,
+      ocrModel: pilotLifecycle.ocr_model,
+      pageCount: Number(pilotLifecycle.page_count),
+      cronOcrEvent: pilotLifecycle.cron_ocr_event === null ? null : Number(pilotLifecycle.cron_ocr_event),
+      archiveEvent: pilotLifecycle.archive_event === null ? null : Number(pilotLifecycle.archive_event),
+      archiveActor: pilotLifecycle.archive_actor,
+    } : null,
   };
 }
 

@@ -21,17 +21,17 @@ repoda kanıtlanmış bir taşıma deseni vardır.
 | Python servisleri: `services/content-scan`, `services/ocr`, `services/document-render` | Zaten kurum içi hedefli FastAPI konteynerleri; S3 erişimi boto3 ile — MinIO'ya `*_S3_ENDPOINT_URL` değişikliğiyle bağlanır |
 | Veri şeması ve göçler: `lib/archive-schema.ts`, `lib/ingest-schema.ts` (denetim değişmezlik tetikleyicileri dahil) | SQLite lehçesi; kurum içi SQLite yolunda birebir çalışır (bkz. §3) |
 | Kabul altyapısı: `scripts/phase-one-acceptance-*`, `scripts/acceptance-executors/*` (19 test) | Tasarım gereği sağlayıcıdan bağımsız: HTTPS + S3 SigV4. Kurum içi staging'e karşı aynen yeniden koşulur; T-10 taşınabilirliği zaten kanıtlıyor |
-| Birim test takımı (288 test) + `tests/sqlite-d1.ts` şimi | Node üzerinde koşuyor; şim, D1 arayüzünün gerçek SQLite ile karşılanabildiğinin kanıtı |
+| Tam test takımı + `tests/sqlite-d1.ts` şimi | Node üzerinde koşuyor; şim, D1 arayüzünün gerçek SQLite ile karşılanabildiğinin kanıtı |
 | UI (Next.js app router, `app/`) | Standart React/Next; çalışma zamanı değişiminden etkilenmez |
 
-### 1.2 Adaptör yazılacaklar (arayüz hazır, uygulama yeni)
+### 1.2 Uygulanan kurum içi adaptörler
 
 | Nokta | Mevcut durum | Kurum içi karşılık | Boyut |
 |---|---|---|---|
-| Nesne depolama | `lib/object-storage.ts` arayüzleri (`ObjectReader`, `StagingStorage`, `ImmutableVaultWriter`); tek uygulama `lib/r2-object-storage.ts` (R2 binding) | MinIO'ya karşı S3 SigV4 adaptörü (aws4fetch ya da `scripts/acceptance-executors/s3-contract.mjs` istemcisinin TS uyarlaması). Kritik sözleşmeler: koşullu ilk yazma (`If-None-Match: *`), multipart, tam-akış okuma, sürüm kimliği | M |
-| Yapılandırma/bağlama dikişi | `cloudflare:workers` env importu **tek dosyada**: `lib/archive-storage.ts` (`getArchiveBindings`) | `process.env` + adaptör fabrikası; başka hiçbir dosya değişmez | S |
-| Zamanlanmış işler | `wrangler.jsonc` cron tetikleyicileri → `lib/scheduled-jobs.ts` | systemd timer / k8s CronJob, mevcut `/api/jobs/process` ucunu ya da aynı iş fonksiyonlarını çağıran ince bir runner | S |
-| Veritabanı sürücüsü | `D1Database` arayüzü (24 dosya, yalnız `prepare/bind/first/all/run/batch` yüzeyi) | `tests/sqlite-d1.ts` deseninin üretim sınıfı hâli: `node:sqlite`/`better-sqlite3` üzerinde D1 uyumlu sarmalayıcı | S-M |
+| Nesne depolama | `lib/node-s3-object-storage.ts`: MinIO/S3 SigV4, koşullu ilk yazma, multipart, akışlı okuma ve sürüm kimliği | P3 tamam; gerçek hedef davranışı T-01/P8 ile kanıtlanır | M |
+| Yapılandırma/bağlama dikişi | `lib/archive-bindings.ts` + `lib/node-runtime.ts`: `process.env` ve rol adaptörü fabrikası | P1 tamam | S |
+| Zamanlanmış işler | `server/` zamanlayıcısı aynı `lib/scheduled-jobs.ts` fonksiyonlarını çağırır | P4 tamam; gerçek makine süre/yeniden başlatma kanıtı P7/P8 | S |
+| Veritabanı sürücüsü | `lib/node-sqlite-d1.ts`: WAL, tam fsync ve işlemsel `batch` | P2 tamam; tek süreç sınırı korunur | S-M |
 
 ### 1.3 Yeniden kurulacaklar
 

@@ -11,11 +11,16 @@ on:
         default: staging
         type: choice
         options: [staging]
+      phase_zero_run_id:
+        description: Başarılı Faz 0 pilot kanıtı workflow run kimliği
+        required: false
+        type: string
   push:
     tags: ["acceptance-*"]
 
 permissions:
   contents: read
+  actions: read
   id-token: write
   attestations: write
   artifact-metadata: write
@@ -45,6 +50,24 @@ jobs:
           ACCEPTANCE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
         run: mkdir -p "outputs/acceptance/${ACCEPTANCE_RUN_ID}"
 
+      - name: Faz 0 kanıtını güvenilir koşudan al
+        id: phase_zero
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PHASE_ZERO_RUN_ID: ${{ inputs.phase_zero_run_id || vars.ACCEPTANCE_PHASE_ZERO_RUN_ID }}
+          ACCEPTANCE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          test -n "$PHASE_ZERO_RUN_ID"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PHASE_ZERO_RUN_ID}" --jq '.conclusion')" = "success"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PHASE_ZERO_RUN_ID}" --jq '.path')" = ".github/workflows/phase-zero-evidence.yml"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PHASE_ZERO_RUN_ID}" --jq '.head_sha')" = "$GITHUB_SHA"
+          target="outputs/acceptance/${ACCEPTANCE_RUN_ID}/phase-zero"
+          mkdir -p "$target"
+          gh run download "$PHASE_ZERO_RUN_ID" --name "phase-zero-evidence-${PHASE_ZERO_RUN_ID}" --dir "$target"
+          gh attestation verify "$target/phase-zero-evidence.json" --repo "$GITHUB_REPOSITORY"
+          node scripts/verify-phase-zero-evidence.mjs "$target/phase-zero-evidence.json" "$GITHUB_SHA"
+          echo "digest=$(sha256sum "$target/phase-zero-evidence.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
       - name: Staging dağıtım ön kontrolü
         id: preflight
         env:
@@ -54,6 +77,7 @@ jobs:
         run: |
           node scripts/verify-deployment.mjs > "outputs/acceptance/${ACCEPTANCE_RUN_ID}/preflight.json"
           echo "digest=$(sha256sum "outputs/acceptance/${ACCEPTANCE_RUN_ID}/preflight.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          node -e 'const fs=require("node:fs");const p=JSON.parse(fs.readFileSync(`outputs/acceptance/${process.env.ACCEPTANCE_RUN_ID}/preflight.json`,"utf8"));fs.appendFileSync(process.env.GITHUB_OUTPUT,`schema_version=${p.schemaVersion}\n`);'
 
       - name: Kabul koşusu
         env:
@@ -65,15 +89,17 @@ jobs:
           ACCEPTANCE_INITIATED_BY: ${{ github.actor }}
           ACCEPTANCE_ADAPTER_PROFILE: ${{ vars.ACCEPTANCE_ADAPTER_PROFILE }}
           ACCEPTANCE_APP_VERSION: ${{ github.ref_name }}
-          ACCEPTANCE_SCHEMA_VERSION: ${{ vars.ACCEPTANCE_SCHEMA_VERSION }}
+          # Elle tutulan bir değişken zamanla sapabilir; sürüm aynı koşuda canlı
+          # staging göç/readiness doğrulamasından alınır.
+          ACCEPTANCE_SCHEMA_VERSION: ${{ steps.preflight.outputs.schema_version }}
           # Repoda sürümlenen kanıt yürütücüleri; boş bırakılırsa tüm testler BLOCKED.
           ACCEPTANCE_EXECUTOR_MODULE: ${{ vars.ACCEPTANCE_EXECUTOR_MODULE || 'scripts/acceptance-executors/pipeline.mjs' }}
           ACCEPTANCE_UPLOADER_IDENTITY: ${{ secrets.ACCEPTANCE_UPLOADER_IDENTITY }}
           ACCEPTANCE_UPLOADER_UNIT: ${{ vars.ACCEPTANCE_UPLOADER_UNIT }}
           ACCEPTANCE_PREFLIGHT_RESULT: PASS
           ACCEPTANCE_PREFLIGHT_EVIDENCE_DIGEST: ${{ steps.preflight.outputs.digest }}
-          ACCEPTANCE_PHASE_ZERO_RESULT: ${{ vars.ACCEPTANCE_PHASE_ZERO_RESULT }}
-          ACCEPTANCE_PHASE_ZERO_EVIDENCE_DIGEST: ${{ vars.ACCEPTANCE_PHASE_ZERO_EVIDENCE_DIGEST }}
+          ACCEPTANCE_PHASE_ZERO_RESULT: PASS
+          ACCEPTANCE_PHASE_ZERO_EVIDENCE_DIGEST: ${{ steps.phase_zero.outputs.digest }}
           ACCEPTANCE_OPEN_CRITICAL_FINDINGS: ${{ vars.ACCEPTANCE_OPEN_CRITICAL_FINDINGS }}
           ACCEPTANCE_OPEN_HIGH_FINDINGS: ${{ vars.ACCEPTANCE_OPEN_HIGH_FINDINGS }}
           ACCEPTANCE_BASE_URL: ${{ secrets.ACCEPTANCE_BASE_URL }}

@@ -1,4 +1,4 @@
-# Kabul Koşusu Hazırlık Durumu — 2026-08-14
+# Kabul Koşusu Hazırlık Durumu — 2026-08-25
 
 > **Yerleşim kararı (2026-08-14): kabul koşusu KURUM İÇİ staging'e karşı
 > koşulacak.** Üretim hedefi ADR-018 gereği kurum içidir; kabul kanıtının
@@ -57,10 +57,12 @@
   eklenecek mi, yoksa bu iki test bilinçli BLOCKED mı bırakılacak
 - K-5/K-6 anahtarları: `ACCEPTANCE_FAULT_INJECTION` / `ACCEPTANCE_LARGE_FIXTURES`
 
-**Aşama 6 · Kapı beyanları ve koşu**
-- Faz 0 kanıt paketi: `deploy:verify` + `smoke.sh` çıktıları; SHA-256'sı
-  `ACCEPTANCE_PHASE_ZERO_EVIDENCE_DIGEST` beyanına girilir
-- Açık kritik/yüksek bulgu beyanları; environment onaycıları (runbook §1)
+**Aşama 6 · İmzalı Faz 0 bağı ve koşu**
+- Başarılı dağıtımın imzalı kanıtı + arşivlenmiş pilot oturum,
+  `phase-zero-evidence.yml` ile canlı kayıtlardan doğrulanır
+- Üretilen Faz 0 workflow run kimliği Faz 1'in `phase_zero_run_id` girdisine
+  verilir; özet ve provenance otomatik doğrulanır
+- Açık kritik/yüksek bulgu sayıları; environment onaycıları (runbook §1)
 - `phase-one-acceptance.yml` tetiklenir; BLOCKED listesi yalnız bilinçli
   kapalı fazları göstermelidir
 
@@ -84,8 +86,9 @@ olarak BLOCKED bırakılacağı kabul edilmelidir.
 
 | Prova | Sonuç |
 |---|---|
-| Tam test takımı (`npm test`) | **430/430 yeşil** (16.7 sn) |
-| Şema | v28; taze veritabanında `0 → 28` göçü tek adımda uygulandı |
+| Tam kalite kapısı (`npm run verify`) | **PASS** — typecheck + lint + build + **495/495 test** (2026-08-25) |
+| Bağımlılık güvenliği | Üretim ağacı **0 bulgu** (`npm audit --omit=dev`); geliştirme ağacında 2 yüksek + 4 orta bulgu için risk kapsamı veya uyumlu yükseltme kararı açık |
+| Şema | v33; kabul workflow'u sürümü elle tutmaz, canlı staging ön kontrolünden alır |
 | Kabul hattı kuru koşusu (`run-phase-one-acceptance.mjs`, yeteneksiz) | Manifest üretildi; 19 testin 19'u **dürüstçe BLOCKED**, teknik kapı gerekçeleriyle kapalı (`EXIT_PHASE_ZERO_NOT_PROVEN`, `EXIT_*_FINDINGS_OPEN`, `BLOCKED:*`) |
 | Yürütücü modülü | `scripts/acceptance-executors/pipeline.mjs` repoda; sahte-S3/sahte-staging karşılığındaki yürütücü testleri tam takımda yeşil |
 
@@ -95,8 +98,9 @@ gelebilir.
 
 ## 2. Koşu öncesi güncellenmesi ZORUNLU değerler
 
-- **`ACCEPTANCE_SCHEMA_VERSION` = `28`** — şema bu hafta 27→28 ilerledi
-  (arşivleme tasnifi, PR #47). Eski değerle koşu şema doğrulamasında düşer.
+- `ACCEPTANCE_SCHEMA_VERSION` artık ayarlanmaz; canlı dağıtım ön kontrolü
+  `schema_version` çıktısını koşuya verir. Eski v28 environment değişkeni
+  etkisizdir ve kaldırılabilir.
 - `ACCEPTANCE_GIT_COMMIT` — koşulan dağıtımın gerçek SHA'sı (workflow verir).
 - `DEPLOY_BASE_URL` / `ACCEPTANCE_BASE_URL` — staging worker adresi.
 
@@ -104,9 +108,9 @@ gelebilir.
 
 | Faz | Açtığı testler | Girdiler | Sahibi | Durum |
 |---|---|---|---|---|
-| A — Dağıtım | (ön koşul) | Cloudflare jetonları, staging worker sırları (OCR/tarama/render servis uçları dahil) | Bilgi İşlem | Bekliyor |
+| A — Dağıtım | (ön koşul) | Kurum içi staging makinesi, TLS/DNS, compose sırları ve erişebilen runner | Bilgi İşlem | Bekliyor |
 | B — Kabul çekirdeği | K-1, K-2, K-3, K-7, T-02, T-03, T-05, T-12 | `ACCEPTANCE_BASE_URL`, kabul/göç jetonları, sentetik yükleyici (rol: `archive_manager`, müdürlük: "Kabul Testleri") | Bilgi İşlem + Arşiv | Bekliyor |
-| B.1 — Kapı beyanları | teknik kapı | Faz 0 sonucu + kanıt SHA-256'sı, açık kritik/yüksek bulgu sayıları | Bilgi Güvenliği | Bekliyor |
+| B.1 — Kapı kanıtı | teknik kapı | İmzalı Faz 0 workflow run kimliği + açık kritik/yüksek bulgu sayıları | Bilgi Güvenliği | Bekliyor |
 | C — Birincil S3 | T-01, T-08, K-5 ön koşulu | R2/S3 uç + kova + dar kimlik | Bilgi İşlem | Bekliyor |
 | D — IAM ayrımı | T-04, T-05, T-06, K-4 | 2 uygulama kimliği + 4 rol için S3 üçlüleri (kapsam matrisi runbook §5) | Bilgi İşlem | Bekliyor |
 | E — Değişmezlik kilidi | T-07 | Object Lock/bucket-lock pilotu kovası + prob kimlikleri | Bilgi İşlem | Bekliyor |
@@ -115,6 +119,24 @@ gelebilir.
 
 Fazlar kademelidir: yalnız A+B kurulunca 8 test koşar, kalanı BLOCKED kalır
 ve bu bir hata değildir — koşu eksikliği dürüstçe raporlar.
+
+### 2026-08-25 GitHub environment denetimi
+
+- Depo düzeyinde sır/değişken yoktur.
+- `staging`: yalnız `CLOUDFLARE_API_TOKEN` ve `ARCHIVE_MIGRATION_TOKEN` vardır;
+  eski Cloudflare yolu kullanılacaksa `CLOUDFLARE_ACCOUNT_ID` ve
+  `DEPLOY_BASE_URL`, kurum içi yol kullanılacaksa ayrı dağıtım workflow'u/runner
+  gerekir.
+- `phase-one-acceptance`: yalnız `ARCHIVE_ACCEPTANCE_TOKEN`,
+  `ARCHIVE_MIGRATION_TOKEN` ile üç değişken vardır. Canlı çekirdek koşu için
+  dahi `ACCEPTANCE_BASE_URL` ve `ACCEPTANCE_UPLOADER_IDENTITY` eksiktir;
+  19/19 için C–G girdileri de kurulmalıdır.
+- Faz 1 kabul workflow'u henüz canlı çalıştırılmamıştır. Bu durum kod hatası
+  değil, ortam kurulumunun açık olduğunun kanıtıdır.
+- Kurum içi dağıtımın imzalı kanıtını üretecek
+  `.github/workflows/deploy-onprem.yml` henüz yoktur. Faz 0 toplayıcısı güven
+  sınırını sabit bir izin listesiyle hem mevcut `deploy.yml` hem bu kurum içi
+  workflow yolu için hazır tutar; bilinmeyen workflow koşularını reddeder.
 
 ## 4. Kurumsal ön koşullar (teknik değil)
 

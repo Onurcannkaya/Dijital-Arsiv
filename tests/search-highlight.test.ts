@@ -80,6 +80,12 @@ test("inceleme ekranı arama terimini alır ve eşleşmeye kendiliğinden gider"
   assert.match(review, /parseQuickQuery\(searchTerm\?\?""\)\.freeText/);
   // Aramadan gelen memur ilk eşleşmeye kendisi tıklamak zorunda kalmaz.
   assert.match(review, /jumpToPage\(matchingPages\[0\]\)/);
+  assert.match(review, /searchJumpKey=`\$\{documentId\}:\$\{activeSearch\}`/,
+    "aynı belgede değişen arama yeni eşleşmeye atlamalı");
+  assert.match(review, /lastSearchJumpRef\.current===searchJumpKey/,
+    "etki state güncellemesi yerine belge+sorgu anahtarlı ref kullanmalı");
+  assert.doesNotMatch(review, /setSearchJumped/,
+    "arama atlaması efekt içinde senkron state zinciri üretmemeli");
   // Sayfa bölümleri atlanabilir çapa taşır.
   assert.match(review, /id=\{`okuma-sayfa-\$\{page\.pageNumber\}`\}/);
 });

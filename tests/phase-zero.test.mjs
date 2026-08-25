@@ -94,13 +94,15 @@ test("dağıtım sözleşmesi sırları, şema göçünü ve readiness kontrolü
 });
 
 test("dağıtım workflow'u kaliteyi, dağıtımı, doğrulamayı ve rollback'i bağlar", async () => {
-  const [deploy, pkg] = await Promise.all([
+  const [deploy, pkg, validator] = await Promise.all([
     read(".github/workflows/deploy.yml"),
     read("package.json"),
+    read("scripts/validate-deploy-config.mjs"),
   ]);
   const scripts = JSON.parse(pkg).scripts;
   // Sıra sözleşmesi: kalite kapısı → dağıtım → dağıtım doğrulaması → koşullu rollback.
   assert.match(deploy, /npm run verify/);
+  assert.match(deploy, /node scripts\/validate-deploy-config\.mjs/);
   assert.match(deploy, /id: deploy/);
   assert.match(deploy, /npm run deploy:verify/);
   assert.match(deploy, /npm run "?deploy:\$\{DEPLOY_ENV\}"?/);
@@ -117,6 +119,106 @@ test("dağıtım workflow'u kaliteyi, dağıtımı, doğrulamayı ve rollback'i 
   assert.match(scripts["deploy:staging"], /wrangler deploy --env staging/);
   assert.match(scripts["deploy:production"], /wrangler deploy --env production/);
   assert.match(scripts["deploy:rollback"], /wrangler rollback --env/);
+  for (const name of [
+    "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "DEPLOY_BASE_URL", "ARCHIVE_MIGRATION_TOKEN",
+  ]) {
+    assert.ok(validator.includes(name), `${name} dağıtım ön kontrolünde yok`);
+  }
+});
+
+test("dağıtım ön kontrolü sırları göstermeden eksik ve bozuk girdileri reddeder", async () => {
+  const { validateDeployConfig } = await import("../scripts/validate-deploy-config.mjs");
+  const invalid = validateDeployConfig({
+    DEPLOY_ENV: "staging",
+    CLOUDFLARE_API_TOKEN: "gizli-api-jetonu",
+    CLOUDFLARE_ACCOUNT_ID: "eksik",
+    DEPLOY_BASE_URL: "http://staging.example/path?token=gizli",
+    ARCHIVE_MIGRATION_TOKEN: "kisa",
+  });
+  assert.equal(invalid.ok, false);
+  assert.deepEqual(invalid.failures, [
+    "CLOUDFLARE_ACCOUNT_ID_INVALID",
+    "DEPLOY_BASE_URL_INVALID",
+    "ARCHIVE_MIGRATION_TOKEN_INVALID",
+  ]);
+  assert.ok(!JSON.stringify(invalid).includes("gizli-api-jetonu"));
+
+  const valid = validateDeployConfig({
+    DEPLOY_ENV: "production",
+    CLOUDFLARE_API_TOKEN: "gizli-api-jetonu",
+    CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+    DEPLOY_BASE_URL: "https://arsiv.example",
+    ARCHIVE_MIGRATION_TOKEN: "0123456789abcdef",
+  });
+  assert.deepEqual(valid, { ok: true, environment: "production", failures: [] });
+});
+
+test("Faz 0 kanıtı dağıtım, cron OCR ve insan arşivleme zincirini birlikte ister", async () => {
+  const [{ buildPhaseZeroEvidence }, { validatePhaseZeroEvidence }] = await Promise.all([
+    import("../scripts/collect-phase-zero-evidence.mjs"),
+    import("../scripts/verify-phase-zero-evidence.mjs"),
+  ]);
+  const gitCommit = "a".repeat(40);
+  const input = {
+    deployment: {
+      event: "deployment.verified", environment: "staging", gitCommit,
+      health: "ready", schemaVersion: 33,
+    },
+    health: {
+      status: "ready", correlationId: "health-correlation-1",
+      checks: { schema: { ok: true, version: 33 } },
+    },
+    acceptance: {
+      sessionId: "session-pilot-1", documentId: "document-pilot-1", terminalStatus: "ACCEPTED",
+      transitionChain: { valid: true },
+      counts: { documents: 1, originalObjects: 1, ocrJobs: 1, verifiedPromotions: 1 },
+      pilotLifecycle: {
+        documentId: "document-pilot-1", documentStatus: "archived",
+        uploadedBy: "pilot@example.test", ocrJobId: "ocr-job-pilot-1",
+        ocrJobStatus: "completed", ocrModel: "paddle-v1", pageCount: 1,
+        cronOcrEvent: 2, archiveEvent: 3, archiveActor: "pilot@example.test",
+      },
+    },
+    detail: {
+      document: { id: "document-pilot-1", status: "archived", uploadedBy: "pilot@example.test" },
+      ocrJob: { id: "ocr-job-pilot-1", status: "completed", model: "paddle-v1" },
+      pages: [{ pageNumber: 1 }],
+      audit: [],
+    },
+    correlationId: "phase0-correlation-1",
+    collectedAt: "2026-08-25T12:00:00.000Z",
+  };
+  const evidence = buildPhaseZeroEvidence(input);
+  assert.equal(evidence.result, "PASS");
+  assert.equal(evidence.pilot.cronAuditEvent, 2);
+  assert.equal(evidence.pilot.archiveAuditEvent, 3);
+  assert.equal(validatePhaseZeroEvidence(evidence, gitCommit).ok, true);
+
+  assert.throws(() => buildPhaseZeroEvidence({
+    ...input,
+    acceptance: {
+      ...input.acceptance,
+      pilotLifecycle: { ...input.acceptance.pilotLifecycle, cronOcrEvent: null },
+    },
+  }), /PHASE_ZERO_CRON_NOT_PROVEN/);
+});
+
+test("Faz 0 pilot workflow'u imzalı dağıtım kanıtını salt-okunur canlı kanıta bağlar", async () => {
+  const [workflow, acceptanceWorkflow] = await Promise.all([
+    read(".github/workflows/phase-zero-evidence.yml"),
+    read(".github/workflows/phase-one-acceptance.yml"),
+  ]);
+  assert.match(workflow, /workflow_dispatch/);
+  assert.match(workflow, /deployment-evidence-\$\{DEPLOYMENT_RUN_ID\}/);
+  assert.match(workflow, /\.github\/workflows\/deploy\.yml\|\.github\/workflows\/deploy-onprem\.yml/);
+  assert.match(workflow, /gh attestation verify outputs\/phase-zero\/deployment\/verification\.json/);
+  assert.match(workflow, /collect-phase-zero-evidence\.mjs/);
+  assert.match(workflow, /verify-phase-zero-evidence\.mjs/);
+  assert.match(workflow, /actions\/attest@/);
+  assert.doesNotMatch(workflow, /uses: [^@\n]+@v\d/);
+  assert.match(acceptanceWorkflow, /phase-zero-evidence-\$\{PHASE_ZERO_RUN_ID\}/);
+  assert.match(acceptanceWorkflow, /ACCEPTANCE_PHASE_ZERO_RESULT: PASS/);
+  assert.doesNotMatch(acceptanceWorkflow, /ACCEPTANCE_PHASE_ZERO_RESULT: \$\{\{ vars\./);
 });
 
 test("OCR üretim imajı modeli gömer ve ayrıcalıksız kullanıcıyla çalışır", async () => {
