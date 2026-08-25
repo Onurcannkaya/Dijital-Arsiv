@@ -1,5 +1,6 @@
 const baseUrl = process.env.DEPLOY_BASE_URL?.replace(/\/$/, "");
 const migrationToken = process.env.ARCHIVE_MIGRATION_TOKEN;
+const expectedReleaseRevision = process.env.DEPLOY_EXPECTED_RELEASE_REVISION?.trim();
 
 if (!baseUrl) {
   throw new Error("DEPLOY_BASE_URL zorunludur.");
@@ -45,11 +46,15 @@ const health = await readJson(await fetch(`${baseUrl}/api/health`, {
 if (health.status !== "ready") {
   throw new Error(`Dağıtım hazır değil: ${JSON.stringify(health)}`);
 }
+if (expectedReleaseRevision && health.releaseRevision !== expectedReleaseRevision) {
+  throw new Error(`Dağıtım sürümü uyuşmuyor: beklenen=${expectedReleaseRevision} okunan=${health.releaseRevision ?? "yok"}`);
+}
 
 console.log(JSON.stringify({
   event: "deployment.verified",
   environment: process.env.DEPLOY_ENV ?? null,
   gitCommit: process.env.DEPLOY_GIT_COMMIT ?? null,
+  releaseRevision: health.releaseRevision ?? null,
   baseUrl,
   migration,
   schemaVersion: migrationState.currentVersion,

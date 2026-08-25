@@ -22,12 +22,14 @@ import { logEvent } from "./observability.ts";
 
 export const QUOTA_WARNING_RATIO = 0.8;
 export const QUOTA_CRITICAL_RATIO = 0.95;
+/** Türev/işletim payı bırakmak için yeni kabul kritik eşikte durur. */
+export const QUOTA_ADMISSION_RATIO = QUOTA_CRITICAL_RATIO;
 
 export type StorageQuota =
   | { configured: false; usedBytes: number }
   | { configured: true; usedBytes: number; limitBytes: number; usedRatio: number };
 
-function configuredLimitBytes(bindings: Pick<ArchiveBindings, "ARCHIVE_STORAGE_QUOTA_GB">): number | null {
+export function configuredLimitBytes(bindings: Pick<ArchiveBindings, "ARCHIVE_STORAGE_QUOTA_GB">): number | null {
   const raw = bindings.ARCHIVE_STORAGE_QUOTA_GB?.trim();
   if (!raw) return null;
   const gb = Number(raw);
@@ -42,13 +44,22 @@ function configuredLimitBytes(bindings: Pick<ArchiveBindings, "ARCHIVE_STORAGE_Q
 export async function readStorageQuota(
   bindings: Pick<ArchiveBindings, "DB" | "ARCHIVE_STORAGE_QUOTA_GB">,
 ): Promise<StorageQuota> {
-  const used = await bindings.DB.prepare(
-    "SELECT COALESCE(SUM(byte_size), 0) AS bytes FROM binary_objects",
-  ).first<{ bytes: number }>();
+  const used = await bindings.DB.prepare(`SELECT
+      (SELECT COALESCE(SUM(byte_size), 0) FROM binary_objects)
+      + (SELECT COALESCE(SUM(byte_size), 0) FROM ingest_objects WHERE deleted_at IS NULL) AS bytes`)
+    .first<{ bytes: number }>();
   const usedBytes = Number(used?.bytes ?? 0);
   const limitBytes = configuredLimitBytes(bindings);
   if (!limitBytes) return { configured: false, usedBytes };
   return { configured: true, usedBytes, limitBytes, usedRatio: usedBytes / limitBytes };
+}
+
+/** Yeni oturumların atomik SQL rezervasyonunda kullanılacak güvenli tavan. */
+export function uploadAdmissionLimitBytes(
+  bindings: Pick<ArchiveBindings, "ARCHIVE_STORAGE_QUOTA_GB">,
+): number | null {
+  const configured = configuredLimitBytes(bindings);
+  return configured ? Math.floor(configured * QUOTA_ADMISSION_RATIO) : null;
 }
 
 export type QuotaCheckResult =

@@ -15,6 +15,7 @@ import {
 } from "../../../lib/ingest-service";
 import { ACCEPTED_FILE_EXTENSIONS, isAcceptedMediaType, isOperatorRetryWindowOpen } from "../../../lib/ingest-contract";
 import { failure } from "../../../lib/errors";
+import { uploadAdmissionLimitBytes } from "../../../lib/capacity";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,7 @@ export async function POST(request: Request) {
       db: bindings.DB,
       ...storages,
       hasher: createDigestStreamHasher(),
+      capacityLimitBytes: uploadAdmissionLimitBytes(bindings),
     }, {
       userId: principal.email,
       unit,

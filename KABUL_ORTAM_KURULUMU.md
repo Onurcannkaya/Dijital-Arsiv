@@ -11,11 +11,11 @@ Sözleşme kaynakları: yetenek tanımları `scripts/phase-one-acceptance-core.m
 (`resolveCapabilities`), ortam eşlemesi `scripts/run-phase-one-acceptance.mjs`
 (`scopedConfig`), test ölçütleri `FAZ_1_KANIT_REHBERI.md`.
 
-> **Yerleşim notu:** §2'deki `deploy.yml` komutları Cloudflare pilot
-> sağlayıcısına aittir. Kurum içi staging, P8 kapsamında hazırlanacak
-> `.github/workflows/deploy-onprem.yml` ile aynı imzalı
-> `deployment-evidence-<run-id>` sözleşmesini üretmelidir. Bu workflow ve erişen
-> runner kurulmadan kurum içi Faz 0/Faz 1 canlı kapısı açılmış sayılmaz.
+> **Kurum içi yerleşim:** `.github/workflows/deploy-onprem.yml` artık SSO/TLS,
+> yedek/PITR ve SHA sürümlü rollback kapılarıyla aynı imzalı
+> `deployment-evidence-<run-id>` sözleşmesini üretir. §2'deki `deploy.yml`
+> komutları yalnız Cloudflare pilotu içindir; kurum staging'inde `onprem-staging`
+> environment ve `onprem-archive` etiketli kurum runner'ı kullanılır.
 
 ## 0. İlkeler
 
@@ -34,12 +34,16 @@ Sözleşme kaynakları: yetenek tanımları `scripts/phase-one-acceptance-core.m
 
 ## 1. GitHub environment'larını oluştur
 
-GitHub → Settings → Environments altında üç environment açılır:
+GitHub → Settings → Environments altında kurum içi kurulum için aşağıdaki
+environment'lar açılır (Cloudflare pilotu kullanılacaksa ilk iki satır da
+ayrıca korunur):
 
 | Environment | Kullanan workflow | Koruma önerisi |
 |---|---|---|
 | `staging` | `deploy.yml` | — |
 | `production` | `deploy.yml` | Zorunlu onaylayıcı: Bilgi İşlem |
+| `onprem-staging` | `deploy-onprem.yml` | Zorunlu onaylayıcı: Bilgi İşlem |
+| `onprem-production` | `deploy-onprem.yml` | Zorunlu onaylayıcı: Bilgi İşlem + Bilgi Güvenliği |
 | `phase-one-acceptance` | `phase-one-acceptance.yml` | Zorunlu onaylayıcı: Bilgi Güvenliği + Arşiv temsilcisi |
 
 > Environment onayı koşuyu **çalıştırma** yetkisidir; release imzası değildir.
@@ -85,6 +89,7 @@ Bunlar tamamlandığında K-1, K-2, K-3, K-7, T-02, T-03, T-05, T-12 koşabilir.
 
 ```bash
 gh secret set ACCEPTANCE_BASE_URL --env phase-one-acceptance          # staging HTTPS adresi
+gh secret set ACCEPTANCE_PRODUCTION_BASE_URL --env phase-one-acceptance # gerçek üretim HTTPS adresi; staging'den farklı
 gh secret set ARCHIVE_MIGRATION_TOKEN --env phase-one-acceptance      # Faz A'dakiyle aynı
 gh secret set ARCHIVE_ACCEPTANCE_TOKEN --env phase-one-acceptance     # Faz A'dakiyle aynı, >= 32 karakter
 gh secret set ACCEPTANCE_UPLOADER_IDENTITY --env phase-one-acceptance # ör. kabul-yukleyici@sivas.bel.tr
@@ -255,6 +260,9 @@ gh variable set ACCEPTANCE_FAULT_INJECTION --env phase-one-acceptance --body "en
 
 1. `deploy.yml` ile staging dağıtımını yap ve doğrulama adımının geçtiğini gör.
 2. `phase-one-acceptance.yml` workflow'unu elle tetikle; environment onayını ver.
+   Sıkı ön kontrol 19 yürütücünün tamamını, dokuz canlı yeteneği, sıfır açık
+   kritik/yüksek bulguyu, birbirinden farklı IAM test kimliklerini ve staging
+   adresinin üretim adresinden farklı olduğunu testler başlamadan doğrular.
 3. Koşu çıktısındaki `acceptance.run-complete` olayında:
    - `blocked` listesi, henüz kurulmamış fazların testlerini göstermelidir —
      başka bir test BLOCKED ise yetenek girdilerinden biri eksik/bozuktur;
@@ -271,6 +279,7 @@ gh variable set ACCEPTANCE_FAULT_INJECTION --env phase-one-acceptance --body "en
 |---|---|---|
 | `EXECUTOR_NOT_CONFIGURED` | Test için yürütücü yok | Yalnız `ACCEPTANCE_EXECUTOR_MODULE` bilinçli daraltıldıysa görülür |
 | `CAPABILITY_MISSING` (BLOCKED) | Yetenek girdileri eksik | İlgili fazın sır/değişkenleri |
+| `ACCEPTANCE_PREFLIGHT_FAILED` | 19/19 koşunun ön şartlarından biri eksik/tehlikeli | Hata kodundaki yetenek, IAM ayrımı, üretim adresi veya bulgu sayacı |
 | `*_ACCEPTANCE_TOKEN_MISSING` / `*_EVIDENCE_UNAVAILABLE` | Kanıt ucuna erişilemiyor | `ARCHIVE_ACCEPTANCE_TOKEN` (iki tarafta aynı değer) ya da staging `APP_ENV` |
 | `K7_DOCUMENT_LIST_UNAVAILABLE`, `T02_TICKET_DENIED` | Yükleyici kimliğinin rolü dar | §3.2 rol/müdürlük ataması |
 | `T06_*`, `K4_*` erişim FAIL'leri | IAM anahtarı beklenenden geniş/dar | §5 kapsam matrisi |

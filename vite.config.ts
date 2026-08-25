@@ -1,5 +1,5 @@
 import vinext from "vinext";
-import { defineConfig } from "vite";
+import { defineConfig, type PluginOption } from "vite";
 import hostingConfig from "./.openai/hosting.json" with { type: "json" };
 import { sites } from "./build/sites-vite-plugin.ts";
 
@@ -7,6 +7,7 @@ const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
 
 const { d1, r2 } = hostingConfig;
+const isOnPremUiBuild = process.env.ARCHIVE_BUILD_TARGET === "onprem-ui";
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
@@ -77,20 +78,20 @@ export default defineConfig(async () => {
   process.env.WRANGLER_LOG_PATH ??= ".wrangler/logs";
   process.env.MINIFLARE_REGISTRY_PATH ??= ".wrangler/registry";
 
-  // Wrangler snapshots its log path while the Cloudflare plugin is imported.
+  const platformPlugins: PluginOption[] = [];
+  // Vinext'in RSC üretim grafiği Cloudflare eklentisini build sırasında da
+  // ister. Kurum içi standalone çıktıda yalnız Sites paketleme adımı atlanır.
   const { cloudflare } = await import("@cloudflare/vite-plugin");
+  if (!isOnPremUiBuild) platformPlugins.push(sites());
+  platformPlugins.push(cloudflare({
+    viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
+    config: localBindingConfig,
+  }));
 
   return {
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,
-    plugins: [
-      vinext(),
-      sites(),
-      cloudflare({
-        viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        config: localBindingConfig,
-      }),
-    ],
+    plugins: [vinext(), ...platformPlugins],
   };
 });

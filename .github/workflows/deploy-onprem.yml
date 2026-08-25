@@ -1,0 +1,192 @@
+name: Kurum içi dağıtım
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Kurum içi hedef ortam
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+concurrency:
+  group: onprem-deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      image_prefix: ${{ steps.release.outputs.image_prefix }}
+      image_tag: ${{ steps.release.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 22.18.0
+          cache: npm
+      - run: npm ci
+      - name: Tam kalite kapısı
+        run: npm run verify
+
+      - name: Değişmez sürüm kimliğini hazırla
+        id: release
+        shell: bash
+        run: |
+          prefix="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "image_prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: GHCR oturumu
+        shell: bash
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: SHA sabitli Syft aracını hazırla
+        id: syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      - name: SHA sabitli Grype aracını hazırla
+        id: grype
+        uses: anchore/scan-action/download-grype@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+
+      - name: Beş imajı commit SHA ile üret ve yayımla
+        env:
+          IMAGE_PREFIX: ${{ steps.release.outputs.image_prefix }}
+          IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
+          SYFT: ${{ steps.syft.outputs.cmd }}
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+        shell: bash
+        run: |
+          mkdir -p outputs/onprem
+          build_image() {
+            name="$1"; dockerfile="$2"; context="$3"
+            image="${IMAGE_PREFIX}/${name}:${IMAGE_TAG}"
+            docker build --pull \
+              --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+              --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+              -f "$dockerfile" -t "$image" "$context"
+            "$SYFT" "$image" -o "spdx-json=outputs/onprem/${name}.spdx.json"
+            "$GRYPE" "sbom:outputs/onprem/${name}.spdx.json" \
+              --fail-on critical --only-fixed -o json \
+              > "outputs/onprem/${name}.vulnerabilities.json"
+            docker push "$image"
+            docker image inspect "$image" --format '{{index .RepoDigests 0}}' >> outputs/onprem/images.txt
+          }
+          build_image archive-api server/Dockerfile .
+          build_image archive-ui server/ui.Dockerfile .
+          build_image content-scan services/content-scan/Dockerfile services/content-scan
+          build_image ocr services/ocr/Dockerfile services/ocr
+          build_image document-render services/document-render/Dockerfile services/document-render
+          test "$(wc -l < outputs/onprem/images.txt)" -eq 5
+
+      - name: İmaj manifestini provenance ile bağla
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: outputs/onprem/images.txt
+
+      - name: İmaj manifestini yükle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: onprem-images-${{ github.run_id }}
+          path: outputs/onprem/
+          retention-days: 90
+          if-no-files-found: error
+
+  deploy:
+    needs: build
+    runs-on: [self-hosted, linux, onprem-archive]
+    timeout-minutes: 30
+    environment: onprem-${{ inputs.environment }}
+    env:
+      DEPLOY_ENV: ${{ inputs.environment }}
+      ONPREM_IMAGE_PREFIX: ${{ needs.build.outputs.image_prefix }}
+      ONPREM_IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+      ONPREM_ENV_FILE: ${{ vars.ONPREM_ENV_FILE }}
+      ONPREM_RELEASE_STATE_FILE: ${{ vars.ONPREM_RELEASE_STATE_FILE }}
+      ONPREM_PROJECT_NAME: ${{ vars.ONPREM_PROJECT_NAME || 'sivas-arsiv' }}
+      DEPLOY_BASE_URL: ${{ secrets.DEPLOY_BASE_URL }}
+      ARCHIVE_MIGRATION_TOKEN: ${{ secrets.ARCHIVE_MIGRATION_TOKEN }}
+      ONPREM_REQUIRE_EDGE: enabled
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 22.18.0
+
+      - name: Hedef ve sır dosyası ön kontrolü
+        run: node scripts/validate-onprem-deploy-config.mjs
+
+      - name: Yedek, alarm, kota ve PITR üretim kapısı
+        run: node scripts/validate-onprem-runtime-env.mjs
+
+      - name: GHCR salt-okunur oturumu
+        shell: bash
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: İmajları çek ve yığını değiştir
+        id: rollout
+        shell: bash
+        run: |
+          mkdir -p outputs/deployment
+          compose=(docker compose --project-name "$ONPREM_PROJECT_NAME" --env-file "$ONPREM_ENV_FILE" -f deploy/kurum-ici/docker-compose.yml -f deploy/kurum-ici/docker-compose.sso.yml -f deploy/kurum-ici/docker-compose.tls.yml -f deploy/kurum-ici/docker-compose.release.yml)
+          "${compose[@]}" config --quiet
+          "${compose[@]}" pull api ui content-scan ocr document-render oauth2-proxy tls-edge litestream
+          renderer_image="${ONPREM_IMAGE_PREFIX}/document-render:${ONPREM_IMAGE_TAG}"
+          renderer_ref="$(docker image inspect "$renderer_image" --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep -F "${ONPREM_IMAGE_PREFIX}/document-render@sha256:" | head -n 1)"
+          export DOCUMENT_RENDER_IMAGE_DIGEST="${renderer_ref##*@}"
+          test "${#DOCUMENT_RENDER_IMAGE_DIGEST}" -eq 71
+          printf '%s\n' "$DOCUMENT_RENDER_IMAGE_DIGEST" > outputs/deployment/renderer-image-digest.txt
+          "${compose[@]}" up -d --no-build
+
+      - name: Göç, readiness ve sürüm kanıtı
+        id: verify_deploy
+        env:
+          DEPLOY_GIT_COMMIT: ${{ github.sha }}
+          DEPLOY_EXPECTED_RELEASE_REVISION: ${{ github.sha }}
+        shell: bash
+        run: |
+          mkdir -p outputs/deployment
+          node scripts/verify-deployment.mjs > outputs/deployment/verification.json
+          mkdir -p "$(dirname "$ONPREM_RELEASE_STATE_FILE")"
+          printf '%s\n' "$ONPREM_IMAGE_TAG" > "${ONPREM_RELEASE_STATE_FILE}.new"
+          mv "${ONPREM_RELEASE_STATE_FILE}.new" "$ONPREM_RELEASE_STATE_FILE"
+
+      - name: Başarısızlıkta önceki imajlara dön
+        if: failure() && steps.rollout.outcome == 'success'
+        shell: bash
+        run: |
+          test -s "$ONPREM_RELEASE_STATE_FILE"
+          export ONPREM_IMAGE_TAG="$(tr -d '\r\n' < "$ONPREM_RELEASE_STATE_FILE")"
+          export DEPLOY_EXPECTED_RELEASE_REVISION="$ONPREM_IMAGE_TAG"
+          compose=(docker compose --project-name "$ONPREM_PROJECT_NAME" --env-file "$ONPREM_ENV_FILE" -f deploy/kurum-ici/docker-compose.yml -f deploy/kurum-ici/docker-compose.sso.yml -f deploy/kurum-ici/docker-compose.tls.yml -f deploy/kurum-ici/docker-compose.release.yml)
+          "${compose[@]}" pull api ui content-scan ocr document-render oauth2-proxy tls-edge litestream
+          renderer_image="${ONPREM_IMAGE_PREFIX}/document-render:${ONPREM_IMAGE_TAG}"
+          renderer_ref="$(docker image inspect "$renderer_image" --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep -F "${ONPREM_IMAGE_PREFIX}/document-render@sha256:" | head -n 1)"
+          export DOCUMENT_RENDER_IMAGE_DIGEST="${renderer_ref##*@}"
+          test "${#DOCUMENT_RENDER_IMAGE_DIGEST}" -eq 71
+          "${compose[@]}" up -d --no-build
+          node scripts/verify-deployment.mjs > outputs/deployment/rollback-verification.json
+
+      - name: Dağıtım kanıtını provenance ile bağla
+        if: steps.verify_deploy.outcome == 'success'
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: outputs/deployment/verification.json
+
+      - name: Dağıtım kanıtını yükle
+        if: steps.verify_deploy.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deployment-evidence-${{ github.run_id }}
+          path: outputs/deployment/
+          retention-days: 90
+          if-no-files-found: error

@@ -1,7 +1,8 @@
 # Kurum İçi Yığın (P6 Referans Kurulumu)
 
-Tek makinelik referans kurulum: MinIO + Node API + üç Python servisi + kimlik
-sınırı ters vekili. Kapsam belgesi: `KURUM_ICI_PORT_KAPSAMI.md`; kabul ortamı
+Tek makinelik referans kurulum: MinIO + Node API + vinext standalone UI + üç
+Python servisi + kimlik sınırı ters vekili. Kapsam belgesi:
+`KURUM_ICI_PORT_KAPSAMI.md`; kabul ortamı
 değişkenleri: `KABUL_ORTAM_KURULUMU.md`.
 
 ## Kurulum
@@ -19,6 +20,12 @@ docker compose up -d --build
 Sağlık yanıtı ilk açılışta `degraded` olabilir: OCR modeli ve ClamAV imzaları
 iniyordur; `docker compose ps` sağlık sütununu izleyin.
 
+Üretim yedeği ve SQLite PITR varsayılan yerel yığını etkilemez. Kurulum
+kararları tamamlandıktan sonra `.env` içindeki ikinci hata alanı/alarm/kota
+değerleri doldurulur ve `COMPOSE_PROFILES=pitr` ile açılır. Dar IAM ve güvenli
+geri yükleme tatbikatı `litestream/README.md`, tüm sıra `AYAGA_KALDIRMA.md`
+içindedir.
+
 ## Mimarinin güvenlik sınırları
 
 - **Kimlik**: Uygulama `oai-authenticated-user-email` başlığına güvenir; bu
@@ -27,25 +34,33 @@ iniyordur; `docker compose ps` sağlık sütununu izleyin.
   bırakır ve uygulama 401 döner. SSO katmanı hazırdır:
   `docker-compose.sso.yml` kaplaması oauth2-proxy + Keycloak bağlar
   (kurulum: `sso/README.md`).
-- **Ağ**: API, MinIO ve servisler yalnız `arsiv-ic` ağındadır; dışarıya tek
-  kapı vekilin portudur.
+- **Ağ**: UI, API, MinIO ve servisler yalnız `arsiv-ic` ağındadır; dışarıya
+  tek kapı vekilin portudur. UI hiçbir DB/depolama sırrı almaz; `/api/`
+  trafiğini vekil ayrı API sürecine yollar.
 - **Değişmezlik**: `arsiv-asil` kovası sürümleme + Object Lock ile açılır
-  (gerçek WORM, ADR-016). ADR-018 Karar 5 gereği ilk üretim döneminde tasfiye
-  KAPALIDIR: varsayılan bekletme tanımlanmaz, tasfiye kimliği açılmaz; sınıf
-  bazlı bekletme dosya planı eşlemesi sonrası yeni ADR ile gelir.
-- **SQLite verisi** `api-veri` birimindedir; yedeği dosya kopyasıyla değil
-  önce `checkpoint` (kapanış) sonra birim anlık görüntüsüyle alın.
+  ve varsayılan `COMPLIANCE` bekletmesi uygulanır (gerçek WORM, ADR-016).
+  Örnekteki `1d` yalnız sentetik staging belgeleri içindir. Üretim,
+  dosya planından onaylı süre girilmeden ve
+  `ARCHIVE_WORM_POLICY_APPROVED=approved-production-policy` yapılmadan
+  fail-closed açılmaz. ADR-018 Karar 5 gereği tasfiye kimliği hâlâ KAPALIDIR.
+- **SQLite verisi** `api-veri` yerel Linux birimindedir. `pitr` profili aynı
+  birimi izleyerek işlemleri ikinci S3 hata alanına sürekli çoğaltır; canlı DB
+  dosyası elle kopyalanmaz ve geri yükleme tatbikatı yalnız ayrı dosyaya yapılır.
 
-## IAM (üretim öncesi zorunlu sıkılaştırma)
+## IAM
 
-`minio-init` başlangıç için TEK uygulama kullanıcısına `readwrite` verir. Bu,
-ADR-014 rol ayrımını KARŞILAMAZ. Üretim ve kabul koşusu öncesi:
+`minio-init`, sürüm kontrollü politikaları idempotent uygular ve dört ayrı
+kimlik oluşturur:
 
-1. Rol başına kullanıcı: uygulama (gecici+karantina rw, asıl koşullu yazma,
-   turev rw), scanner (yalnız karantina okuma), ocr (yalnız asıl okuma),
-   viewer probu (hiçbir kovaya erişim yok).
-2. `mc admin policy create` ile dar politikalar; K-4/T-06 kabul testleri bu
-   ayrımı fiilen doğrular.
+1. Uygulama: geçici/karantina/türev okuma-yazma; asıl okuma ve koşullu yazma.
+   Asılda silme, retention/legal-hold yönetimi ve governance bypass yoktur.
+2. Tarayıcı: yalnız karantina okuma.
+3. OCR: yalnız asıl okuma.
+4. Renderer: asıl okuma, türev okuma-yazma; silme yoktur.
+
+Kimlikler ile en az 32 karakterli sırlar benzersiz değilse kurulum durur.
+Eski kurulumdaki uygulama kullanıcısına bağlı `readwrite` politikası otomatik
+sökülür. K-4/T-06 kabul testleri ayrımı canlı ortamda ayrıca kanıtlar.
 
 ## ClamAV imza aynası
 
@@ -62,8 +77,7 @@ T-01 koşullu yazma probudur (MinIO sürüm doğrulaması).
 
 ## Bilinçli kapsam sınırları
 
-- UI bu yığında sunulmaz (API-only); UI kararı kapsam belgesinde ayrı iştir.
-- MinIO burada tek düğümdür; ikinci hata alanı/çoğaltma ADR-017 kararıyla
-  planlanır (İş Etki Analizi).
+- MinIO burada tek düğümdür; üretim nesne yedeği ve SQLite PITR hedefleri bu
+  makinenin/birincil MinIO'nun dışındaki hata alanlarında kurulmalıdır.
 - Konteyner içi trafik düz HTTP'dir (`ARCHIVE_S3_ALLOW_HTTP=enabled` yalnız
   bu izole ağ için). Makineler ayrışırsa MinIO TLS zorunludur.

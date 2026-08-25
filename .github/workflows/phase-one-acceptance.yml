@@ -74,6 +74,7 @@ jobs:
           ACCEPTANCE_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
           DEPLOY_BASE_URL: ${{ secrets.ACCEPTANCE_BASE_URL }}
           ARCHIVE_MIGRATION_TOKEN: ${{ secrets.ARCHIVE_MIGRATION_TOKEN }}
+          DEPLOY_EXPECTED_RELEASE_REVISION: ${{ github.sha }}
         run: |
           node scripts/verify-deployment.mjs > "outputs/acceptance/${ACCEPTANCE_RUN_ID}/preflight.json"
           echo "digest=$(sha256sum "outputs/acceptance/${ACCEPTANCE_RUN_ID}/preflight.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
@@ -86,6 +87,8 @@ jobs:
           ACCEPTANCE_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
           ACCEPTANCE_SYNTHETIC_ONLY: enabled
           ACCEPTANCE_PRODUCTION_GUARD: confirmed-non-production
+          ACCEPTANCE_REQUIRE_ALL_CAPABILITIES: enabled
+          ACCEPTANCE_PRODUCTION_BASE_URL: ${{ secrets.ACCEPTANCE_PRODUCTION_BASE_URL }}
           ACCEPTANCE_INITIATED_BY: ${{ github.actor }}
           ACCEPTANCE_ADAPTER_PROFILE: ${{ vars.ACCEPTANCE_ADAPTER_PROFILE }}
           ACCEPTANCE_APP_VERSION: ${{ github.ref_name }}

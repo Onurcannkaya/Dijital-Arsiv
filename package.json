@@ -9,6 +9,7 @@
         "dev": "vinext dev",
         "dev:hizmetler": "node scripts/dev-stack.mjs",
         "build": "vinext build",
+        "build:onprem-ui": "node scripts/build-onprem-ui.mjs",
         "start": "vinext start",
         "test": "npm run build && node --test \"tests/*.test.mjs\" \"tests/*.test.ts\"",
         "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .wrangler --ignore-pattern outputs --ignore-pattern work --ignore-pattern .claude",
@@ -18,6 +19,8 @@
         "deploy:production": "wrangler deploy --env production",
         "deploy:rollback": "wrangler rollback --env \"${DEPLOY_ENV:-staging}\" --yes --message \"${ROLLBACK_MESSAGE:-deploy gate failed}\"",
         "deploy:verify": "node scripts/verify-deployment.mjs",
+        "onprem:validate-runtime": "node scripts/validate-onprem-runtime-env.mjs",
+        "onprem:verify-restore": "node scripts/verify-sqlite-restore.mjs",
         "start:node": "node server/main.ts",
         "db:generate": "drizzle-kit generate"
     },

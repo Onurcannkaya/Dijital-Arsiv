@@ -43,6 +43,8 @@ export type ArchiveBindings = {
   /** Şema göç uç noktasının anahtarı; tanımlı değilse uç nokta kapalıdır. */
   ARCHIVE_MIGRATION_TOKEN?: string;
   APP_ENV?: string;
+  /** Kurum içi imajın değişmez commit etiketi; readiness kanıtına yansır. */
+  ARCHIVE_RELEASE_REVISION?: string;
   /** Yalnız staging kabul kanıtı okuma uç noktasının ayrı, en-dar yetki anahtarıdır. */
   ARCHIVE_ACCEPTANCE_TOKEN?: string;
   /**
@@ -117,6 +119,7 @@ const NODE_CONFIG_KEYS = [
   "ARCHIVE_ADMIN_EMAILS",
   "ARCHIVE_MIGRATION_TOKEN",
   "APP_ENV",
+  "ARCHIVE_RELEASE_REVISION",
   "ARCHIVE_ACCEPTANCE_TOKEN",
   "ARCHIVE_INTERNAL_OBJECT_FETCH",
   "ALARM_WEBHOOK_URL",

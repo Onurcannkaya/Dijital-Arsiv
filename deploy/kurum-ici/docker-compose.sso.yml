@@ -17,6 +17,7 @@ services:
   proxy:
     depends_on:
       - api
+      - ui
       - oauth2-proxy
     volumes: !override
       - ./sso/nginx.sso.conf.template:/etc/nginx/templates/default.conf.template:ro
@@ -24,9 +25,11 @@ services:
       # >= 32 karakter zorunlu; boş değer nginx yapılandırma üretimini bozar
       # (bilinçli fail-closed) ve vekil hiç açılmaz.
       ACCEPTANCE_PROXY_TOKEN: ${ACCEPTANCE_PROXY_TOKEN:?}
+      # Yönlendirme şeması istemci başlığından alınmaz. Üretimde yalnız https.
+      ARCHIVE_EXTERNAL_SCHEME: ${ARCHIVE_EXTERNAL_SCHEME:-https}
 
   oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    image: ${OAUTH2_PROXY_IMAGE:-quay.io/oauth2-proxy/oauth2-proxy:v7.6.0}
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
       OAUTH2_PROXY_OIDC_ISSUER_URL: ${SSO_ISSUER_URL:?}      # ör. https://kimlik.sivas.bel.tr/realms/sivas-arsiv
@@ -40,8 +43,10 @@ services:
       OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
       OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
       OAUTH2_PROXY_COOKIE_SAMESITE: lax
+      OAUTH2_PROXY_COOKIE_HTTPONLY: "true"
       # TLS'siz pilot denemesinde "false" yapılabilir; üretimde true kalır.
       OAUTH2_PROXY_COOKIE_SECURE: ${SSO_COOKIE_SECURE:-true}
+      OAUTH2_PROXY_WHITELIST_DOMAINS: ${SSO_ALLOWED_REDIRECT_DOMAINS:?}
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
     networks: [arsiv-ic]
 
@@ -50,7 +55,7 @@ services:
   # aktarılır ve AD/LDAP federasyonu bağlanır (sso/README.md).
   keycloak:
     profiles: [kimlik-yerel]
-    image: quay.io/keycloak/keycloak:26.0
+    image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.0}
     command: ["start-dev", "--import-realm", "--http-port=8081"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:?}

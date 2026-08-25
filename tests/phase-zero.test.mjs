@@ -86,7 +86,13 @@ test("dağıtım sözleşmesi sırları, şema göçünü ve readiness kontrolü
   assert.match(health, /state\.scannerReady !== true/);
   assert.match(workflow, /npm run typecheck/);
   assert.match(workflow, /npm run lint/);
-  assert.match(workflow, /unittest discover services\/content-scan\/tests/);
+  for (const service of ["content-scan", "ocr", "document-render"]) {
+    assert.match(
+      workflow,
+      new RegExp(`cd services/${service} && python -m unittest discover`),
+      `${service} regresyonları ana CI kapısında çalışmalıdır`,
+    );
+  }
   assert.match(workflow, /npm test/);
   assert.doesNotMatch(sitesPlugin, /cp\(drizzleSource/);
   assert.match(sitesPlugin, /dist", "server", "\.dev\.vars/);

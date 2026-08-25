@@ -1,0 +1,31 @@
+addr: ":9090"
+
+logging:
+  level: info
+  type: json
+  stderr: false
+
+# Sağlayıcı yaşam döngüsü politikası silme işini üstlenir. Böylece PITR yazıcısı
+# DeleteObject yetkisi almaz ve ele geçirilmesi geçmişi silemez.
+retention:
+  enabled: false
+
+verify-compaction: true
+heartbeat-url: ${SQLITE_PITR_HEARTBEAT_URL}
+heartbeat-interval: 1m
+shutdown-sync-timeout: 30s
+shutdown-sync-interval: 500ms
+
+dbs:
+  - path: /veri/arsiv.db
+    monitor-interval: 1s
+    checkpoint-interval: 1m
+    busy-timeout: 5s
+    replica:
+      type: s3
+      bucket: ${SQLITE_PITR_S3_BUCKET}
+      path: ${SQLITE_PITR_S3_PREFIX}
+      endpoint: ${SQLITE_PITR_S3_ENDPOINT}
+      region: ${SQLITE_PITR_S3_REGION}
+      force-path-style: true
+      sync-interval: 10s

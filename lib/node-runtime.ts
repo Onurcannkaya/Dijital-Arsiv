@@ -74,12 +74,65 @@ function requireEnv(env: Record<string, string | undefined>, name: string): stri
   return value;
 }
 
+function isHttpsEndpoint(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function normalizedEndpoint(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}${url.pathname.replace(/\/$/, "")}`;
+  } catch {
+    return value.replace(/\/$/, "");
+  }
+}
+
+/**
+ * Üretimde yerel disk veya birincil S3'e sessizce düşen bir "yedek" kabul
+ * edilmez. Bu denetim çalışma zamanı doğrudan başlatıldığında da dağıtım
+ * kapısındaki ikinci hata alanı sözleşmesini korur.
+ */
+export function validateNodeProductionStorage(env: Record<string, string | undefined>): void {
+  if (env.APP_ENV?.trim() !== "production") return;
+  if (env.ARCHIVE_STORAGE_DRIVER === "local") {
+    throw new Error("Üretimde ARCHIVE_STORAGE_DRIVER=local kullanılamaz.");
+  }
+
+  const backupBucket = requireEnv(env, "ARCHIVE_S3_BUCKET_BACKUP");
+  const backupEndpoint = requireEnv(env, "ARCHIVE_BACKUP_S3_ENDPOINT");
+  const backupAccessKey = requireEnv(env, "ARCHIVE_BACKUP_S3_ACCESS_KEY_ID");
+  const backupSecret = requireEnv(env, "ARCHIVE_BACKUP_S3_SECRET_ACCESS_KEY");
+  const primaryEndpoint = requireEnv(env, "ARCHIVE_S3_ENDPOINT");
+  const primaryAccessKey = requireEnv(env, "ARCHIVE_S3_ACCESS_KEY_ID");
+  const primarySecret = requireEnv(env, "ARCHIVE_S3_SECRET_ACCESS_KEY");
+
+  if (!backupBucket) throw new Error("Üretimde yedek kovası zorunludur.");
+  if (!isHttpsEndpoint(backupEndpoint) || env.ARCHIVE_BACKUP_S3_ALLOW_HTTP === "enabled") {
+    throw new Error("Üretim yedek ucu TLS (https) kullanmalıdır.");
+  }
+  if (normalizedEndpoint(backupEndpoint) === normalizedEndpoint(primaryEndpoint)) {
+    throw new Error("Üretim yedek ucu birincil S3 ucundan farklı olmalıdır.");
+  }
+  if (backupSecret.length < 32) {
+    throw new Error("Üretim yedek sırrı en az 32 karakter olmalıdır.");
+  }
+  if (backupAccessKey === primaryAccessKey || backupSecret === primarySecret) {
+    throw new Error("Üretim yedeği ayrı erişim kimliği ve sır kullanmalıdır.");
+  }
+}
+
 /**
  * Bağlama sağlayıcısını kaydeder ve veritabanı tutamacını döndürür. Süreç
  * kapanışında `close()` çağrılmalıdır (WAL checkpoint + bağlantı kapanışı).
  */
 export function bootstrapNodeRuntime(options: NodeRuntimeOptions = {}): NodeRuntime {
   const env = options.env ?? process.env;
+  validateNodeProductionStorage(env);
   const db = createNodeSqliteD1({ path: options.dbPath ?? env.ARCHIVE_DB_PATH ?? "data/arsiv.db" });
 
   // Lokal geliştirme sürücüsü: MinIO/S3 yerine yerel disk. YALNIZ dev/deneme;
@@ -123,9 +176,8 @@ export function bootstrapNodeRuntime(options: NodeRuntimeOptions = {}): NodeRunt
   /*
    * ADR-017: yedek hedefi ikinci hata alanında ve ayrı yönetim kimliğinde
    * olmalıdır. Bu yüzden yedek kovası kendi ucunu/kimliğini alabilir; verilmeyen
-   * her değer birincile düşer ama uç ve kimlik birincille aynıysa "ikinci hata
-   * alanı" şartı KARŞILANMAMIŞTIR — bu bir kod kararı değil kurulum kararıdır
-   * ve işletim rehberine yazılır.
+   * her değer staging/geliştirmede birincile düşebilir. Üretimde ise yukarıdaki
+   * çalışma zamanı kapısı ayrı HTTPS uç ve ayrı kimliği zorunlu tutar.
    */
   const backupBucket = env.ARCHIVE_S3_BUCKET_BACKUP?.trim();
   const backupFiles = backupBucket ? createNodeS3Namespace({

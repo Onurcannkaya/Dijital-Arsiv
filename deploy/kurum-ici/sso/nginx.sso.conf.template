@@ -29,12 +29,18 @@ server {
     proxy_read_timeout 600s;
     proxy_send_timeout 600s;
 
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'" always;
+
     # oauth2-proxy uçları: giriş, geri dönüş, çıkış, oturum.
     location /oauth2/ {
         proxy_pass http://oauth2-proxy:4180;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto ${ARCHIVE_EXTERNAL_SCHEME};
         proxy_set_header X-Forwarded-Uri $request_uri;
     }
 
@@ -43,13 +49,13 @@ server {
         proxy_pass http://oauth2-proxy:4180/oauth2/auth;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto ${ARCHIVE_EXTERNAL_SCHEME};
         proxy_set_header X-Forwarded-Uri $request_uri;
         proxy_set_header Content-Length "";
         proxy_pass_request_body off;
     }
 
-    location / {
+    location /api/ {
         # Kabul geçidi: geçerli koşu jetonu SSO'yu atlayıp iç yola sapar.
         if ($kabul_gecidi = "gecerli") {
             rewrite ^ /_kabul$uri last;
@@ -68,8 +74,22 @@ server {
         proxy_pass http://api:8788;
     }
 
+    # Arayüz de aynı SSO oturumuyla korunur; depolama/DB kimliği almayan UI
+    # sürecine yalnız doğrulanmış kullanıcı ulaşır. Veri çağrıları /api/
+    # konumunda ayrıca yetkili e-posta başlığıyla API'ye gider.
+    location / {
+        auth_request /oauth2/auth;
+        error_page 401 = @girise_yonlendir;
+        proxy_set_header oai-authenticated-user-email "";
+        proxy_set_header oai-authenticated-user-full-name "";
+        proxy_set_header oai-authenticated-user-full-name-encoding "";
+        proxy_set_header x-acceptance-proxy-token "";
+        proxy_set_header Host $host;
+        proxy_pass http://ui:3000;
+    }
+
     location @girise_yonlendir {
-        return 302 /oauth2/start?rd=$scheme://$host$request_uri;
+        return 302 /oauth2/start?rd=${ARCHIVE_EXTERNAL_SCHEME}://$host$request_uri;
     }
 
     # Kabul koşusunun iç yolu: sentetik oai-authenticated-user-email başlığı

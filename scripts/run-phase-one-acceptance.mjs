@@ -19,6 +19,7 @@ import {
   resolveCapabilities,
   sha256Hex,
 } from "./phase-one-acceptance-core.mjs";
+import { validatePhaseOnePreflight } from "./phase-one-preflight.mjs";
 
 const EXECUTOR_TIMEOUT_MS = 5 * 60 * 1000;
 const LARGE_EXECUTOR_TIMEOUT_MS = 45 * 60 * 1000;
@@ -234,6 +235,12 @@ await mkdir(evidenceRoot);
 
 const capabilities = resolveCapabilities(process.env);
 const executors = await loadExecutors();
+if (process.env.ACCEPTANCE_REQUIRE_ALL_CAPABILITIES === "enabled") {
+  const preflight = validatePhaseOnePreflight(process.env, capabilities, Object.keys(executors));
+  if (!preflight.ok) {
+    throw new Error(`ACCEPTANCE_PREFLIGHT_FAILED:${preflight.failures.join(",")}`);
+  }
+}
 const evidenceFiles = [];
 const results = [];
 const secrets = sensitiveValues();
