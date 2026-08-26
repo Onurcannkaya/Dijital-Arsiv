@@ -165,7 +165,8 @@ test("cleaned OCR text is searchable and reviewable", async () => {
   assert.match(processor, /page\.rawText/);
   assert.match(processor, /normalizeSearch\(page\.fullText\)/);
   assert.match(documents, /parameters\.get\("q"\)/);
-  assert.match(documents, /p\.search_text LIKE/);
+  assert.match(documents, /wordPrefixCondition\("p\.search_text", true\)/);
+  assert.match(documents, /return `% \$\{escapeLike\(token\)\}%`/);
   assert.match(detail, /searchText:page\.search_text/);
   assert.match(review, /Okunabilir metin/);
   assert.match(review, /Onaylı ve aranabilir belge metni/);
