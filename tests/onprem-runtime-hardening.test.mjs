@@ -34,5 +34,6 @@ test("API ve sırsız UI salt-okunur kök üzerinde yalnız sınırlı geçici a
   assert.match(base, /ui:[\s\S]*?read_only: true[\s\S]*?\/tmp:rw,noexec,nosuid,nodev,size=64m/);
   assert.match(ci, /config --no-interpolate --quiet/);
   assert.match(ci, /--read-only/);
+  assert.match(ci, /\/veri:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700/);
   assert.match(ci, /sivas-arsiv-ui:ci/);
 });
