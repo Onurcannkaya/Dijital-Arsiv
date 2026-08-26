@@ -9,7 +9,7 @@ RUN npm ci
 
 COPY . .
 ENV NODE_ENV=production
-RUN npm run build:onprem-ui
+RUN npm run build:onprem-ui && npm prune --omit=dev
 
 FROM node:22-slim AS runtime
 ENV NODE_ENV=production \
@@ -18,6 +18,10 @@ ENV NODE_ENV=production \
 WORKDIR /app
 
 COPY --from=build --chown=node:node /app/dist/standalone ./
+# Vinext standalone çıktısı uygulamanın peer/runtime bağımlılıklarını paketlemez.
+# `npm prune` ile yalnız production ağacı kaldığı için React gibi zorunlu
+# eş bağımlılıklar development araçlarını taşımadan güvenle eklenir.
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node server/ui-healthcheck.mjs ./ui-healthcheck.mjs
 
 USER node

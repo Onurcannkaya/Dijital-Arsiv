@@ -15,7 +15,9 @@ test("kurum içi UI standalone, sırsız ve statik varlık sağlık kontrollüd�
   ]);
 
   assert.match(dockerfile, /npm run build:onprem-ui/);
+  assert.match(dockerfile, /npm prune --omit=dev/);
   assert.match(dockerfile, /\/app\/dist\/standalone/);
+  assert.match(dockerfile, /\/app\/node_modules \.\/node_modules/);
   assert.match(dockerfile, /CMD \["node", "server\.js"\]/);
   assert.match(dockerfile, /ui-healthcheck\.mjs/);
   assert.match(nextConfig, /ARCHIVE_BUILD_TARGET === "onprem-ui" \? "standalone"/);
