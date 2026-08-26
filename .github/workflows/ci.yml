@@ -99,11 +99,13 @@ jobs:
             --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
             --cap-drop ALL --security-opt no-new-privileges \
             -p 13000:3000 sivas-arsiv-ui:ci
-          status=starting
+          status=1
           for _ in $(seq 1 30); do
-            status=$(docker inspect arsiv-ui --format '{{.State.Health.Status}}')
-            case "$status" in healthy|unhealthy) break ;; esac
+            if docker exec arsiv-ui node ui-healthcheck.mjs; then
+              status=0
+              break
+            fi
             sleep 1
           done
           docker logs arsiv-ui
-          test "$status" = healthy
+          test "$status" -eq 0

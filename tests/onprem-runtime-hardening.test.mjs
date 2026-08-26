@@ -35,5 +35,6 @@ test("API ve sırsız UI salt-okunur kök üzerinde yalnız sınırlı geçici a
   assert.match(ci, /config --no-interpolate --quiet/);
   assert.match(ci, /--read-only/);
   assert.match(ci, /\/veri:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700/);
+  assert.match(ci, /docker exec arsiv-ui node ui-healthcheck\.mjs/);
   assert.match(ci, /sivas-arsiv-ui:ci/);
 });
