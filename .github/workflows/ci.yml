@@ -35,7 +35,7 @@ jobs:
       - name: Python servis test bağımlılıkları
         run: |
           python -m pip install --disable-pip-version-check -r services/content-scan/requirements.txt
-          python -m pip install --disable-pip-version-check fastapi==0.116.1 pydantic==2.11.7 Pillow==11.3.0 pypdfium2==4.30.0
+          python -m pip install --disable-pip-version-check fastapi==0.116.1 pydantic==2.11.7 Pillow==11.3.0 pypdfium2==4.30.0 numpy==2.2.6 opencv-python-headless==4.11.0.86
       - name: Üç Python servisinin birim/regresyon testleri
         shell: bash
         run: |
