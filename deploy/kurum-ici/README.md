@@ -40,12 +40,26 @@ içindedir.
 - **Değişmezlik**: `arsiv-asil` kovası sürümleme + Object Lock ile açılır
   ve varsayılan `COMPLIANCE` bekletmesi uygulanır (gerçek WORM, ADR-016).
   Örnekteki `1d` yalnız sentetik staging belgeleri içindir. Üretim,
-  dosya planından onaylı süre girilmeden ve
+  kurulca onaylı teknik alt sınır ile karar referansı girilmeden ve
   `ARCHIVE_WORM_POLICY_APPROVED=approved-production-policy` yapılmadan
-  fail-closed açılmaz. ADR-018 Karar 5 gereği tasfiye kimliği hâlâ KAPALIDIR.
+  fail-closed açılmaz. Sürenin dolması silme kararı değildir; ADR-018/020
+  gereği tasfiye kimliği hâlâ KAPALIDIR.
 - **SQLite verisi** `api-veri` yerel Linux birimindedir. `pitr` profili aynı
   birimi izleyerek işlemleri ikinci S3 hata alanına sürekli çoğaltır; canlı DB
   dosyası elle kopyalanmaz ve geri yükleme tatbikatı yalnız ayrı dosyaya yapılır.
+- **Çalışma zamanı**: Uzun ömürlü servisler `unless-stopped` ile toparlanır;
+  uygulama konteynerleri capability bırakır ve ayrıcalık yükseltemez. API/UI
+  salt-okunur kök kullanır. CPU/bellek/süreç sınırları `.env` üzerinden K-6
+  ölçümüne göre ayarlanır; OCR belirli istek sayısından sonra kontrollü tazelenir.
+- **Kabul geçidi**: yalnız staging'de `ARCHIVE_ACCEPTANCE_BYPASS_ENABLED=enabled`
+  ve 32+ karakter jetonla açılır. Production, açık geçidi veya tanımlı kabul
+  jetonunu dağıtım öncesinde ve nginx açılışında reddeder.
+- **Kabul gözlemlenebilirliği**: staging'de kabul jetonuyla korunan
+  `/api/admin/acceptance-observability?kind=logs|resources` ucu korelasyonlu
+  yapılandırılmış logları ve API RSS örneklerini sabit boyutlu süreç içi
+  halkadan verir. Production'da uç 404'tür; kalıcı kurum log/SIEM hattının
+  yerine geçmez. `API_MEMORY_LIMIT_BYTES`, Compose `API_MEMORY_LIMIT`
+  değerinin bayt karşılığıdır ve dağıtım doğrulayıcısı eşitliği zorlar.
 
 ## IAM
 

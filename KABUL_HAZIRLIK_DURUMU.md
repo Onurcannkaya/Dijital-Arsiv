@@ -1,4 +1,4 @@
-# Kabul Koşusu Hazırlık Durumu — 2026-08-25
+# Kabul Koşusu Hazırlık Durumu — 2026-08-26
 
 > **Yerleşim kararı (2026-08-14): kabul koşusu KURUM İÇİ staging'e karşı
 > koşulacak.** Üretim hedefi ADR-018 gereği kurum içidir; kabul kanıtının
@@ -24,6 +24,8 @@
 - `.env`: 7 sır `openssl rand -hex 32` ile üretilir; `APP_ENV=staging`
   (kanıt ucu yalnız staging'de açılır); `ARCHIVE_CANONICAL_HOST` staging
   alan adı; `ARCHIVE_ADMIN_EMAILS` ilk yöneticiler
+- `ARCHIVE_ACCEPTANCE_BYPASS_ENABLED=enabled`; production'da bu değer
+  `disabled`, `ACCEPTANCE_PROXY_TOKEN` ise boş olmak zorundadır
 - `ARCHIVE_ACCEPTANCE_TOKEN` da üretilip `.env`'e girilir (GitHub'dakiyle
   AYNI değer olacak)
 - `docker compose up -d --build` → 8 doğrulama adımı → `./smoke.sh`
@@ -52,9 +54,9 @@
 - T-09: izole geri yükleme kovası + RTO 8 saat (ADR-018)
 - T-10: ikinci sağlayıcı — ayrı MinIO örneği ya da farklı hesapta S3;
   birinciden gerçekten farklı adaptör olmalı
-- T-11 / K-6: HTTPS log okuma ucu ve kaynak metrik ucu — **karar gerekiyor:**
-  compose yığınına log/metrik dışa verme katmanı (ör. Loki + cAdvisor)
-  eklenecek mi, yoksa bu iki test bilinçli BLOCKED mı bırakılacak
+- T-11 / K-6: staging API'sinin kimlik doğrulamalı, production'da görünmeyen
+  kabul gözlemlenebilirlik ucu hazırdır. Aynı HTTPS yol `kind=logs` ve
+  `kind=resources` sorgularıyla kullanılır; kalıcı SIEM/izleme yerine geçmez.
 - K-5/K-6 anahtarları: `ACCEPTANCE_FAULT_INJECTION` / `ACCEPTANCE_LARGE_FIXTURES`
 
 **Aşama 6 · İmzalı Faz 0 bağı ve koşu**
@@ -86,8 +88,8 @@ olarak BLOCKED bırakılacağı kabul edilmelidir.
 
 | Prova | Sonuç |
 |---|---|
-| Tam kalite kapısı (`npm run verify`) | **PASS** — typecheck + lint + build + **495/495 test** (2026-08-25) |
-| Bağımlılık güvenliği | Üretim ağacı **0 bulgu** (`npm audit --omit=dev`); geliştirme ağacında 2 yüksek + 4 orta bulgu için risk kapsamı veya uyumlu yükseltme kararı açık |
+| Tam kalite kapısı (`npm run verify`) | **PASS** — typecheck + lint + build + **534/534 test** (2026-08-26) |
+| Bağımlılık güvenliği | **0 bulgu** — üretim ve tam geliştirme ağacı (`npm audit`, 2026-08-26) |
 | Şema | v33; kabul workflow'u sürümü elle tutmaz, canlı staging ön kontrolünden alır |
 | Kabul hattı kuru koşusu (`run-phase-one-acceptance.mjs`, yeteneksiz) | Manifest üretildi; 19 testin 19'u **dürüstçe BLOCKED**, teknik kapı gerekçeleriyle kapalı (`EXIT_PHASE_ZERO_NOT_PROVEN`, `EXIT_*_FINDINGS_OPEN`, `BLOCKED:*`) |
 | Yürütücü modülü | `scripts/acceptance-executors/pipeline.mjs` repoda; sahte-S3/sahte-staging karşılığındaki yürütücü testleri tam takımda yeşil |
@@ -115,7 +117,7 @@ gelebilir.
 | D — IAM ayrımı | T-04, T-05, T-06, K-4 | 2 uygulama kimliği + 4 rol için S3 üçlüleri (kapsam matrisi runbook §5) | Bilgi İşlem | Bekliyor |
 | E — Değişmezlik kilidi | T-07 | Object Lock/bucket-lock pilotu kovası + prob kimlikleri | Bilgi İşlem | Bekliyor |
 | F — Yedek/taşınabilirlik | T-09, T-10 | Geri yükleme kovası (RTO 8 saat, ADR-018) + ikinci sağlayıcı (gerçekten farklı adaptör) | Bilgi İşlem | Bekliyor |
-| G — Log/metrik/anahtar | T-11, K-5, K-6 | Log ve metrik uçları + jetonları, büyük veri/hata enjeksiyonu anahtarları | Bilgi İşlem | Bekliyor |
+| G — Log/metrik/anahtar | T-11, K-5, K-6 | Staging kabul gözlemlenebilirlik URL'leri hazır; GitHub girdileri, büyük veri/hata enjeksiyonu anahtarları | Bilgi İşlem | Ortam girdisi bekliyor |
 
 Fazlar kademelidir: yalnız A+B kurulunca 8 test koşar, kalanı BLOCKED kalır
 ve bu bir hata değildir — koşu eksikliği dürüstçe raporlar.
@@ -133,10 +135,10 @@ ve bu bir hata değildir — koşu eksikliği dürüstçe raporlar.
   19/19 için C–G girdileri de kurulmalıdır.
 - Faz 1 kabul workflow'u henüz canlı çalıştırılmamıştır. Bu durum kod hatası
   değil, ortam kurulumunun açık olduğunun kanıtıdır.
-- Kurum içi dağıtımın imzalı kanıtını üretecek
-  `.github/workflows/deploy-onprem.yml` henüz yoktur. Faz 0 toplayıcısı güven
-  sınırını sabit bir izin listesiyle hem mevcut `deploy.yml` hem bu kurum içi
-  workflow yolu için hazır tutar; bilinmeyen workflow koşularını reddeder.
+- Kurum içi dağıtımın imzalı kanıtını üreten
+  `.github/workflows/deploy-onprem.yml` repodadır: SHA imajları, SBOM/kritik
+  açık kapısı, SSO/TLS, göç/readiness, sürüm doğrulama ve rollback bağlıdır.
+  Henüz gerçek kurum runner'ında başarılı canlı koşu kanıtı yoktur.
 
 ## 4. Kurumsal ön koşullar (teknik değil)
 

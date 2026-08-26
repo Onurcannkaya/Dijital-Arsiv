@@ -7,6 +7,7 @@ const sso = readFileSync(new URL("../deploy/kurum-ici/sso/nginx.sso.conf.templat
 const tls = readFileSync(new URL("../deploy/kurum-ici/tls/nginx.tls.conf.template", import.meta.url), "utf8");
 const overlay = readFileSync(new URL("../deploy/kurum-ici/docker-compose.tls.yml", import.meta.url), "utf8");
 const workflow = readFileSync(new URL("../.github/workflows/deploy-onprem.yml", import.meta.url), "utf8");
+const edgeGuard = readFileSync(new URL("../deploy/kurum-ici/sso/validate-edge-env.sh", import.meta.url), "utf8");
 
 test("nginx sınırları temel tarayıcı güvenlik başlıklarını her yanıta ekler", () => {
   for (const config of [base, sso]) {
@@ -33,4 +34,12 @@ test("kurum dağıtımı SSO ve TLS kaplamalarını atlayamaz", () => {
   assert.match(workflow, /ONPREM_REQUIRE_EDGE: enabled/);
   assert.match(sso, /X-Forwarded-Proto \$\{ARCHIVE_EXTERNAL_SCHEME\}/);
   assert.doesNotMatch(sso, /X-Forwarded-Proto \$http_x_forwarded_proto/);
+});
+
+test("kabul SSO bypass'ı yalnız staging'de açık, production'da fail-closed'dur", () => {
+  assert.match(sso, /ARCHIVE_ACCEPTANCE_BYPASS_ENABLED/);
+  assert.match(sso, /enabled:\$\{ACCEPTANCE_PROXY_TOKEN\}/);
+  assert.match(edgeGuard, /production\)/);
+  assert.match(edgeGuard, /production kabul geçidi kapalı olmalıdır/);
+  assert.match(edgeGuard, /production kabul geçidi jetonu tanımlanamaz/);
 });

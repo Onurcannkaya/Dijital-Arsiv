@@ -101,6 +101,11 @@ gh variable set ACCEPTANCE_UPLOADER_UNIT --env phase-one-acceptance --body "Kabu
 gh variable set ACCEPTANCE_ADAPTER_PROFILE --env phase-one-acceptance --body "minio-onprem-v1"
 ```
 
+Kurum staging `.env` dosyasında ayrıca
+`ARCHIVE_ACCEPTANCE_BYPASS_ENABLED=enabled` bulunur. Aynı compose yığınının
+production `.env` dosyasında değer `disabled`, `ACCEPTANCE_PROXY_TOKEN` boş
+olmak zorundadır; production'da sentetik kimlik geçidi bulunmaz.
+
 Şema sürümü elle girilmez. Workflow, aynı koşudaki `verify-deployment.mjs`
 ön kontrolünün canlı staging'den doğruladığı sürümü kullanır. Eski
 `ACCEPTANCE_SCHEMA_VERSION` değişkeni artık etkisizdir ve kaldırılabilir.
@@ -238,12 +243,12 @@ dayandığını bu heterojenlikle kanıtlar.
 
 ```bash
 # T-11: erişim/anahtar loglarında kişisel veri taraması
-gh secret set ACCEPTANCE_LOG_ENDPOINT --env phase-one-acceptance   # HTTPS log okuma ucu
-gh secret set ACCEPTANCE_LOG_TOKEN --env phase-one-acceptance      # >= 32 karakter
+gh variable set ACCEPTANCE_LOG_ENDPOINT --env phase-one-acceptance   # https://.../api/admin/acceptance-observability?kind=logs
+# Ayrı log jetonu girilmez; workflow dar kapsamlı ARCHIVE_ACCEPTANCE_TOKEN'ı kullanır.
 
 # K-6: kaynak/bellek metrik kanıtı ve büyük test verisi anahtarı
-gh secret set ACCEPTANCE_RESOURCE_METRICS_ENDPOINT --env phase-one-acceptance
-gh secret set ACCEPTANCE_RESOURCE_METRICS_TOKEN --env phase-one-acceptance
+gh variable set ACCEPTANCE_RESOURCE_METRICS_ENDPOINT --env phase-one-acceptance # https://.../api/admin/acceptance-observability?kind=resources
+# Kaynak ucu da aynı dar kapsamlı kabul jetonuyla korunur.
 gh variable set ACCEPTANCE_LARGE_FIXTURES --env phase-one-acceptance --body "enabled"
 
 # K-5: hata enjeksiyonu anahtarı (yalnız üretim-dışı ortam güvencesiyle)

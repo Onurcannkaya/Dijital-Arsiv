@@ -1,4 +1,4 @@
-# Kapanış Notu — Durum ve Kalan İşler (2026-08-11)
+# Kapanış Notu — Durum ve Kalan İşler (2026-08-26)
 
 Bu not, kabul hattı + kurum içi port çalışmasının bittiği noktayı ve kalan
 işleri devralacak kişi için tek sayfada toplar. Ayrıntı belgeleri:
@@ -14,11 +14,13 @@ işleri devralacak kişi için tek sayfada toplar. Ayrıntı belgeleri:
   çalışıyor (uçtan uca kabul akışı testli); SQLite + MinIO adaptörleri,
   konteyner yığını, SSO kaplaması, ayağa kaldırma runbook'u ve duman testi
   hazır. Workers pilotu davranışsal olarak korunuyor (tam takım her
-  commit'te Workers build'iyle koşuyor: 320 test yeşil).
+  commit'te Workers build'iyle doğrulanıyor).
 - **GitHub tarafı**: `staging`/`production`/`phase-one-acceptance`
   environment'ları açık; `ARCHIVE_MIGRATION_TOKEN` (3 ortam) ve
   `ARCHIVE_ACCEPTANCE_TOKEN` sırları üretilip yazıldı. CI her push'ta kalite
-  kapısı + API imaj derleme/açılış smoke'u koşuyor.
+  kapısı + API/UI imaj derleme, salt-okunur açılış smoke'u ve Compose
+  birleştirme doğrulaması koşuyor. Kurum içi SHA/SBOM/rollback workflow'u da
+  repoda; gerçek runner kanıtı bekliyor.
 
 ## Kalan işler (önerilen sıra)
 
@@ -56,8 +58,9 @@ işleri devralacak kişi için tek sayfada toplar. Ayrıntı belgeleri:
 
 ### 4. Kabul koşusu (P8 — Faz 1'in kapanış kapısı)
 - [ ] `KABUL_ORTAM_KURULUMU.md` fazlarının MinIO'ya çevrilmesi: TLS'li dış
-      S3 ucu, `s3-object-lock` kilit profili, geri yükleme kovası, ikinci
-      MinIO örneği (T-10), log/metrik uçları (T-11, K-6).
+      S3 ucu, `s3-object-lock` kilit profili, geri yükleme kovası ve ikinci
+      MinIO örneği (T-10). T-11/K-6 için staging'e özel kimlik doğrulamalı
+      log/metrik kanıt ucu artık uygulamada hazırdır.
 - [ ] Dar IAM kimlikleri: uygulama/scanner/ocr/viewer rol politikaları
       (compose'un tek `readwrite` kullanıcısı kabul için YETMEZ; K-4/T-06
       bu ayrımı fiilen doğrular).
@@ -70,7 +73,7 @@ işleri devralacak kişi için tek sayfada toplar. Ayrıntı belgeleri:
       T-07 N/A ise Hukuk/KVKK) — manifest özetine bağlanır.
 
 ### 5. Sonraki dalgalar (Faz 1 sonrası, ayrı planlama)
-- [ ] UI'nin kurum içi sunumu (Node yığını bilinçli API-only).
+- [x] UI'nin kurum içi sunumu (sırsız ayrı UI konteyneri + SSO vekili).
 - [ ] P9: PostgreSQL geçişi + arama iyileştirmesi (çok replika gerekirse
       öne çekilir) + MinIO KES/SSE ile kurum sahipliğinde anahtar (ADR-018
       Karar 2, 2. dalga).

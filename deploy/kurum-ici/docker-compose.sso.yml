@@ -21,15 +21,30 @@ services:
       - oauth2-proxy
     volumes: !override
       - ./sso/nginx.sso.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./sso/validate-edge-env.sh:/opt/sivas-arsiv/validate-edge-env.sh:ro
+    entrypoint: ["/bin/sh", "/opt/sivas-arsiv/validate-edge-env.sh"]
+    command: ["nginx", "-g", "daemon off;"]
     environment:
-      # >= 32 karakter zorunlu; boş değer nginx yapılandırma üretimini bozar
-      # (bilinçli fail-closed) ve vekil hiç açılmaz.
-      ACCEPTANCE_PROXY_TOKEN: ${ACCEPTANCE_PROXY_TOKEN:?}
+      APP_ENV: ${APP_ENV:?}
+      # Yalnız staging kabul ortamında enabled + >=32 karakter jeton.
+      # Production doğrulaması enabled değerini ve dolu jetonu reddeder.
+      ARCHIVE_ACCEPTANCE_BYPASS_ENABLED: ${ARCHIVE_ACCEPTANCE_BYPASS_ENABLED:-disabled}
+      ACCEPTANCE_PROXY_TOKEN: ${ACCEPTANCE_PROXY_TOKEN:-}
       # Yönlendirme şeması istemci başlığından alınmaz. Üretimde yalnız https.
       ARCHIVE_EXTERNAL_SCHEME: ${ARCHIVE_EXTERNAL_SCHEME:-https}
 
   oauth2-proxy:
     image: ${OAUTH2_PROXY_IMAGE:-quay.io/oauth2-proxy/oauth2-proxy:v7.6.0}
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 30s
+    mem_limit: ${OAUTH2_PROXY_MEMORY_LIMIT:-512m}
+    cpus: ${OAUTH2_PROXY_CPU_LIMIT:-0.5}
+    pids_limit: ${OAUTH2_PROXY_PIDS_LIMIT:-256}
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
       OAUTH2_PROXY_OIDC_ISSUER_URL: ${SSO_ISSUER_URL:?}      # ör. https://kimlik.sivas.bel.tr/realms/sivas-arsiv
@@ -56,6 +71,16 @@ services:
   keycloak:
     profiles: [kimlik-yerel]
     image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.0}
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 60s
+    mem_limit: ${KEYCLOAK_MEMORY_LIMIT:-2g}
+    cpus: ${KEYCLOAK_CPU_LIMIT:-2.0}
+    pids_limit: ${KEYCLOAK_PIDS_LIMIT:-512}
     command: ["start-dev", "--import-realm", "--http-port=8081"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:?}

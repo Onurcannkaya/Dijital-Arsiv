@@ -22,7 +22,11 @@ async function readMetrics(ctx) {
   let last = { ok: false, status: 0, body: null };
   for (let attempt = 0; attempt < (ctx.metricsAttempts ?? 12); attempt += 1) {
     const response = await fetcher(endpoint, {
-      headers: { authorization: `Bearer ${ctx.config.resourceMetricsToken}` },
+      headers: {
+        authorization: `Bearer ${ctx.config.resourceMetricsToken}`,
+        ...(ctx.config.acceptanceProxyToken
+          ? { "x-acceptance-proxy-token": ctx.config.acceptanceProxyToken } : {}),
+      },
       signal: ctx.signal,
     });
     let body = null;

@@ -47,6 +47,7 @@ test("Node sağlayıcısı adaptörleri ve ortam yapılandırmasını birleştir
     APP_ENV: "staging",
     ARCHIVE_MIGRATION_TOKEN: "m".repeat(32),
     ARCHIVE_ACCEPTANCE_TOKEN: "a".repeat(32),
+    ARCHIVE_RUNTIME_MEMORY_LIMIT_BYTES: "2147483648",
     ARCHIVE_ADMIN_EMAILS: "yonetici@sivas.bel.tr",
     OCR_SERVICE_URL: "https://ocr.internal",
     // İlgisiz anahtarlar bağlamaya taşınmaz.
@@ -62,6 +63,7 @@ test("Node sağlayıcısı adaptörleri ve ortam yapılandırmasını birleştir
   assert.equal(bindings.APP_ENV, "staging");
   assert.equal(bindings.ARCHIVE_MIGRATION_TOKEN, "m".repeat(32));
   assert.equal(bindings.OCR_SERVICE_URL, "https://ocr.internal");
+  assert.equal(bindings.ARCHIVE_RUNTIME_MEMORY_LIMIT_BYTES, "2147483648");
   assert.ok(!("PATH" in bindings));
 });
 

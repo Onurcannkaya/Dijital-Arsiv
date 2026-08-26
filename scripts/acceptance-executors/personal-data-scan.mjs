@@ -24,7 +24,11 @@ async function readCorrelatedLogs(ctx) {
   let last = { status: 0, ok: false, records: [] };
   for (let attempt = 0; attempt < (ctx.logAttempts ?? 12); attempt += 1) {
     const response = await fetcher(endpoint, {
-      headers: { authorization: `Bearer ${ctx.config.logToken}` },
+      headers: {
+        authorization: `Bearer ${ctx.config.logToken}`,
+        ...(ctx.config.acceptanceProxyToken
+          ? { "x-acceptance-proxy-token": ctx.config.acceptanceProxyToken } : {}),
+      },
       signal: ctx.signal,
     });
     let body = null;

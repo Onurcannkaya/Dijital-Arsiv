@@ -146,8 +146,9 @@ bağımlılık bir sunucudur.
    `KABUL_HAZIRLIK_DURUMU.md` sonunda) — geliştirme makinesi Docker'sız.
 2. **GitHub runner erişim modeli:** DMZ'de erişilebilir staging mi,
    self-hosted runner mı? (Bilgi Güvenliği kararı.)
-3. **Log/metrik katmanı (T-11/K-6):** Loki+cAdvisor kurulacak mı, yoksa iki
-   test bilinçli BLOCKED mi bırakılacak?
+3. **Log/metrik kanıtı (T-11/K-6):** staging'e özel, jetonlu ve production'da
+   404 dönen sınırlı kanıt ucu kodlandı. Kurumun kalıcı SIEM/izleme ürünü ayrı
+   işletim kararıdır; kabul testlerini artık teknik olarak engellemez.
 4. **Ortam değerleri:** `ACCEPTANCE_BASE_URL`, sentetik yükleyici kimliği,
    imzalı Faz 0 kanıt workflow run kimliği, açık kritik/yüksek bulgu
    sayıları ve IAM üçlüleri (runbook §5). Şema v33'tür; kabul workflow'u

@@ -12,6 +12,14 @@ services:
 
   tls-edge:
     image: ${NGINX_IMAGE:-nginx:1.27-alpine}
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    mem_limit: ${TLS_EDGE_MEMORY_LIMIT:-256m}
+    cpus: ${TLS_EDGE_CPU_LIMIT:-0.5}
+    pids_limit: ${TLS_EDGE_PIDS_LIMIT:-256}
     depends_on:
       - proxy
     ports:

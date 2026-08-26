@@ -51,6 +51,14 @@ function positiveNumber(value) {
   return Number.isFinite(parsed) && parsed > 0;
 }
 
+function memoryLimitBytes(value) {
+  const match = /^(\d+(?:\.\d+)?)([kmgt])$/i.exec(value ?? "");
+  if (!match) return null;
+  const exponent = { k: 1, m: 2, g: 3, t: 4 }[match[2].toLowerCase()];
+  const bytes = Number(match[1]) * (1024 ** exponent);
+  return Number.isSafeInteger(bytes) && bytes > 0 ? bytes : null;
+}
+
 function present(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -62,6 +70,15 @@ function secret(value) {
 function immutableImage(value) {
   return typeof value === "string"
     && /^[^\s@]+@sha256:[a-f0-9]{64}$/.test(value);
+}
+
+function wormDuration(value) {
+  const match = /^(\d+)([dmy])$/.exec(value ?? "");
+  return Boolean(match && Number(match[1]) > 0);
+}
+
+function decisionReference(value) {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._/-]{5,127}$/.test(value);
 }
 
 /** Değerleri asla döndürmez; yalnız kararlı hata kodları üretir. */
@@ -124,11 +141,23 @@ export function validateOnpremRuntimeEnv(values, deployEnvironment, options = {}
   if (production) {
     add(values.ARCHIVE_WORM_POLICY_APPROVED === "approved-production-policy",
       "WORM_POLICY_NOT_APPROVED");
+    add(wormDuration(values.ARCHIVE_WORM_RETENTION_DURATION), "WORM_DURATION_INVALID");
+    add(values.ARCHIVE_WORM_RETENTION_DURATION !== "1d", "WORM_STAGING_DURATION_IN_PRODUCTION");
+    add(decisionReference(values.ARCHIVE_WORM_POLICY_REFERENCE), "WORM_POLICY_REFERENCE_INVALID");
     add(values.SQLITE_PITR_RESTORE_DRILL_APPROVED === "approved-representative-restore",
       "PITR_RESTORE_DRILL_NOT_APPROVED");
   }
 
   if (requireEdge) {
+    const configuredMemoryBytes = Number(values.API_MEMORY_LIMIT_BYTES);
+    add(memoryLimitBytes(values.API_MEMORY_LIMIT) !== null, "API_MEMORY_LIMIT_INVALID");
+    add(Number.isSafeInteger(configuredMemoryBytes) && configuredMemoryBytes > 0,
+      "API_MEMORY_LIMIT_BYTES_INVALID");
+    if (memoryLimitBytes(values.API_MEMORY_LIMIT) !== null
+        && Number.isSafeInteger(configuredMemoryBytes)) {
+      add(memoryLimitBytes(values.API_MEMORY_LIMIT) === configuredMemoryBytes,
+        "API_MEMORY_LIMIT_MISMATCH");
+    }
     add(present(values.ARCHIVE_CANONICAL_HOST), "CANONICAL_HOST_MISSING");
     add(values.ARCHIVE_EXTERNAL_SCHEME === "https", "EXTERNAL_SCHEME_INVALID");
     add(validHttps(values.SSO_ISSUER_URL), "SSO_ISSUER_INVALID");
@@ -146,7 +175,15 @@ export function validateOnpremRuntimeEnv(values, deployEnvironment, options = {}
       "SSO_EMAIL_DOMAIN_INVALID");
     add(present(values.SSO_ALLOWED_REDIRECT_DOMAINS)
       && !values.SSO_ALLOWED_REDIRECT_DOMAINS.includes("*"), "SSO_REDIRECT_DOMAIN_INVALID");
-    add(secret(values.ACCEPTANCE_PROXY_TOKEN), "ACCEPTANCE_PROXY_TOKEN_INVALID");
+    if (production) {
+      add(values.ARCHIVE_ACCEPTANCE_BYPASS_ENABLED === "disabled",
+        "PRODUCTION_ACCEPTANCE_BYPASS_ENABLED");
+      add(!present(values.ACCEPTANCE_PROXY_TOKEN), "PRODUCTION_ACCEPTANCE_TOKEN_PRESENT");
+    } else {
+      add(values.ARCHIVE_ACCEPTANCE_BYPASS_ENABLED === "enabled",
+        "STAGING_ACCEPTANCE_BYPASS_DISABLED");
+      add(secret(values.ACCEPTANCE_PROXY_TOKEN), "ACCEPTANCE_PROXY_TOKEN_INVALID");
+    }
     add(isAbsolute(values.ARCHIVE_TLS_CERT_FILE ?? ""), "TLS_CERT_PATH_INVALID");
     add(isAbsolute(values.ARCHIVE_TLS_KEY_FILE ?? ""), "TLS_KEY_PATH_INVALID");
 

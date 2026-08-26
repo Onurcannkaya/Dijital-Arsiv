@@ -22,7 +22,7 @@ repoda kanıtlanmış bir taşıma deseni vardır.
 | Veri şeması ve göçler: `lib/archive-schema.ts`, `lib/ingest-schema.ts` (denetim değişmezlik tetikleyicileri dahil) | SQLite lehçesi; kurum içi SQLite yolunda birebir çalışır (bkz. §3) |
 | Kabul altyapısı: `scripts/phase-one-acceptance-*`, `scripts/acceptance-executors/*` (19 test) | Tasarım gereği sağlayıcıdan bağımsız: HTTPS + S3 SigV4. Kurum içi staging'e karşı aynen yeniden koşulur; T-10 taşınabilirliği zaten kanıtlıyor |
 | Tam test takımı + `tests/sqlite-d1.ts` şimi | Node üzerinde koşuyor; şim, D1 arayüzünün gerçek SQLite ile karşılanabildiğinin kanıtı |
-| UI (Next.js app router, `app/`) | Standart React/Next; çalışma zamanı değişiminden etkilenmez |
+| UI (Next.js/Vinext app router, `app/`) | Yalnız sırsız sunum/PWA katmanıdır; DB, S3, kuyruk ve saklama kararı taşımaz. Müdürlük kısıtı gereği kurumsal çekirdek sayılmaz |
 
 ### 1.2 Uygulanan kurum içi adaptörler
 
@@ -95,9 +95,9 @@ işaret eder):
 | P2 | SQLite D1 sarmalayıcısı (üretim sınıfı) + kalıcı disk/WAL | S-M | P1 |
 | P3 | MinIO S3 adaptörü (`object-storage.ts` uygulaması) + koşullu yazma/multipart doğrulaması | M | P1 |
 | P4 | Node çalışma zamanı + build boru hattı (vinext → node hedefi) + cron runner | M | P1 |
-| P5 | Kimlik: ters vekil + SSO entegrasyonu, başlık sözleşmesi ve ağ kapatma | M | P4 |
-| P6 | Konteynerleştirme + kurum içi CI/CD (self-hosted runner) + sır yönetimi | M | P4 |
-| P7 | Python servislerinin kurum içi dağıtımı (ClamAV imza aynası dahil) | S-M | P6 |
+| P5 | Kimlik: ters vekil + SSO entegrasyonu, production'da kapalı kabul bypass'ı, başlık sözleşmesi ve ağ kapatma | M | P4 |
+| P6 | Konteynerleştirme + SHA/SBOM kapılı kurum içi CI/CD (self-hosted runner) + sır yönetimi | M | P4 |
+| P7 | Python servisleri, ClamAV aynası, yeniden başlatma ve CPU/bellek/süreç sınırları | S-M | P6 |
 | P8 | Kabul ortamı kurulumu (runbook fazları MinIO'ya) + 19 testin yeniden koşusu | M | P2-P7 |
 | P9 | (2. dalga, opsiyonel) PostgreSQL geçişi + arama iyileştirmesi | L | P8 sonrası |
 

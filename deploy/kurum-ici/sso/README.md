@@ -16,18 +16,19 @@ Kullanıcı ──> nginx (8080)
                     istemcinin sentetik oai-* başlığı AYNEN geçer → api
 ```
 
-Kabul geçidi fail-closed'dur: `ACCEPTANCE_PROXY_TOKEN` boşsa nginx şablon
-üretimi çift map anahtarıyla bozulur ve vekil hiç açılmaz; jeton yalnız
-staging kabul koşusuna dağıtılır, üretim .env'inde rastgele tutulup kimseye
-verilmez. Yürütücüler jetonu `ACCEPTANCE_PROXY_TOKEN` ortam değişkeninden
-otomatik gönderir (scripts/acceptance-executors/contract.mjs).
+Kabul geçidi iki koşullu fail-closed'dur: staging'de
+`ARCHIVE_ACCEPTANCE_BYPASS_ENABLED=enabled` ve en az 32 karakterli jeton
+birlikte gerekir. Production'da değer `disabled`, jeton boş olmak zorundadır;
+aksi durumda hem runtime kapısı hem nginx açılış betiği sistemi durdurur.
+Yürütücüler jetonu `ACCEPTANCE_PROXY_TOKEN` ortam değişkeninden otomatik
+gönderir (scripts/acceptance-executors/contract.mjs).
 
 ## Kurulum
 
 1. `.env` dosyasına SSO bölümünü doldurun (`../.env.example` şablonundan):
 
 ```bash
-openssl rand -hex 32                       # ACCEPTANCE_PROXY_TOKEN
+openssl rand -hex 32                       # ACCEPTANCE_PROXY_TOKEN (staging)
 openssl rand -base64 32 | tr -- '+/' '-_'  # SSO_COOKIE_SECRET
 ```
 
@@ -87,3 +88,5 @@ bilinçli olarak bu kaplamanın dışındadır.
   değişiklik yönetimiyle yapılır.
 - Kabul koşusu bittiğinde `ACCEPTANCE_PROXY_TOKEN` döndürülür (rotate);
   jeton kanıt dosyalarına ve loglara yazılmaz.
+- Production `.env` dosyasına staging kabul jetonu kopyalanmaz ve bypass
+  anahtarı açılamaz.

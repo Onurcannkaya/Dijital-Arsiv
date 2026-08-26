@@ -34,7 +34,7 @@ openssl rand -hex 32   # ARCHIVE_MIGRATION_TOKEN
 openssl rand -hex 32   # CONTENT_SCAN_SERVICE_TOKEN
 openssl rand -hex 32   # OCR_SERVICE_TOKEN
 openssl rand -hex 32   # DOCUMENT_RENDER_SERVICE_TOKEN
-openssl rand -hex 32   # ACCEPTANCE_PROXY_TOKEN (SSO kaplaması için şimdiden)
+openssl rand -hex 32   # ACCEPTANCE_PROXY_TOKEN (yalnız staging kabul ortamı)
 openssl rand -hex 32   # ARCHIVE_BACKUP_S3_SECRET_ACCESS_KEY
 openssl rand -hex 32   # ALARM_WEBHOOK_TOKEN
 openssl rand -hex 32   # SQLITE_PITR_S3_SECRET_ACCESS_KEY
@@ -51,12 +51,19 @@ openssl rand -hex 32   # SQLITE_PITR_S3_SECRET_ACCESS_KEY
   verisi içindir. Üretimde kurum dosya planındaki onaylı `Nd`/`Ny` değeri
   yazılır ve ancak karar kaydı tamamlandıktan sonra
   `ARCHIVE_WORM_POLICY_APPROVED=approved-production-policy` yapılır. Bu karar
-  olmadan üretim bilinçli olarak açılmaz.
+  olmadan üretim bilinçli olarak açılmaz. Aynı kurul/tutanak kimliği
+  `ARCHIVE_WORM_POLICY_REFERENCE` alanına yazılır; staging `1d` değeri ve boş
+  karar referansı production'da reddedilir (ADR-020).
 - MinIO kullanıcı adları ve dört MinIO sırrı birbirinden farklı, sırlar en az
   32 karakter olmalıdır.
 - Üretimde nesne yedeği, SQLite PITR ve alarm bölümleri boş bırakılamaz. İki
   yedek ucu hem birincilden hem birbirinden farklı hata alanlarında; üç
   depolama kimliği ve sırları birbirinden farklı olmalıdır.
+- Staging SSO kabul koşusunda `ARCHIVE_ACCEPTANCE_BYPASS_ENABLED=enabled` ve
+  32+ karakter `ACCEPTANCE_PROXY_TOKEN` kullanılır. Production'da ilk değer
+  `disabled`, jeton ise boş olmalıdır; aksi halde rollout başlamaz.
+- Kaynak üst sınırları `.env.example` değerleriyle başlar. K-6 büyük dosya
+  ölçümü sonrasında donanıma göre ayarlanır; sınırlar kaldırılmaz.
 
 Dağıtımdan önce dosyanın değerlerini loglamayan kapıyı çalıştırın:
 
@@ -111,8 +118,8 @@ curl -k -s -o /dev/null -w '%{http_code}\n' \
   https://127.0.0.1/api/documents   # 302 → girişe yönlendirme
 ```
 
-Vekil açılmıyorsa ilk bakılacak yer: `ACCEPTANCE_PROXY_TOKEN` boş — bu
-bilinçli fail-closed'dur (şablon çift map anahtarı üretir).
+Vekil açılmıyorsa `APP_ENV` ile kabul geçidi çiftini kontrol edin: staging
+`enabled` + 32 karakter jeton, production `disabled` + boş jeton ister.
 
 ## 5. Kapalı ağ notları
 
@@ -175,7 +182,7 @@ Yedekleme (İş Etki Analizi RPO/RTO kararına bağlanır):
 
 | Belirti | Muhtemel neden | Çözüm |
 |---|---|---|
-| `proxy` açılmıyor, "duplicate ... map" | `ACCEPTANCE_PROXY_TOKEN` boş | `.env`'e >= 32 karakter jeton yazın (bilinçli fail-closed) |
+| `proxy` kabul geçidi hatasıyla açılmıyor | `APP_ENV`, bypass anahtarı ve jeton çelişkili | Staging: `enabled` + 32+ jeton; production: `disabled` + boş jeton |
 | Sağlık `degraded`, `contentScan.ok=false` | İmzalar eski/iniyor | `docker compose logs content-scan`; ayna erişimini doğrulayın |
 | Oturum `SCANNING`'de kalıyor | Tarayıcı fail-closed ya da servis jetonu uyumsuz | İmza yaşı + `CONTENT_SCAN_SERVICE_TOKEN` eşitliği |
 | Oturum `VERIFIED`'da kalıyor | Terfi zamanlayıcısı | `docker compose logs api \| grep cron.promotion` |
@@ -183,7 +190,7 @@ Yedekleme (İş Etki Analizi RPO/RTO kararına bağlanır):
 | `putIfAbsent` beklenmedik davranıyor | MinIO sürümü koşullu yazmayı desteklemiyor | MinIO'yu güncelleyin; kabul T-01 probu nihai hakemdir |
 | API açılmıyor: `ARCHIVE_S3_* zorunludur` | `.env` eksik | İlgili değişkeni doldurun (fail-closed açılış) |
 | `minio-init` benzersiz kimlik/sır hatası | Eski `.env` tek MinIO kimliğini paylaştırıyor | `.env.example` içindeki dört kimliği ve dört ayrı 32+ karakter sırrı doldurun |
-| `minio-init` üretim WORM onayı hatası | Onaylı dosya planı süresi yok | Süreyi teknik ekip uydurmaz; kurum kararını tamamlayın, onaylı süreyi yazın ve onay işaretini açın |
+| `minio-init` üretim WORM onayı hatası | Onaylı teknik süre veya karar referansı yok | Süreyi teknik ekip uydurmaz; kurul kararını tamamlayın, süre+referansı yazın ve onay işaretini açın |
 | Dağıtım `PITR_*` koduyla kapanıyor | İkinci hata alanı, ayrı kimlik, heartbeat ya da tatbikat kanıtı eksik | `.env.example` PITR bölümünü doldurun; `litestream/README.md` tatbikatını tamamlayın |
 | `litestream` sağlıksız | Yerel DB görülmüyor, S3/TLS erişimi veya dar IAM eksik | `docker compose --profile pitr logs litestream`; heartbeat ve hedef politika kanıtını inceleyin |
 

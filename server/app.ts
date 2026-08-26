@@ -20,7 +20,9 @@ import { applyArchiveMigrations } from "../lib/archive-schema.ts";
 import { getArchiveBindings } from "../lib/archive-storage.ts";
 import { bootstrapNodeRuntime, type NodeRuntimeOptions } from "../lib/node-runtime.ts";
 import type { NodeSqliteD1 } from "../lib/node-sqlite-d1.ts";
-import { logEvent } from "../lib/observability.ts";
+import {
+  configureAcceptanceObservability, correlationId, logEvent, recordRuntimeMemorySample,
+} from "../lib/observability.ts";
 import {
   CONTENT_SCAN_CRON, INTEGRITY_CRON, MAINTENANCE_CRON, OCR_CRON, runScheduledJob,
 } from "../lib/scheduled-jobs.ts";
@@ -49,6 +51,7 @@ import * as adminMaintenance from "../app/api/admin/maintenance/route.ts";
 import * as adminMigrate from "../app/api/admin/migrate/route.ts";
 import * as adminScan from "../app/api/admin/scan/route.ts";
 import * as acceptanceEvidence from "../app/api/admin/acceptance-evidence/[id]/route.ts";
+import * as acceptanceObservability from "../app/api/admin/acceptance-observability/route.ts";
 import * as activity from "../app/api/activity/route.ts";
 import * as internalObjects from "../app/api/internal/objects/route.ts";
 import * as settings from "../app/api/settings/route.ts";
@@ -89,6 +92,7 @@ const ROUTES: Array<{ pattern: RegExp; module: RouteModule }> = [
   { pattern: /^\/api\/admin\/migrate$/, module: adminMigrate },
   { pattern: /^\/api\/admin\/scan$/, module: adminScan },
   { pattern: /^\/api\/admin\/acceptance-evidence\/([^/]+)$/, module: acceptanceEvidence },
+  { pattern: /^\/api\/admin\/acceptance-observability$/, module: acceptanceObservability },
 ];
 
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
@@ -97,6 +101,8 @@ function jsonResponse(status: number, body: Record<string, unknown>): Response {
 
 export async function handleApiRequest(request: Request): Promise<Response> {
   const pathname = new URL(request.url).pathname;
+  const requestCorrelation = correlationId(request);
+  recordRuntimeMemorySample(requestCorrelation, process.memoryUsage().rss);
   for (const route of ROUTES) {
     const match = route.pattern.exec(pathname);
     if (!match) continue;
@@ -107,7 +113,9 @@ export async function handleApiRequest(request: Request): Promise<Response> {
     const params: Record<string, string> = match[1] !== undefined
       ? { id: decodeURIComponent(match[1]) } : {};
     try {
-      return await (handler as RouteHandler)(request, { params: Promise.resolve(params) });
+      const response = await (handler as RouteHandler)(request, { params: Promise.resolve(params) });
+      recordRuntimeMemorySample(requestCorrelation, process.memoryUsage().rss);
+      return response;
     } catch (error) {
       logEvent("error", "node.route-failed", {
         path: pathname,
@@ -216,10 +224,15 @@ export type NodeServer = {
 export async function startNodeServer(options: NodeServerOptions = {}): Promise<NodeServer> {
   const env = options.runtime?.env ?? process.env;
   const runtime = bootstrapNodeRuntime(options.runtime);
+  configureAcceptanceObservability(
+    env.APP_ENV?.trim() === "staging"
+      && (env.ARCHIVE_ACCEPTANCE_TOKEN?.trim().length ?? 0) >= 32,
+  );
   try {
     if (options.migrate ?? true) await applyArchiveMigrations(runtime.db);
   } catch (error) {
     runtime.close();
+    configureAcceptanceObservability(false);
     throw error;
   }
 
@@ -254,6 +267,7 @@ export async function startNodeServer(options: NodeServerOptions = {}): Promise<
       stopScheduler();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       runtime.close();
+      configureAcceptanceObservability(false);
     },
   };
 }

@@ -9,11 +9,27 @@
 
 name: sivas-arsiv
 
+x-service-resilience: &service-resilience
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 30s
+
+x-app-security: &app-security
+  <<: *service-resilience
+  cap_drop:
+    - ALL
+
 services:
   minio:
+    <<: *service-resilience
     # Yerel pilot varsayılanı korunur; korumalı dağıtım kapısı
     # MINIO_SERVER_IMAGE değerini repo@sha256:... olarak zorunlu kılar.
     image: ${MINIO_SERVER_IMAGE:-minio/minio:latest}
+    mem_limit: ${MINIO_MEMORY_LIMIT:-4g}
+    cpus: ${MINIO_CPU_LIMIT:-2.0}
+    pids_limit: ${MINIO_PIDS_LIMIT:-512}
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
@@ -31,6 +47,12 @@ services:
   # sürümleme + varsayılan COMPLIANCE Object Lock ile gerçek WORM'dur.
   minio-init:
     image: ${MINIO_CLIENT_IMAGE:-minio/mc:latest}
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${MINIO_INIT_MEMORY_LIMIT:-512m}
+    cpus: ${MINIO_INIT_CPU_LIMIT:-1.0}
+    pids_limit: 128
     depends_on:
       minio:
         condition: service_healthy
@@ -49,6 +71,30 @@ services:
         if [ "$${APP_ENV}" = "production" ] && [ "$${ARCHIVE_WORM_POLICY_APPROVED}" != "approved-production-policy" ]; then
           echo "HATA: üretim WORM süresi kurumsal onay olmadan uygulanamaz" >&2
           exit 1
+        fi
+        worm_unit="$${ARCHIVE_WORM_RETENTION_DURATION#"$${ARCHIVE_WORM_RETENTION_DURATION%?}"}"
+        worm_count="$${ARCHIVE_WORM_RETENTION_DURATION%?}"
+        case "$${worm_unit}" in d|m|y) ;; *)
+            echo "HATA: WORM süresi pozitif sayı ve d/m/y birimi taşımalıdır" >&2
+            exit 1
+        esac
+        case "$${worm_count}" in ''|*[!0-9]*)
+            echo "HATA: WORM süresi pozitif sayı ve d/m/y birimi taşımalıdır" >&2
+            exit 1
+        esac
+        if [ "$${worm_count}" -eq 0 ]; then
+          echo "HATA: WORM süresi sıfır olamaz" >&2
+          exit 1
+        fi
+        if [ "$${APP_ENV}" = "production" ]; then
+          if [ "$${ARCHIVE_WORM_RETENTION_DURATION}" = "1d" ]; then
+            echo "HATA: staging WORM süresi production'da kullanılamaz" >&2
+            exit 1
+          fi
+          if [ "$${#ARCHIVE_WORM_POLICY_REFERENCE}" -lt 6 ]; then
+            echo "HATA: production WORM kurul karar referansı zorunludur" >&2
+            exit 1
+          fi
         fi
         require_secret() {
           if [ "$${#2}" -lt 32 ]; then
@@ -115,14 +161,22 @@ services:
       ARCHIVE_WORM_RETENTION_MODE: ${ARCHIVE_WORM_RETENTION_MODE:?}
       ARCHIVE_WORM_RETENTION_DURATION: ${ARCHIVE_WORM_RETENTION_DURATION:?}
       ARCHIVE_WORM_POLICY_APPROVED: ${ARCHIVE_WORM_POLICY_APPROVED:-}
+      ARCHIVE_WORM_POLICY_REFERENCE: ${ARCHIVE_WORM_POLICY_REFERENCE:-}
     volumes:
       - ./minio/policies:/minio-policies:ro
     networks: [arsiv-ic]
 
   api:
+    <<: *app-security
     build:
       context: ../..
       dockerfile: server/Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+    mem_limit: ${API_MEMORY_LIMIT:-2g}
+    cpus: ${API_CPU_LIMIT:-2.0}
+    pids_limit: ${API_PIDS_LIMIT:-512}
     depends_on:
       minio-init:
         condition: service_completed_successfully
@@ -153,6 +207,7 @@ services:
       APP_ENV: ${APP_ENV:-staging}
       ARCHIVE_RELEASE_REVISION: ${ONPREM_IMAGE_TAG:-development}
       ARCHIVE_ACCEPTANCE_TOKEN: ${ARCHIVE_ACCEPTANCE_TOKEN:-}
+      ARCHIVE_RUNTIME_MEMORY_LIMIT_BYTES: ${API_MEMORY_LIMIT_BYTES:-2147483648}
       CONTENT_SCAN_SERVICE_URL: http://content-scan:8091
       CONTENT_SCAN_SERVICE_TOKEN: ${CONTENT_SCAN_SERVICE_TOKEN:?}
       OCR_SERVICE_URL: http://ocr:8090
@@ -165,8 +220,12 @@ services:
     networks: [arsiv-ic]
 
   content-scan:
+    <<: *app-security
     build:
       context: ../../services/content-scan
+    mem_limit: ${CONTENT_SCAN_MEMORY_LIMIT:-4g}
+    cpus: ${CONTENT_SCAN_CPU_LIMIT:-2.0}
+    pids_limit: ${CONTENT_SCAN_PIDS_LIMIT:-512}
     environment:
       CONTENT_SCAN_SERVICE_TOKEN: ${CONTENT_SCAN_SERVICE_TOKEN:?}
       CONTENT_SCAN_QUARANTINE_BUCKET: arsiv-karantina
@@ -181,8 +240,15 @@ services:
     networks: [arsiv-ic]
 
   ocr:
+    <<: *app-security
     build:
       context: ../../services/ocr
+    mem_limit: ${OCR_MEMORY_LIMIT:-8g}
+    cpus: ${OCR_CPU_LIMIT:-4.0}
+    pids_limit: ${OCR_PIDS_LIMIT:-1024}
+    # Uzun ömürlü PaddleOCR sürecindeki bellek/parçalanma ve hız bozulmasını
+    # kontrollü yeniden başlatma ile sınırlar; kalıcı kuyruk işi yeniden alır.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8090", "--limit-max-requests", "${OCR_MAX_REQUESTS:-100}"]
     environment:
       OCR_SERVICE_TOKEN: ${OCR_SERVICE_TOKEN:?}
       OCR_ORIGINAL_BUCKET: arsiv-asil
@@ -193,8 +259,12 @@ services:
     networks: [arsiv-ic]
 
   document-render:
+    <<: *app-security
     build:
       context: ../../services/document-render
+    mem_limit: ${DOCUMENT_RENDER_MEMORY_LIMIT:-4g}
+    cpus: ${DOCUMENT_RENDER_CPU_LIMIT:-2.0}
+    pids_limit: ${DOCUMENT_RENDER_PIDS_LIMIT:-512}
     environment:
       DOCUMENT_RENDER_SERVICE_TOKEN: ${DOCUMENT_RENDER_SERVICE_TOKEN:?}
       RENDER_ORIGINAL_BUCKET: arsiv-asil
@@ -210,7 +280,12 @@ services:
   # yığınına dahil değildir; COMPOSE_PROFILES=pitr ile açıkça etkinleştirilir.
   # /veri mutlaka aynı Linux çekirdeğindeki yerel blok disk üzerinde olmalıdır.
   litestream:
+    <<: *app-security
     image: ${LITESTREAM_IMAGE:-litestream/litestream:0.5.16-scratch}
+    read_only: true
+    mem_limit: ${LITESTREAM_MEMORY_LIMIT:-512m}
+    cpus: ${LITESTREAM_CPU_LIMIT:-0.5}
+    pids_limit: 128
     profiles: [pitr]
     depends_on:
       api:
@@ -238,9 +313,16 @@ services:
   # Arayüz ayrı, sırsız bir Node sürecidir. Tarayıcının /api çağrılarını
   # proxy doğrudan API servisine yollar; UI imajı depolama/DB kimliği almaz.
   ui:
+    <<: *app-security
     build:
       context: ../..
       dockerfile: server/ui.Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    mem_limit: ${UI_MEMORY_LIMIT:-512m}
+    cpus: ${UI_CPU_LIMIT:-0.5}
+    pids_limit: ${UI_PIDS_LIMIT:-256}
     environment:
       PORT: 3000
       HOSTNAME: 0.0.0.0
@@ -249,7 +331,11 @@ services:
   # Tek dış kapı: kimlik başlıklarını yöneten ters vekil. SSO entegrasyonu
   # (Keycloak/AD, P5) bu katmana eklenir; API'ye doğrudan ağ erişimi yoktur.
   proxy:
+    <<: *service-resilience
     image: ${NGINX_IMAGE:-nginx:1.27-alpine}
+    mem_limit: ${PROXY_MEMORY_LIMIT:-256m}
+    cpus: ${PROXY_CPU_LIMIT:-0.5}
+    pids_limit: ${PROXY_PIDS_LIMIT:-256}
     depends_on: [api, ui]
     ports:
       - "${ARCHIVE_PROXY_PORT:-8080}:8080"

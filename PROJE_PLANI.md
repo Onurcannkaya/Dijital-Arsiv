@@ -63,9 +63,10 @@ Cron Trigger tabanlı OCR/bakım/bütünlük işleri, exponential backoff ve
 dead-letter görünürlüğü, yapılandırılmış log, korelasyon kimliği, `/api/health`,
 kuyruk metrikleri, model gömülü OCR imajı, dev/staging/production ortam
 sözleşmesi ve CI kalite kapıları eklendi. Ancak canlı teslim ve kanıt kapısı
-tamamlanmadı: CI bugün yalnız doğrulama yapıyor; dağıtım, `deploy:verify` ve
-rollback adımlarının workflow'a bağlanması, OCR servisinin barındırılması,
-canlı staging dağıtımı ve uçtan uca kanıt paketi kalan çıkış işleridir.
+tamamlanmadı: kurum içi CI/CD artık SHA imajı, SBOM, dağıtım, `deploy:verify`
+ve rollback adımlarını bağlıyor; kalan çıkış işleri kurum runner'ında başarılı
+canlı koşu, OCR servisinin gerçek barındırma kanıtı, staging dağıtımı ve uçtan
+uca kanıt paketidir.
 
 Çıkış kapısı kodun derlenmesi değildir. Staging'de bir belge yükleme → otomatik OCR
 → doğrulama → arşivleme zinciri elle yönetim uç noktası çağrılmadan tamamlanmalı;

@@ -59,6 +59,8 @@ test("kurum içi compose WORM ve servis kimliği ayrımında fail-closed çalı�
   assert.match(compose, /mc retention set --default "\$\$\{ARCHIVE_WORM_RETENTION_MODE\}" "\$\$\{ARCHIVE_WORM_RETENTION_DURATION\}" kurum\/arsiv-asil/);
   assert.match(compose, /ARCHIVE_WORM_RETENTION_MODE[^\n]+COMPLIANCE/);
   assert.match(compose, /approved-production-policy/);
+  assert.match(compose, /ARCHIVE_WORM_POLICY_REFERENCE/);
+  assert.match(compose, /staging WORM süresi production'da kullanılamaz/);
   assert.match(compose, /mc admin policy detach kurum readwrite/);
   assert.doesNotMatch(compose, /mc admin policy attach kurum readwrite/);
   assert.match(compose, /require_distinct/);
@@ -75,6 +77,7 @@ test("örnek ortam üretim onayı ile sentetik staging süresini ayırır", asyn
   assert.match(env, /^ARCHIVE_WORM_RETENTION_MODE=COMPLIANCE$/m);
   assert.match(env, /^ARCHIVE_WORM_RETENTION_DURATION=1d$/m);
   assert.match(env, /^ARCHIVE_WORM_POLICY_APPROVED=$/m);
+  assert.match(env, /^ARCHIVE_WORM_POLICY_REFERENCE=$/m);
   for (const name of [
     "ARCHIVE_S3_ACCESS_KEY_ID", "CONTENT_SCAN_S3_ACCESS_KEY_ID",
     "OCR_S3_ACCESS_KEY_ID", "DOCUMENT_RENDER_S3_ACCESS_KEY_ID",

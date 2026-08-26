@@ -38,6 +38,11 @@ onaylandı; bu ADR onaylanan değerleri kalıcı kayda geçirir.
    varsayılan bekletme süresi tanımlanmaz, tasfiye kimliği hiç açılmaz,
    silme yetkisi hiçbir uygulama rolünde bulunmaz. Dosya planı eşlemesi
    tamamlandığında sınıf bazlı bekletme yeni ADR sürümüyle devreye alınır.
+   **Teknik uzlaştırma:** S3 Object Lock sonsuz süre kabul etmediğinden iş
+   kaydındaki “süresiz/tasfiye kapalı” kararı fiziksel WORM süresiyle aynı
+   kavram değildir. ADR-020, otomatik tasfiyeyi kapalı tutarken asıl kovada
+   kurulca onaylanan sonlu bir COMPLIANCE alt sınırı uygular; bu sürenin
+   dolması silme yetkisi veya tasfiye kararı üretmez.
 6. **Bütünlük işletimi:** Uzlaştırma günlük; tam SHA taraması envanteri 30
    günde bir turlayan dilimli döngüde. KRİTİK bulguda anında alarm ve 1 iş
    günü içinde müdahale; açık kritik bulgu varken yeni müdürlük alımı durur.

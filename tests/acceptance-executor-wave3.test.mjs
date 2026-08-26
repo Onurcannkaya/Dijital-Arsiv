@@ -114,9 +114,11 @@ test("T-11 ham sentetik de?erleri kan?ta ta??madan ?? y?zeyi tarar", async () =>
     });
     ctx.config.logEndpoint = "https://logs.example/query";
     ctx.config.logToken = "l".repeat(32);
+    ctx.config.acceptanceProxyToken = "p".repeat(32);
     ctx.config.logFetcher = async (url, init) => {
       assert.equal(new URL(url).searchParams.get("correlationId"), "run-wave3-T-11");
       assert.match(init.headers.authorization, /^Bearer /);
+      assert.equal(init.headers["x-acceptance-proxy-token"], "p".repeat(32));
       return Response.json({ records: [{
         correlationId: "run-wave3-T-11",
         event: "ingest.completed",

@@ -59,10 +59,10 @@ kanıt kapısı henüz tamamlanmamıştır. Kodlanan omurga:
 - Backoff süresi veritabanı kolonu değildir; `app/api/jobs/process/route.ts`
   içinde hesaplanır. Zamanlama alanları `next_attempt_at`, `last_attempt_at` ve
   `dead_lettered_at` kolonlarında tutulur.
-- CI workflow'u bugün yalnız doğrulama yapar. Dağıtım, `deploy:verify`
-  koşusu ve başarısızlıkta rollback adımları workflow'a bağlı değildir;
-  `scripts/verify-deployment.mjs` betiğinin mevcut olması CI/CD hattının
-  tamamlandığını tek başına göstermez.
+- Kurum içi CI/CD kod tarafında bağlıdır: `.github/workflows/deploy-onprem.yml`
+  kalite → SHA imajı/SBOM → korumalı runner → göç/readiness/sürüm kanıtı →
+  başarısızlıkta önceki SHA'ya rollback sırasını uygular. Canlı kurum runner
+  koşusu ve üretilen imzalı kanıt olmadan Faz 0 yine kapanmış sayılmaz.
 
 `vite.config.ts` içindeki yer tutucu veritabanı kimliği yalnız yerel
 Miniflare/Vite çalışması içindir. Gerçek D1/R2 kaynakları Sites kontrol düzlemi
@@ -809,8 +809,8 @@ ortam onayı koşuyu çalıştırma yetkisidir; sonuçlar oluşmadan verildiği 
 imzası sayılmaz. Bilgi İşlem, Bilgi Güvenliği ve Arşiv imzaları teknik manifest
 üretildikten sonra ona bağlanan ayrı release kapısında tamamlanmalıdır.
 
-Kurum içi yerleşimde bu zincirin dağıtım üreticisi P8 kapsamında hazırlanacak
-`.github/workflows/deploy-onprem.yml` olmalıdır ve mevcut `deploy.yml` ile aynı
+Kurum içi yerleşimde bu zincirin dağıtım üreticisi
+`.github/workflows/deploy-onprem.yml` olarak hazırlanmıştır ve mevcut `deploy.yml` ile aynı
 atteste edilmiş `deployment-evidence-<run-id>` sözleşmesini üretmelidir. Faz 0
 toplayıcısı yalnız bu iki sabit workflow yolunu kabul eder; serbest workflow
 adı/girdisi güven kökü olarak kullanılamaz.
@@ -873,16 +873,16 @@ kabul ölçütleri değişiklik yönetimi olmadan daraltılamaz.
 |---:|---|---|---|---|
 | 1 | Aynı nesne anahtarına ikinci yazma engellenir | Kod/sözleşme testi geçti; staging kanıtı açık | F1.1, F1.5 | Gerçek sağlayıcıda ikinci yazma reddi, nesne sürümü/SHA değişmedi |
 | 2 | Asıl SHA yazma sonrası doğrulanır | Kod/negatif test geçti; staging kanıtı açık | F1.5 | `promotion_receipts` alındısı ve tam yeniden okuma SHA sonucu |
-| 3 | Asıl güncellenmeden türev üretilir | Görselde mevcut, PDF eksik | F1.7 | Önce/sonra asıl SHA+sürüm ve yeni türev kaydı |
-| 4 | Kullanıcı bucket erişim anahtarı alamaz | Tasarımda mevcut | F1.9 | Yanıt/ağ izi denetimi ve erişim politikası |
-| 5 | Süresi dolan görüntüleme bileti çalışmaz | Eksik | F1.9 | Zaman kontrollü negatif test ve denetim olayı |
-| 6 | Yetkisiz rol aslı okuyamaz veya silemez | Uygulamada kısmi | F1.1, F1.9 | Uygulama ve depolama düzeyinde read/delete negatif testleri |
+| 3 | Asıl güncellenmeden türev üretilir | Kod/yürütücü testi geçti; staging kanıtı açık | F1.7 | Önce/sonra asıl SHA+sürüm ve yeni türev kaydı |
+| 4 | Kullanıcı bucket erişim anahtarı alamaz | Kod/yürütücü testi geçti; staging kanıtı açık | F1.9 | Yanıt/ağ izi denetimi ve erişim politikası |
+| 5 | Süresi dolan görüntüleme bileti çalışmaz | Kod/yürütücü testi geçti; staging kanıtı açık | F1.9 | Zaman kontrollü negatif test ve denetim olayı |
+| 6 | Yetkisiz rol aslı okuyamaz veya silemez | Kod/yürütücü testi geçti; staging kanıtı açık | F1.1, F1.9 | Uygulama ve depolama düzeyinde read/delete negatif testleri |
 | 7 | Sürümleme/Object Lock profili sonuçlandırılır | ADR-016 teknik kararı yazıldı; kurumsal onay bekliyor, R2 pilot Object Lock/legal hold için uygulanamaz | F1.0, F1.9 | Üretimde kilit/yasal bekletme test raporu; R2 pilotta gerekçeli `NOT_APPLICABLE` + bucket lock telafi testi |
-| 8 | Bütünlük taraması kontrollü uyuşmazlığı yakalar | Eksik | F1.6 | Metadata aynıyken SHA uyuşmazlığı ve kalıcı bulgu/alarm |
-| 9 | Belge bağlamıyla yedekten geri yüklenir | Eksik | F1.10 | Belge+üst veri+ilişki+denetim geri yükleme raporu |
-| 10 | Sağlayıcı taşınabilirlik manifesti doğrulanır | Eksik | F1.10 | Kaynak/hedef SHA-256 manifest sonuçları |
-| 11 | Anahtar ve erişim logunda kişisel veri yoktur | Kısmi | F1.8, F1.9 | Maskelenmiş anahtar/metadata/log tarama raporu |
-| 12 | Sahipsiz/dosyasız uzlaştırma rapor üretir | Eksik | F1.6 | İki kontrollü bulgunun koşu raporu ve çözüm durumu |
+| 8 | Bütünlük taraması kontrollü uyuşmazlığı yakalar | Kod/yürütücü testi geçti; staging kanıtı açık | F1.6 | Metadata aynıyken SHA uyuşmazlığı ve kalıcı bulgu/alarm |
+| 9 | Belge bağlamıyla yedekten geri yüklenir | Kod/yürütücü testi geçti; staging kanıtı açık | F1.10 | Belge+üst veri+ilişki+denetim geri yükleme raporu |
+| 10 | Sağlayıcı taşınabilirlik manifesti doğrulanır | Kod/yürütücü testi geçti; staging kanıtı açık | F1.10 | Kaynak/hedef SHA-256 manifest sonuçları |
+| 11 | Anahtar ve erişim logunda kişisel veri yoktur | Kod/yürütücü ve staging kanıt ucu hazır; canlı kanıt açık | F1.8, F1.9 | Maskelenmiş anahtar/metadata/log tarama raporu |
+| 12 | Sahipsiz/dosyasız uzlaştırma rapor üretir | Kod/yürütücü testi geçti; staging kanıtı açık | F1.6 | İki kontrollü bulgunun koşu raporu ve çözüm durumu |
 
 ## 9. §19 dışındaki kabul hattı güvenlik testleri
 
@@ -984,10 +984,10 @@ altyapısında çalışacak biçimde taşınmıştır. Kapsam ve gerekçe
 | P2 | Üretim sınıfı SQLite D1 sarmalayıcısı: WAL + tam fsync, atomik batch (`lib/node-sqlite-d1.ts`) | ✅ Tamam |
 | P3 | MinIO/S3 rol adaptörleri: SigV4, koşullu ilk yazma, sınırlı bellekle iç multipart (`lib/node-s3-object-storage.ts`) | ✅ Tamam |
 | P4 | Node çalışma zamanı: rota modülleri değişmeden HTTP köprüsü + iş zamanlayıcı (`server/`), depolama rol dikişi (`lib/storage-roles.ts`), uçtan uca kabul akışı testi | ✅ Tamam |
-| P5 | Kimlik sınırı: oauth2-proxy + Keycloak kaplaması, kabul koşusu için fail-closed jetonlu geçit (`deploy/kurum-ici/sso/`) | ✅ Yapılandırma hazır; Keycloak↔AD bağlantısı kurulum işi |
-| P6 | Paketleme: API imajı (bağımlılıksız), compose yığını, CI imaj kapısı (`server/Dockerfile`, `deploy/kurum-ici/`) | ✅ Tamam; imaj derlemesi CI'da doğrulanıyor |
-| P7 | İşletim: ayağa kaldırma runbook'u + duman testi + çalışma zamanı ClamAV imza tazeleme (`deploy/kurum-ici/AYAGA_KALDIRMA.md`, `smoke.sh`) | 🟨 Referans paket hazır; tek `readwrite` MinIO kimliği yalnız ilk kurulum içindir, üretim IAM/TLS ve gerçek makine kanıtı açık |
-| P8 | Kabul koşusu: 19 test MinIO'lu kurum içi staging'e karşı yeniden koşulur (`KABUL_ORTAM_KURULUMU.md` uçları çevrilir) | ⬜ Açık — makine/runner, dar IAM rolleri, ikinci sağlayıcı, log ve metrik uçları ile sır kurulumu bekliyor |
+| P5 | Kimlik sınırı: oauth2-proxy + Keycloak kaplaması; kabul bypass'ı yalnız staging'de, production'da jetonla birlikte fail-closed kapalı (`deploy/kurum-ici/sso/`) | ✅ Yapılandırma hazır; Keycloak↔AD bağlantısı kurulum işi |
+| P6 | Paketleme: API/UI imajı, compose yığını, SHA/SBOM/kritik açık ve salt-okunur konteyner CI kapısı (`server/`, `deploy/kurum-ici/`) | ✅ Kodlandı; yeni commitin uzaktaki CI koşusu bekleniyor |
+| P7 | İşletim: runbook + duman testi + ClamAV tazeleme + otomatik yeniden başlatma/kaynak/ayrıcalık sınırları | 🟨 Referans paket hazır; üretim IAM/TLS/LUKS ve gerçek makine kanıtı açık |
+| P8 | Kabul koşusu: 19 test MinIO'lu kurum içi staging'e karşı yeniden koşulur (`KABUL_ORTAM_KURULUMU.md` uçları çevrilir) | ⬜ Açık — makine/runner, dar IAM rolleri, ikinci sağlayıcı ve GitHub ortam sırları bekliyor; staging log/metrik kanıt ucu kodlandı |
 | P9 | (2. dalga, opsiyonel) PostgreSQL geçişi, arama iyileştirmesi ve MinIO KES/SSE (ADR-018 Karar 2) | ⬜ Planlanmadı; portun ön koşulu değil |
 
 Değişmeyenler: Workers pilotu davranışsal olarak korunur (tam takım her
