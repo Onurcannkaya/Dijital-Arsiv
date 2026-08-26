@@ -22,7 +22,7 @@ test("kurum içi UI standalone, sırsız ve statik varlık sağlık kontrollüd�
   assert.match(dockerfile, /ui-healthcheck\.mjs/);
   assert.match(nextConfig, /ARCHIVE_BUILD_TARGET === "onprem-ui" \? "standalone"/);
   assert.match(healthcheck, /\/archive/);
-  assert.ok(healthcheck.includes("\\/assets\\/"));
+  assert.ok(healthcheck.includes("assets|_next\\/static"));
   assert.match(builder, /dist\/standalone\/dist\/server\/\.dev\.vars/);
   assert.match(builder, /rm\(path, \{ force: true \}\)/);
 
