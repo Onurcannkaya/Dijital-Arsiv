@@ -1,9 +1,12 @@
 name: Faz 0 dağıtım
 
 # Faz 0 çıkış kapısı: kalite → dağıtım → deploy:verify → başarısızlıkta rollback.
-# staging main'e push'ta otomatik; production yalnız elle tetikleme ve korumalı
-# ortam onayıyla. Gerçek kaynak kimlikleri ve dağıtım kimliği korumalı ortam
-# sırlarından gelir (FAZ_0_ISLETIM_REHBERI.md).
+# Her iki ortam da YALNIZ elle tetiklenir. Cloudflare yolu ADR-018 ile üretim
+# hedefi olmaktan çıkıp sentetik pilota indiği için main'e her push'ta koşan
+# otomatik staging dağıtımı, ortam sırları olmadan kalıcı kırmızı üretiyordu;
+# pilot dağıtım artık bilinçli bir eylemdir. Kurum içi üretim dağıtımı
+# `deploy-onprem.yml` ile yapılır. Gerçek kaynak kimlikleri ve dağıtım kimliği
+# korumalı ortam sırlarından gelir (FAZ_0_ISLETIM_REHBERI.md).
 on:
   workflow_dispatch:
     inputs:
@@ -13,8 +16,6 @@ on:
         default: staging
         type: choice
         options: [staging, production]
-  push:
-    branches: [main]
 
 permissions:
   contents: read

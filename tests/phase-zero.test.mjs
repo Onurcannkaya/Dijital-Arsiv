@@ -115,9 +115,10 @@ test("dağıtım workflow'u kaliteyi, dağıtımı, doğrulamayı ve rollback'i 
   // Rollback yalnız dağıtım başarılıyken ve sonraki adım düştüğünde tetiklenir.
   assert.match(deploy, /if: failure\(\) && steps\.deploy\.outcome == 'success'/);
   assert.match(deploy, /npm run deploy:rollback/);
-  // production yalnız elle tetiklenir; staging main'e push'ta otomatik.
+  // Her iki ortam da elle tetiklenir: sentetik Cloudflare pilotu main'e push'ta
+  // kendiliğinden koşmaz (ADR-018; üretim dağıtımı deploy-onprem.yml).
   assert.match(deploy, /workflow_dispatch/);
-  assert.match(deploy, /branches: \[main\]/);
+  assert.doesNotMatch(deploy, /^\s*push:/m);
   assert.match(deploy, /environment: \$\{\{ github\.event\.inputs\.environment \|\| 'staging' \}\}/);
   // Üçüncü taraf action'lar değişmez commit SHA'sına sabitli.
   assert.doesNotMatch(deploy, /uses: [^@\n]+@v\d/);
