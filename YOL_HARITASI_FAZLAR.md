@@ -985,7 +985,7 @@ altyapısında çalışacak biçimde taşınmıştır. Kapsam ve gerekçe
 | P3 | MinIO/S3 rol adaptörleri: SigV4, koşullu ilk yazma, sınırlı bellekle iç multipart (`lib/node-s3-object-storage.ts`) | ✅ Tamam |
 | P4 | Node çalışma zamanı: rota modülleri değişmeden HTTP köprüsü + iş zamanlayıcı (`server/`), depolama rol dikişi (`lib/storage-roles.ts`), uçtan uca kabul akışı testi | ✅ Tamam |
 | P5 | Kimlik sınırı: oauth2-proxy + Keycloak kaplaması; kabul bypass'ı yalnız staging'de, production'da jetonla birlikte fail-closed kapalı (`deploy/kurum-ici/sso/`) | ✅ Yapılandırma hazır; Keycloak↔AD bağlantısı kurulum işi |
-| P6 | Paketleme: API/UI imajı, compose yığını, SHA/SBOM/kritik açık ve salt-okunur konteyner CI kapısı (`server/`, `deploy/kurum-ici/`) | ✅ Kodlandı; yeni commitin uzaktaki CI koşusu bekleniyor |
+| P6 | Paketleme: API/UI imajı, compose yığını, SHA/SBOM/kritik açık ve salt-okunur konteyner CI kapısı (`server/`, `deploy/kurum-ici/`) | ✅ Tamam; kapı uzaktaki koşucuda yeşil (26 Ağustos, imaj derleme + salt-okunur açılış smoke'u + compose birleştirme) |
 | P7 | İşletim: runbook + duman testi + ClamAV tazeleme + otomatik yeniden başlatma/kaynak/ayrıcalık sınırları | 🟨 Referans paket hazır; üretim IAM/TLS/LUKS ve gerçek makine kanıtı açık |
 | P8 | Kabul koşusu: 19 test MinIO'lu kurum içi staging'e karşı yeniden koşulur (`KABUL_ORTAM_KURULUMU.md` uçları çevrilir) | ⬜ Açık — makine/runner, dar IAM rolleri, ikinci sağlayıcı ve GitHub ortam sırları bekliyor; staging log/metrik kanıt ucu kodlandı |
 | P9 | (2. dalga, opsiyonel) PostgreSQL geçişi, arama iyileştirmesi ve MinIO KES/SSE (ADR-018 Karar 2) | ⬜ Planlanmadı; portun ön koşulu değil |
