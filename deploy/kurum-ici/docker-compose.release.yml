@@ -1,0 +1,22 @@
+# CI tarafından üretilen, commit SHA ile değişmez etiketlenmiş kurum içi
+# imajları kullanır. Yerel geliştirme docker-compose.yml içindeki build
+# tanımlarını kullanmaya devam eder; dağıtım `up --no-build` ile çalışır.
+
+name: sivas-arsiv
+
+services:
+  api:
+    image: ${ONPREM_IMAGE_PREFIX:?}/archive-api:${ONPREM_IMAGE_TAG:?}
+    pull_policy: always
+  ui:
+    image: ${ONPREM_IMAGE_PREFIX:?}/archive-ui:${ONPREM_IMAGE_TAG:?}
+    pull_policy: always
+  content-scan:
+    image: ${ONPREM_IMAGE_PREFIX:?}/content-scan:${ONPREM_IMAGE_TAG:?}
+    pull_policy: always
+  ocr:
+    image: ${ONPREM_IMAGE_PREFIX:?}/ocr:${ONPREM_IMAGE_TAG:?}
+    pull_policy: always
+  document-render:
+    image: ${ONPREM_IMAGE_PREFIX:?}/document-render:${ONPREM_IMAGE_TAG:?}
+    pull_policy: always

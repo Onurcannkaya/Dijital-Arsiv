@@ -244,4 +244,6 @@ test("readiness denetimi PDF türev üreticisini de ölçer", async () => {
   // sırrı wrangler zorunlu kılar, yerel geliştirme türevsiz çalışabilir.
   assert.match(source, /renderUrl \? documentRender\.ok : true/);
   assert.match(source, /configured: false/);
+  assert.match(source, /state\.rendererImageDigest !== bindings\.DOCUMENT_RENDER_IMAGE_DIGEST\.toLowerCase\(\)/);
+  assert.match(source, /state\.profileVersion !== "access-pdf-v1"/);
 });

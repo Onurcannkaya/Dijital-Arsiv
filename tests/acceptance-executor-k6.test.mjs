@@ -18,12 +18,16 @@ test("K-6 ak?? ?reticisi b?t?n y?k? bellekte kurmadan e?zamanl? par?alar? ve met
       config: {
         unit: "Kabul Testleri", resourceMetricsEndpoint: "https://metrics.example",
         resourceMetricsToken: "m".repeat(32),
-        resourceMetricsFetcher: async () => Response.json({
-          source: "fake-worker-runtime", memoryLimitBytes: 128 * 1024 * 1024,
-          samples: [20, 21, 20, 22, 21, 22, 21, 23].map((value) => ({
-            memoryBytes: value * 1024 * 1024,
-          })),
-        }),
+        acceptanceProxyToken: "p".repeat(32),
+        resourceMetricsFetcher: async (_url, init) => {
+          assert.equal(init.headers["x-acceptance-proxy-token"], "p".repeat(32));
+          return Response.json({
+            source: "fake-worker-runtime", memoryLimitBytes: 128 * 1024 * 1024,
+            samples: [20, 21, 20, 22, 21, 22, 21, 23].map((value) => ({
+              memoryBytes: value * 1024 * 1024,
+            })),
+          });
+        },
       },
       writeEvidence: evidenceWriter(dir),
     });

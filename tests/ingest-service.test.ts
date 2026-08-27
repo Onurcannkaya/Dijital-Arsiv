@@ -79,6 +79,36 @@ test("idempotent oturum aynı yükleme kimliğini döndürür, farklı istekle �
   }
 });
 
+test("yükleme kabulü fiziksel kullanım ve açık oturum rezervasyonunu atomik kotayla sınırlar", async () => {
+  const target = fixture();
+  try {
+    await applyArchiveMigrations(target.db);
+    const dependencies = { ...target.dependencies, capacityLimitBytes: 1500 };
+    const input = {
+      userId: "user@sivas.bel.tr",
+      unit: "Yazı İşleri",
+      idempotencyKey: "quota-1",
+      expectedByteSize: 1000,
+      declaredMediaType: "application/pdf",
+    };
+    const first = await createUploadSession(dependencies, input);
+    const resumed = await createUploadSession(dependencies, input);
+    assert.equal(resumed.id, first.id, "idempotent tekrar ikinci rezervasyon oluşturmamalı");
+
+    await assert.rejects(() => createUploadSession(dependencies, {
+      ...input,
+      idempotencyKey: "quota-2",
+      expectedByteSize: 501,
+    }), (error: unknown) => error instanceof IngestOperationError
+      && error.code === "STORAGE_QUOTA_EXCEEDED" && error.status === 507);
+    assert.equal((target.db.raw.prepare("SELECT COUNT(*) AS count FROM upload_sessions").get() as { count: number }).count, 1);
+    assert.equal((target.db.raw.prepare("SELECT COUNT(*) AS count FROM ingest_objects").get() as { count: number }).count, 1,
+      "reddedilen rezervasyon sahipsiz envanter kaydı bırakmamalı");
+  } finally {
+    target.db.close();
+  }
+});
+
 test("multipart kesintiden sonra eksik parçadan sürer ve karantinaya akışla tamamlanır", async () => {
   const target = fixture();
   try {

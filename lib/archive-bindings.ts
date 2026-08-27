@@ -43,8 +43,12 @@ export type ArchiveBindings = {
   /** Şema göç uç noktasının anahtarı; tanımlı değilse uç nokta kapalıdır. */
   ARCHIVE_MIGRATION_TOKEN?: string;
   APP_ENV?: string;
+  /** Kurum içi imajın değişmez commit etiketi; readiness kanıtına yansır. */
+  ARCHIVE_RELEASE_REVISION?: string;
   /** Yalnız staging kabul kanıtı okuma uç noktasının ayrı, en-dar yetki anahtarıdır. */
   ARCHIVE_ACCEPTANCE_TOKEN?: string;
+  /** Staging kaynak kanıtındaki API konteyneri bellek tavanı (bayt). */
+  ARCHIVE_RUNTIME_MEMORY_LIMIT_BYTES?: string;
   /**
    * YALNIZ YEREL GELİŞTİRME: "enabled" iken /api/internal/objects ucu açılır ve
    * Python servisleri nesneleri S3 yerine uygulamadan indirir. Üretimde ve kabul
@@ -117,7 +121,9 @@ const NODE_CONFIG_KEYS = [
   "ARCHIVE_ADMIN_EMAILS",
   "ARCHIVE_MIGRATION_TOKEN",
   "APP_ENV",
+  "ARCHIVE_RELEASE_REVISION",
   "ARCHIVE_ACCEPTANCE_TOKEN",
+  "ARCHIVE_RUNTIME_MEMORY_LIMIT_BYTES",
   "ARCHIVE_INTERNAL_OBJECT_FETCH",
   "ALARM_WEBHOOK_URL",
   "ALARM_WEBHOOK_TOKEN",

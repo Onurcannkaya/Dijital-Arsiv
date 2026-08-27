@@ -105,7 +105,7 @@ export function ActivityScreen({onOpenDocument}:{onOpenDocument:(id:string)=>voi
         :!entries.length?<p className="table-empty">Bu süzgeçle kayıt bulunamadı.</p>
         :<ul className="activity-list">{entries.map((entry)=>
           <li key={`${entry.kind}-${entry.id}`}>
-            <span className={`activity-icon ${entry.kind}`}>{entry.kind==="user"?<UserRound size={16}/>:<History size={16}/>}</span>
+            <span className={`activity-icon activity-kind-${entry.kind}`}>{entry.kind==="user"?<UserRound size={16}/>:<History size={16}/>}</span>
             <div className="activity-body">
               <b>{entry.kind==="user"
                 ?<>{entry.targetEmail} <em>{describe(entry)}</em></>

@@ -32,9 +32,9 @@ test("vurgu aralığı özgün metindeki büyük harfli ve diakritikli kelimeyi 
 });
 
 test("üst üste binen aralıklar tek işarete kaynaşır", () => {
-  // "keskin" ve "eski" aynı kelimede kesişir; iç içe <mark> üretilmemeli.
+  // Aynı kelimenin iki başlangıç eşleşmesi iç içe <mark> üretmemeli.
   const display = "Ali Keskin dosyası";
-  const ranges = findHighlightRanges(display, [...searchTokens("keskin"), ...searchTokens("eski")]);
+  const ranges = findHighlightRanges(display, [...searchTokens("keskin"), ...searchTokens("kes")]);
   assert.equal(ranges.length, 1);
   assert.equal(display.slice(ranges[0][0], ranges[0][1]), "Keskin");
 });
@@ -44,6 +44,14 @@ test("sayfa eşleşmesi tam normalleştirmeyle karar verir", () => {
   assert.ok(matchesAnyToken("Emlak ve İstimlak MÜDÜRLÜĞÜNDEN verilen yazı", tokens));
   assert.ok(!matchesAnyToken("Encümen kararı", tokens));
   assert.ok(!matchesAnyToken("", tokens));
+});
+
+test("kelime içinden başlayan yanlış eşleşme ve vurgu üretilmez", () => {
+  const tokens = searchTokens("alı");
+  assert.ok(matchesAnyToken("Alıcı başvurusu", tokens));
+  assert.ok(!matchesAnyToken("Belediye hali denetimi", tokens));
+  assert.deepEqual(findHighlightRanges("Belediye hali denetimi", tokens), []);
+  assert.equal(findHighlightRanges("Alıcı başvurusu", tokens).length, 1);
 });
 
 test("kırpıntı, eşleşmeyi bağlamıyla verir ve pencere başına toplar", () => {
@@ -80,6 +88,12 @@ test("inceleme ekranı arama terimini alır ve eşleşmeye kendiliğinden gider"
   assert.match(review, /parseQuickQuery\(searchTerm\?\?""\)\.freeText/);
   // Aramadan gelen memur ilk eşleşmeye kendisi tıklamak zorunda kalmaz.
   assert.match(review, /jumpToPage\(matchingPages\[0\]\)/);
+  assert.match(review, /searchJumpKey=`\$\{documentId\}:\$\{activeSearch\}`/,
+    "aynı belgede değişen arama yeni eşleşmeye atlamalı");
+  assert.match(review, /lastSearchJumpRef\.current===searchJumpKey/,
+    "etki state güncellemesi yerine belge+sorgu anahtarlı ref kullanmalı");
+  assert.doesNotMatch(review, /setSearchJumped/,
+    "arama atlaması efekt içinde senkron state zinciri üretmemeli");
   // Sayfa bölümleri atlanabilir çapa taşır.
   assert.match(review, /id=\{`okuma-sayfa-\$\{page\.pageNumber\}`\}/);
 });

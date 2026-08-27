@@ -59,6 +59,17 @@ export async function GET(request: Request) {
             const response = await fetch(`${renderUrl}/health`, { signal: AbortSignal.timeout(5_000) });
             // Servis kendi yapılandırma eksiğini 503 ile bildirir (main.py /health).
             if (!response.ok) throw new Error("Document render health check failed");
+            const state = await response.json() as {
+              renderer?: unknown;
+              rendererImageDigest?: unknown;
+              profileVersion?: unknown;
+            };
+            if (state.renderer !== "pdfium"
+              || state.profileVersion !== "access-pdf-v1"
+              || typeof bindings.DOCUMENT_RENDER_IMAGE_DIGEST !== "string"
+              || state.rendererImageDigest !== bindings.DOCUMENT_RENDER_IMAGE_DIGEST.toLowerCase()) {
+              throw new Error("Document render provenance mismatch");
+            }
           })
         : Promise.resolve({ ok: false, latencyMs: 0, configured: false }),
     ]);
@@ -79,6 +90,7 @@ export async function GET(request: Request) {
     });
     return Response.json({
       status: ready ? "ready" : "degraded",
+      releaseRevision: bindings.ARCHIVE_RELEASE_REVISION ?? null,
       checks: { database, objectStorage, ocr, contentScan, documentRender, schema },
       timestamp: new Date().toISOString(),
       correlationId: requestId,

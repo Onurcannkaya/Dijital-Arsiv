@@ -3,16 +3,33 @@
 # Bileşenler: MinIO (4 kova; asıl kasa Object Lock'lu), Node API, üç Python
 # servisi ve oai-* kimlik başlıklarını yöneten nginx ters vekili. Sırlar bu
 # dosyada DEĞİL, yanındaki .env dosyasındadır (.env.example'dan üretilir ve
-# sürüm kontrolüne girmez). Üretimde her servis kendi dar MinIO kullanıcısını
-# almalıdır; bu iskelet tek uygulama kimliğiyle başlar (README §IAM).
+# sürüm kontrolüne girmez). Her servis ayrı, dar MinIO politikasıyla çalışır.
 #
 #   docker compose --project-name sivas-arsiv up -d --build
 
 name: sivas-arsiv
 
+x-service-resilience: &service-resilience
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 30s
+
+x-app-security: &app-security
+  <<: *service-resilience
+  cap_drop:
+    - ALL
+
 services:
   minio:
-    image: minio/minio:latest
+    <<: *service-resilience
+    # Yerel pilot varsayılanı korunur; korumalı dağıtım kapısı
+    # MINIO_SERVER_IMAGE değerini repo@sha256:... olarak zorunlu kılar.
+    image: ${MINIO_SERVER_IMAGE:-minio/minio:latest}
+    mem_limit: ${MINIO_MEMORY_LIMIT:-4g}
+    cpus: ${MINIO_CPU_LIMIT:-2.0}
+    pids_limit: ${MINIO_PIDS_LIMIT:-512}
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
@@ -26,10 +43,16 @@ services:
       timeout: 5s
       retries: 12
 
-  # Kovalar tek seferlik kurulur: asıl kasa sürümleme + Object Lock ile açılır
-  # (gerçek WORM; ADR-016). Mevcut kovalarda komutlar idempotenttir.
+  # Kovalar ve dar IAM politikaları idempotent biçimde kurulur. Asıl kasa
+  # sürümleme + varsayılan COMPLIANCE Object Lock ile gerçek WORM'dur.
   minio-init:
-    image: minio/mc:latest
+    image: ${MINIO_CLIENT_IMAGE:-minio/mc:latest}
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${MINIO_INIT_MEMORY_LIMIT:-512m}
+    cpus: ${MINIO_INIT_CPU_LIMIT:-1.0}
+    pids_limit: 128
     depends_on:
       minio:
         condition: service_healthy
@@ -41,23 +64,119 @@ services:
         mc alias set kurum http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
         mc mb --ignore-existing --with-lock kurum/arsiv-asil
         mc version enable kurum/arsiv-asil
+        if [ "$${ARCHIVE_WORM_RETENTION_MODE}" != "COMPLIANCE" ]; then
+          echo "HATA: ARCHIVE_WORM_RETENTION_MODE yalnız COMPLIANCE olabilir" >&2
+          exit 1
+        fi
+        if [ "$${APP_ENV}" = "production" ] && [ "$${ARCHIVE_WORM_POLICY_APPROVED}" != "approved-production-policy" ]; then
+          echo "HATA: üretim WORM süresi kurumsal onay olmadan uygulanamaz" >&2
+          exit 1
+        fi
+        worm_unit="$${ARCHIVE_WORM_RETENTION_DURATION#"$${ARCHIVE_WORM_RETENTION_DURATION%?}"}"
+        worm_count="$${ARCHIVE_WORM_RETENTION_DURATION%?}"
+        case "$${worm_unit}" in d|m|y) ;; *)
+            echo "HATA: WORM süresi pozitif sayı ve d/m/y birimi taşımalıdır" >&2
+            exit 1
+        esac
+        case "$${worm_count}" in ''|*[!0-9]*)
+            echo "HATA: WORM süresi pozitif sayı ve d/m/y birimi taşımalıdır" >&2
+            exit 1
+        esac
+        if [ "$${worm_count}" -eq 0 ]; then
+          echo "HATA: WORM süresi sıfır olamaz" >&2
+          exit 1
+        fi
+        if [ "$${APP_ENV}" = "production" ]; then
+          if [ "$${ARCHIVE_WORM_RETENTION_DURATION}" = "1d" ]; then
+            echo "HATA: staging WORM süresi production'da kullanılamaz" >&2
+            exit 1
+          fi
+          if [ "$${#ARCHIVE_WORM_POLICY_REFERENCE}" -lt 6 ]; then
+            echo "HATA: production WORM kurul karar referansı zorunludur" >&2
+            exit 1
+          fi
+        fi
+        require_secret() {
+          if [ "$${#2}" -lt 32 ]; then
+            echo "HATA: $${1} en az 32 karakter olmalıdır" >&2
+            exit 1
+          fi
+        }
+        require_distinct() {
+          while [ "$${#}" -gt 1 ]; do
+            first="$${1}"
+            shift
+            for other in "$${@}"; do
+              if [ "$${first}" = "$${other}" ]; then
+                echo "HATA: MinIO servis kimlikleri ve sırları benzersiz olmalıdır" >&2
+                exit 1
+              fi
+            done
+          done
+        }
+        require_secret ARCHIVE_S3_SECRET_ACCESS_KEY "$${ARCHIVE_S3_SECRET_ACCESS_KEY}"
+        require_secret CONTENT_SCAN_S3_SECRET_ACCESS_KEY "$${CONTENT_SCAN_S3_SECRET_ACCESS_KEY}"
+        require_secret OCR_S3_SECRET_ACCESS_KEY "$${OCR_S3_SECRET_ACCESS_KEY}"
+        require_secret DOCUMENT_RENDER_S3_SECRET_ACCESS_KEY "$${DOCUMENT_RENDER_S3_SECRET_ACCESS_KEY}"
+        require_distinct "$${ARCHIVE_S3_ACCESS_KEY_ID}" "$${CONTENT_SCAN_S3_ACCESS_KEY_ID}" "$${OCR_S3_ACCESS_KEY_ID}" "$${DOCUMENT_RENDER_S3_ACCESS_KEY_ID}"
+        require_distinct "$${ARCHIVE_S3_SECRET_ACCESS_KEY}" "$${CONTENT_SCAN_S3_SECRET_ACCESS_KEY}" "$${OCR_S3_SECRET_ACCESS_KEY}" "$${DOCUMENT_RENDER_S3_SECRET_ACCESS_KEY}"
+        mc retention set --default "$${ARCHIVE_WORM_RETENTION_MODE}" "$${ARCHIVE_WORM_RETENTION_DURATION}" kurum/arsiv-asil
         mc mb --ignore-existing kurum/arsiv-turev
         mc mb --ignore-existing kurum/arsiv-gecici
         mc mb --ignore-existing kurum/arsiv-karantina
-        mc admin user add kurum "$${ARCHIVE_S3_ACCESS_KEY_ID}" "$${ARCHIVE_S3_SECRET_ACCESS_KEY}" || true
-        mc admin policy attach kurum readwrite --user "$${ARCHIVE_S3_ACCESS_KEY_ID}" || true
-        echo "MinIO kurulumu tamam"
+        mc admin policy create kurum archive-api /minio-policies/archive-api.json
+        mc admin policy create kurum content-scan-readonly /minio-policies/content-scan-readonly.json
+        mc admin policy create kurum ocr-original-readonly /minio-policies/ocr-original-readonly.json
+        mc admin policy create kurum document-render /minio-policies/document-render.json
+        ensure_user() {
+          if ! mc admin user info kurum "$${1}" >/dev/null 2>&1; then
+            mc admin user add kurum "$${1}" "$${2}"
+          fi
+        }
+        ensure_user "$${ARCHIVE_S3_ACCESS_KEY_ID}" "$${ARCHIVE_S3_SECRET_ACCESS_KEY}"
+        ensure_user "$${CONTENT_SCAN_S3_ACCESS_KEY_ID}" "$${CONTENT_SCAN_S3_SECRET_ACCESS_KEY}"
+        ensure_user "$${OCR_S3_ACCESS_KEY_ID}" "$${OCR_S3_SECRET_ACCESS_KEY}"
+        ensure_user "$${DOCUMENT_RENDER_S3_ACCESS_KEY_ID}" "$${DOCUMENT_RENDER_S3_SECRET_ACCESS_KEY}"
+        assigned="$$(mc admin policy entities kurum --user "$${ARCHIVE_S3_ACCESS_KEY_ID}")"
+        case "$${assigned}" in
+          *readwrite*) mc admin policy detach kurum readwrite --user "$${ARCHIVE_S3_ACCESS_KEY_ID}" ;;
+        esac
+        mc admin policy attach kurum archive-api --user "$${ARCHIVE_S3_ACCESS_KEY_ID}"
+        mc admin policy attach kurum content-scan-readonly --user "$${CONTENT_SCAN_S3_ACCESS_KEY_ID}"
+        mc admin policy attach kurum ocr-original-readonly --user "$${OCR_S3_ACCESS_KEY_ID}"
+        mc admin policy attach kurum document-render --user "$${DOCUMENT_RENDER_S3_ACCESS_KEY_ID}"
+        echo "MinIO WORM ve rol bazlı IAM kurulumu tamam"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
       ARCHIVE_S3_ACCESS_KEY_ID: ${ARCHIVE_S3_ACCESS_KEY_ID:?}
       ARCHIVE_S3_SECRET_ACCESS_KEY: ${ARCHIVE_S3_SECRET_ACCESS_KEY:?}
+      CONTENT_SCAN_S3_ACCESS_KEY_ID: ${CONTENT_SCAN_S3_ACCESS_KEY_ID:?}
+      CONTENT_SCAN_S3_SECRET_ACCESS_KEY: ${CONTENT_SCAN_S3_SECRET_ACCESS_KEY:?}
+      OCR_S3_ACCESS_KEY_ID: ${OCR_S3_ACCESS_KEY_ID:?}
+      OCR_S3_SECRET_ACCESS_KEY: ${OCR_S3_SECRET_ACCESS_KEY:?}
+      DOCUMENT_RENDER_S3_ACCESS_KEY_ID: ${DOCUMENT_RENDER_S3_ACCESS_KEY_ID:?}
+      DOCUMENT_RENDER_S3_SECRET_ACCESS_KEY: ${DOCUMENT_RENDER_S3_SECRET_ACCESS_KEY:?}
+      APP_ENV: ${APP_ENV:-staging}
+      ARCHIVE_WORM_RETENTION_MODE: ${ARCHIVE_WORM_RETENTION_MODE:?}
+      ARCHIVE_WORM_RETENTION_DURATION: ${ARCHIVE_WORM_RETENTION_DURATION:?}
+      ARCHIVE_WORM_POLICY_APPROVED: ${ARCHIVE_WORM_POLICY_APPROVED:-}
+      ARCHIVE_WORM_POLICY_REFERENCE: ${ARCHIVE_WORM_POLICY_REFERENCE:-}
+    volumes:
+      - ./minio/policies:/minio-policies:ro
     networks: [arsiv-ic]
 
   api:
+    <<: *app-security
     build:
       context: ../..
       dockerfile: server/Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+    mem_limit: ${API_MEMORY_LIMIT:-2g}
+    cpus: ${API_CPU_LIMIT:-2.0}
+    pids_limit: ${API_PIDS_LIMIT:-512}
     depends_on:
       minio-init:
         condition: service_completed_successfully
@@ -70,11 +189,25 @@ services:
       ARCHIVE_S3_BUCKET_DERIVATIVE: arsiv-turev
       ARCHIVE_S3_BUCKET_TEMPORARY: arsiv-gecici
       ARCHIVE_S3_BUCKET_QUARANTINE: arsiv-karantina
+      # Nesne yedeği ayrı hata alanındaki S3 uyumlu hedefe gider. Staging'de
+      # boş bırakılabilir; üretim dağıtım/çalışma zamanı kapıları zorunlu tutar.
+      ARCHIVE_S3_BUCKET_BACKUP: ${ARCHIVE_S3_BUCKET_BACKUP:-}
+      ARCHIVE_BACKUP_S3_ENDPOINT: ${ARCHIVE_BACKUP_S3_ENDPOINT:-}
+      ARCHIVE_BACKUP_S3_REGION: ${ARCHIVE_BACKUP_S3_REGION:-auto}
+      ARCHIVE_BACKUP_S3_ACCESS_KEY_ID: ${ARCHIVE_BACKUP_S3_ACCESS_KEY_ID:-}
+      ARCHIVE_BACKUP_S3_SECRET_ACCESS_KEY: ${ARCHIVE_BACKUP_S3_SECRET_ACCESS_KEY:-}
+      ARCHIVE_BACKUP_S3_SESSION_TOKEN: ${ARCHIVE_BACKUP_S3_SESSION_TOKEN:-}
+      ARCHIVE_BACKUP_S3_ALLOW_HTTP: ${ARCHIVE_BACKUP_S3_ALLOW_HTTP:-}
+      ARCHIVE_STORAGE_QUOTA_GB: ${ARCHIVE_STORAGE_QUOTA_GB:-}
+      ALARM_WEBHOOK_URL: ${ALARM_WEBHOOK_URL:-}
+      ALARM_WEBHOOK_TOKEN: ${ALARM_WEBHOOK_TOKEN:-}
       ARCHIVE_CANONICAL_HOST: ${ARCHIVE_CANONICAL_HOST:?}
       ARCHIVE_ADMIN_EMAILS: ${ARCHIVE_ADMIN_EMAILS:?}
       ARCHIVE_MIGRATION_TOKEN: ${ARCHIVE_MIGRATION_TOKEN:?}
       APP_ENV: ${APP_ENV:-staging}
+      ARCHIVE_RELEASE_REVISION: ${ONPREM_IMAGE_TAG:-development}
       ARCHIVE_ACCEPTANCE_TOKEN: ${ARCHIVE_ACCEPTANCE_TOKEN:-}
+      ARCHIVE_RUNTIME_MEMORY_LIMIT_BYTES: ${API_MEMORY_LIMIT_BYTES:-2147483648}
       CONTENT_SCAN_SERVICE_URL: http://content-scan:8091
       CONTENT_SCAN_SERVICE_TOKEN: ${CONTENT_SCAN_SERVICE_TOKEN:?}
       OCR_SERVICE_URL: http://ocr:8090
@@ -87,14 +220,18 @@ services:
     networks: [arsiv-ic]
 
   content-scan:
+    <<: *app-security
     build:
       context: ../../services/content-scan
+    mem_limit: ${CONTENT_SCAN_MEMORY_LIMIT:-4g}
+    cpus: ${CONTENT_SCAN_CPU_LIMIT:-2.0}
+    pids_limit: ${CONTENT_SCAN_PIDS_LIMIT:-512}
     environment:
       CONTENT_SCAN_SERVICE_TOKEN: ${CONTENT_SCAN_SERVICE_TOKEN:?}
       CONTENT_SCAN_QUARANTINE_BUCKET: arsiv-karantina
       CONTENT_SCAN_S3_ENDPOINT_URL: http://minio:9000
-      AWS_ACCESS_KEY_ID: ${ARCHIVE_S3_ACCESS_KEY_ID:?}
-      AWS_SECRET_ACCESS_KEY: ${ARCHIVE_S3_SECRET_ACCESS_KEY:?}
+      AWS_ACCESS_KEY_ID: ${CONTENT_SCAN_S3_ACCESS_KEY_ID:?}
+      AWS_SECRET_ACCESS_KEY: ${CONTENT_SCAN_S3_SECRET_ACCESS_KEY:?}
       AWS_DEFAULT_REGION: auto
       # İmzalar entrypoint'te açılışta ve periyodik freshclam ile tazelenir;
       # kapalı ağda kurum içi ayna adresi verilir (README §ClamAV).
@@ -103,36 +240,103 @@ services:
     networks: [arsiv-ic]
 
   ocr:
+    <<: *app-security
     build:
       context: ../../services/ocr
+    mem_limit: ${OCR_MEMORY_LIMIT:-8g}
+    cpus: ${OCR_CPU_LIMIT:-4.0}
+    pids_limit: ${OCR_PIDS_LIMIT:-1024}
+    # Uzun ömürlü PaddleOCR sürecindeki bellek/parçalanma ve hız bozulmasını
+    # kontrollü yeniden başlatma ile sınırlar; kalıcı kuyruk işi yeniden alır.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8090", "--limit-max-requests", "${OCR_MAX_REQUESTS:-100}"]
     environment:
       OCR_SERVICE_TOKEN: ${OCR_SERVICE_TOKEN:?}
       OCR_ORIGINAL_BUCKET: arsiv-asil
       OCR_S3_ENDPOINT_URL: http://minio:9000
-      AWS_ACCESS_KEY_ID: ${ARCHIVE_S3_ACCESS_KEY_ID:?}
-      AWS_SECRET_ACCESS_KEY: ${ARCHIVE_S3_SECRET_ACCESS_KEY:?}
+      AWS_ACCESS_KEY_ID: ${OCR_S3_ACCESS_KEY_ID:?}
+      AWS_SECRET_ACCESS_KEY: ${OCR_S3_SECRET_ACCESS_KEY:?}
       AWS_DEFAULT_REGION: auto
     networks: [arsiv-ic]
 
   document-render:
+    <<: *app-security
     build:
       context: ../../services/document-render
+    mem_limit: ${DOCUMENT_RENDER_MEMORY_LIMIT:-4g}
+    cpus: ${DOCUMENT_RENDER_CPU_LIMIT:-2.0}
+    pids_limit: ${DOCUMENT_RENDER_PIDS_LIMIT:-512}
     environment:
       DOCUMENT_RENDER_SERVICE_TOKEN: ${DOCUMENT_RENDER_SERVICE_TOKEN:?}
       RENDER_ORIGINAL_BUCKET: arsiv-asil
       RENDER_DERIVATIVE_BUCKET: arsiv-turev
       RENDER_S3_ENDPOINT_URL: http://minio:9000
       RENDERER_IMAGE_DIGEST: ${DOCUMENT_RENDER_IMAGE_DIGEST:-}
-      AWS_ACCESS_KEY_ID: ${ARCHIVE_S3_ACCESS_KEY_ID:?}
-      AWS_SECRET_ACCESS_KEY: ${ARCHIVE_S3_SECRET_ACCESS_KEY:?}
+      AWS_ACCESS_KEY_ID: ${DOCUMENT_RENDER_S3_ACCESS_KEY_ID:?}
+      AWS_SECRET_ACCESS_KEY: ${DOCUMENT_RENDER_S3_SECRET_ACCESS_KEY:?}
       AWS_DEFAULT_REGION: auto
+    networks: [arsiv-ic]
+
+  # SQLite WAL'i ikinci hata alanına sürekli çoğaltır. Varsayılan geliştirme
+  # yığınına dahil değildir; COMPOSE_PROFILES=pitr ile açıkça etkinleştirilir.
+  # /veri mutlaka aynı Linux çekirdeğindeki yerel blok disk üzerinde olmalıdır.
+  litestream:
+    <<: *app-security
+    image: ${LITESTREAM_IMAGE:-litestream/litestream:0.5.16-scratch}
+    read_only: true
+    mem_limit: ${LITESTREAM_MEMORY_LIMIT:-512m}
+    cpus: ${LITESTREAM_CPU_LIMIT:-0.5}
+    pids_limit: 128
+    profiles: [pitr]
+    depends_on:
+      api:
+        condition: service_healthy
+    user: "1000:1000"
+    command: ["replicate", "-config", "/etc/litestream.yml"]
+    environment:
+      LITESTREAM_ACCESS_KEY_ID: ${SQLITE_PITR_S3_ACCESS_KEY_ID:-}
+      LITESTREAM_SECRET_ACCESS_KEY: ${SQLITE_PITR_S3_SECRET_ACCESS_KEY:-}
+      SQLITE_PITR_S3_BUCKET: ${SQLITE_PITR_S3_BUCKET:-}
+      SQLITE_PITR_S3_PREFIX: ${SQLITE_PITR_S3_PREFIX:-sivas-arsiv}
+      SQLITE_PITR_S3_ENDPOINT: ${SQLITE_PITR_S3_ENDPOINT:-}
+      SQLITE_PITR_S3_REGION: ${SQLITE_PITR_S3_REGION:-auto}
+      SQLITE_PITR_HEARTBEAT_URL: ${SQLITE_PITR_HEARTBEAT_URL:-}
+    volumes:
+      - api-veri:/veri
+      - ./litestream/litestream.yml:/etc/litestream.yml:ro
+    networks: [arsiv-ic]
+    healthcheck:
+      test: ["CMD", "litestream", "status", "-config", "/etc/litestream.yml", "/veri/arsiv.db"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Arayüz ayrı, sırsız bir Node sürecidir. Tarayıcının /api çağrılarını
+  # proxy doğrudan API servisine yollar; UI imajı depolama/DB kimliği almaz.
+  ui:
+    <<: *app-security
+    build:
+      context: ../..
+      dockerfile: server/ui.Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    mem_limit: ${UI_MEMORY_LIMIT:-512m}
+    cpus: ${UI_CPU_LIMIT:-0.5}
+    pids_limit: ${UI_PIDS_LIMIT:-256}
+    environment:
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
     networks: [arsiv-ic]
 
   # Tek dış kapı: kimlik başlıklarını yöneten ters vekil. SSO entegrasyonu
   # (Keycloak/AD, P5) bu katmana eklenir; API'ye doğrudan ağ erişimi yoktur.
   proxy:
-    image: nginx:1.27-alpine
-    depends_on: [api]
+    <<: *service-resilience
+    image: ${NGINX_IMAGE:-nginx:1.27-alpine}
+    mem_limit: ${PROXY_MEMORY_LIMIT:-256m}
+    cpus: ${PROXY_CPU_LIMIT:-0.5}
+    pids_limit: ${PROXY_PIDS_LIMIT:-256}
+    depends_on: [api, ui]
     ports:
       - "${ARCHIVE_PROXY_PORT:-8080}:8080"
     volumes:

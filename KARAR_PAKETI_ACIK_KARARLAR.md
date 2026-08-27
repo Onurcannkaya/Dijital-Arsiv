@@ -146,13 +146,14 @@ bağımlılık bir sunucudur.
    `KABUL_HAZIRLIK_DURUMU.md` sonunda) — geliştirme makinesi Docker'sız.
 2. **GitHub runner erişim modeli:** DMZ'de erişilebilir staging mi,
    self-hosted runner mı? (Bilgi Güvenliği kararı.)
-3. **Log/metrik katmanı (T-11/K-6):** Loki+cAdvisor kurulacak mı, yoksa iki
-   test bilinçli BLOCKED mi bırakılacak?
+3. **Log/metrik kanıtı (T-11/K-6):** staging'e özel, jetonlu ve production'da
+   404 dönen sınırlı kanıt ucu kodlandı. Kurumun kalıcı SIEM/izleme ürünü ayrı
+   işletim kararıdır; kabul testlerini artık teknik olarak engellemez.
 4. **Ortam değerleri:** `ACCEPTANCE_BASE_URL`, sentetik yükleyici kimliği,
-   Faz 0 kapı beyanları (sonuç + kanıt özeti, açık kritik/yüksek bulgu
-   sayıları), IAM üçlüleri (runbook §5). Ayrıca **`ACCEPTANCE_SCHEMA_VERSION`
-   28 → 32** güncellenmeli (şema bu ay v31 OCR iş kirası ve v32 yedek
-   defteriyle ilerledi).
+   imzalı Faz 0 kanıt workflow run kimliği, açık kritik/yüksek bulgu
+   sayıları ve IAM üçlüleri (runbook §5). Şema v33'tür; kabul workflow'u
+   sürümü canlı staging ön kontrolünden aldığı için
+   `ACCEPTANCE_SCHEMA_VERSION` elle güncellenmez.
 
 **KARAR (sunucu/runner/log kararı):** ______________________  **İmza (Bilgi İşlem):** ________  **İmza (Bilgi Güvenliği):** ________
 
@@ -210,7 +211,7 @@ kapatılmalıdır.
   yeniden tasniften geçirilir.
 - Karar 4 → mahalle sözlüğü yüklenir (`vocabulary` yönetimi hazır).
 - Karar 5 → `FILE_PLAN`/`RETENTION_RULE` sözlükleri onaylı planla değiştirilir.
-- Karar 7 → GitHub ortam değişkenleri girilir (`ACCEPTANCE_SCHEMA_VERSION=32`
-  dahil) ve kabul koşusu tetiklenir.
+- Karar 7 → GitHub ortam girdileri ve imzalı Faz 0 workflow run kimliği
+  girilir; şema canlı ön kontrolden otomatik alınarak kabul koşusu tetiklenir.
 - Karar 8 → `.env` değerleri: `ARCHIVE_S3_BUCKET_BACKUP`,
   `ARCHIVE_BACKUP_S3_ENDPOINT` + ayrı kimlik, `ALARM_WEBHOOK_URL`.

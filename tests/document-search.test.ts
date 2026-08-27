@@ -45,6 +45,16 @@ const SEEDS: Seed[] = [
     unit: "İmar ve Şehircilik Müdürlüğü", status: "archived",
     text: "YAPI KULLANMA İZİN BELGESİ Yenişehir Mahallesi 3170 ada 4 parsel B blok yapı sınıfı 3A.",
   },
+  {
+    ref: "ARS-2026-HALI", name: "belediye-hali-inceleme.pdf", type: "Hali inceleme belgesi",
+    unit: "Zabıta Müdürlüğü", status: "queued",
+    text: "Belediye hali işyeri denetim tutanağı.",
+  },
+  {
+    ref: "ARS-2026-ALICI", name: "alici-basvurusu.pdf", type: "Alıcı başvuru belgesi",
+    unit: "Yazı İşleri Müdürlüğü", status: "queued",
+    text: "Alıcı başvurusu ve teslim alındısı.",
+  },
 ];
 
 async function withArchive(run: (server: NodeServer) => Promise<void>) {
@@ -116,6 +126,17 @@ test("çok terimli sorgu VE anlamındadır", async () => {
     // İkinci terim hiçbir belgede yoksa sonuç boştur; VEYA'ya düşmez.
     assert.deepEqual((await list(server, "q=kilavuz+zzzzzz")).refs, []);
     assert.deepEqual((await list(server, "q=lokanta+1284")).refs, []);
+  });
+});
+
+test("kısa sorgu yalnız kelime başlangıcında eşleşir", async () => {
+  await withArchive(async (server) => {
+    for (const term of ["alı", "ali"]) {
+      const found = await list(server, `q=${encodeURIComponent(term)}`);
+      assert.deepEqual(found.refs, ["ARS-2026-ALICI"],
+        `"${term}" sorgusu hali kelimesinin içinden eşleşti`);
+      assert.equal(found.body.documents[0].contentMatch, true);
+    }
   });
 });
 

@@ -185,22 +185,13 @@ test("inceleme ekranı başarısız koşudan sonra paneli bayat bırakmaz", asyn
   assert.doesNotMatch(process, /setPreviewError\(/);
 });
 
-test("görüntüleme kopyası hazırlanırken yetkili memur belgenin aslını çerçevede görür", async () => {
-  /*
-   * Yerelde render servisi hiç koşmadığı için "hazırlanıyor" kartı süresiz
-   * kalıyor ve memur belgeye bakamıyordu (kullanıcı bunu iki kez bildirdi).
-   * Geri düşüş politika değişikliği DEĞİLDİR: yalnız indirme yetkisi olan
-   * kullanıcıda, zaten alabildiği DOWNLOAD biletiyle çalışır; sunucu tarafı
-   * yetki denetimi document-access-route.test.ts'te ayrıca kilitlidir.
-   */
+test("görüntüleme kopyası hazırlanırken PDF aslı önizlemeye geri düşmez", async () => {
   const source = await (await import("node:fs/promises"))
     .readFile(new URL("../app/archive/document-review.tsx", import.meta.url), "utf8");
-  // Geri düşüş yalnız "hazırlanıyor" SÜREÇ durumunda ve yetkiyle tetiklenir;
-  // gerçek hatalar (yetki reddi, kayıp nesne) aslı göstermeyi denemez.
-  assert.match(source, /message\.includes\("hazırlanıyor"\)&&permissions\.includes\("document\.download"\)/);
-  // Asıl, indirme kapsamının biletiyle alınır — görüntüleme kapsamıyla değil.
-  const fallback = /includes\("hazırlanıyor"\)[\s\S]*?requestTicket\("DOWNLOAD"\)[\s\S]*?"x-archive-access-scope":"DOWNLOAD"/.exec(source);
-  assert.ok(fallback, "geri düşüş DOWNLOAD bileti ve kapsamıyla istekte bulunmalı");
-  // Ekran ne gösterdiğini söyler: aslı sessizce kopya gibi sunmak dürüst değildir.
-  assert.match(source, /bu sırada belgenin aslını görüyorsunuz/);
+  const previewEffect = source.slice(source.indexOf("if(!detail) return;"), source.indexOf("const downloadOriginal=async"));
+
+  assert.doesNotMatch(previewEffect, /requestTicket\("DOWNLOAD"\)/);
+  assert.doesNotMatch(previewEffect, /x-archive-access-scope":"DOWNLOAD"/);
+  assert.match(previewEffect, /setPreviewMode\("text"\)/);
+  assert.match(source, /Aslını indir/);
 });

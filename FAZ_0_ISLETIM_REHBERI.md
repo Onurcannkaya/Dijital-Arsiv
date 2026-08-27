@@ -88,3 +88,17 @@ yüklenmesi, cron tarafından elle uç nokta çağrılmadan OCR'a alınması, do
 kuyruğuna düşmesi ve arşivlenmesiyle tamamlanır. Kanıt paketi en az şu değerleri
 içerir: belge kimliği, OCR iş kimliği, model sürümü, korelasyon kimliği, şema
 sürümü, health çıktısı ve denetim olayı numarası.
+
+Bu paket elle yazılmış `PASS` veya SHA beyanıyla kurulmaz:
+
+- başarılı, izinli dağıtım workflow'u (`deploy.yml` pilotu veya P8'de kurulacak
+  `deploy-onprem.yml`), commit ve workflow kimliğine atteste edilmiş
+  `deployment-evidence-<run-id>` üretir;
+- pilot belge cron OCR'ından geçip personelce arşivlendikten sonra
+  `.github/workflows/phase-zero-evidence.yml`, dağıtım koşu kimliği ve pilot
+  yükleme oturum kimliğiyle elle tetiklenir;
+- toplayıcı canlı kayıtlarda `system:cron` aktörlü `ocr.completed` olayını,
+  tamamlanmış OCR işini/modelini ve `document.archived` olayını doğrular;
+- çıkan `phase-zero-evidence-<run-id>` paketi Faz 1 workflow'una koşu
+  kimliğiyle verilir; Faz 1 özeti dosyadan kendisi hesaplar ve attestation'ı
+  doğrular.

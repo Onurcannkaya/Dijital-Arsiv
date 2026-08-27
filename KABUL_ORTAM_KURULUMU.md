@@ -11,6 +11,12 @@ Sözleşme kaynakları: yetenek tanımları `scripts/phase-one-acceptance-core.m
 (`resolveCapabilities`), ortam eşlemesi `scripts/run-phase-one-acceptance.mjs`
 (`scopedConfig`), test ölçütleri `FAZ_1_KANIT_REHBERI.md`.
 
+> **Kurum içi yerleşim:** `.github/workflows/deploy-onprem.yml` artık SSO/TLS,
+> yedek/PITR ve SHA sürümlü rollback kapılarıyla aynı imzalı
+> `deployment-evidence-<run-id>` sözleşmesini üretir. §2'deki `deploy.yml`
+> komutları yalnız Cloudflare pilotu içindir; kurum staging'inde `onprem-staging`
+> environment ve `onprem-archive` etiketli kurum runner'ı kullanılır.
+
 ## 0. İlkeler
 
 - **Sırlar environment düzeyine konur, repo düzeyine değil.** Workflow
@@ -28,12 +34,16 @@ Sözleşme kaynakları: yetenek tanımları `scripts/phase-one-acceptance-core.m
 
 ## 1. GitHub environment'larını oluştur
 
-GitHub → Settings → Environments altında üç environment açılır:
+GitHub → Settings → Environments altında kurum içi kurulum için aşağıdaki
+environment'lar açılır (Cloudflare pilotu kullanılacaksa ilk iki satır da
+ayrıca korunur):
 
 | Environment | Kullanan workflow | Koruma önerisi |
 |---|---|---|
 | `staging` | `deploy.yml` | — |
 | `production` | `deploy.yml` | Zorunlu onaylayıcı: Bilgi İşlem |
+| `onprem-staging` | `deploy-onprem.yml` | Zorunlu onaylayıcı: Bilgi İşlem |
+| `onprem-production` | `deploy-onprem.yml` | Zorunlu onaylayıcı: Bilgi İşlem + Bilgi Güvenliği |
 | `phase-one-acceptance` | `phase-one-acceptance.yml` | Zorunlu onaylayıcı: Bilgi Güvenliği + Arşiv temsilcisi |
 
 > Environment onayı koşuyu **çalıştırma** yetkisidir; release imzası değildir.
@@ -79,6 +89,7 @@ Bunlar tamamlandığında K-1, K-2, K-3, K-7, T-02, T-03, T-05, T-12 koşabilir.
 
 ```bash
 gh secret set ACCEPTANCE_BASE_URL --env phase-one-acceptance          # staging HTTPS adresi
+gh secret set ACCEPTANCE_PRODUCTION_BASE_URL --env phase-one-acceptance # gerçek üretim HTTPS adresi; staging'den farklı
 gh secret set ARCHIVE_MIGRATION_TOKEN --env phase-one-acceptance      # Faz A'dakiyle aynı
 gh secret set ARCHIVE_ACCEPTANCE_TOKEN --env phase-one-acceptance     # Faz A'dakiyle aynı, >= 32 karakter
 gh secret set ACCEPTANCE_UPLOADER_IDENTITY --env phase-one-acceptance # ör. kabul-yukleyici@sivas.bel.tr
@@ -87,23 +98,50 @@ gh secret set ACCEPTANCE_UPLOADER_IDENTITY --env phase-one-acceptance # ör. kab
 gh secret set ACCEPTANCE_PROXY_TOKEN --env phase-one-acceptance
 
 gh variable set ACCEPTANCE_UPLOADER_UNIT --env phase-one-acceptance --body "Kabul Testleri"
-gh variable set ACCEPTANCE_SCHEMA_VERSION --env phase-one-acceptance --body "<sema-surumu>"
-gh variable set ACCEPTANCE_ADAPTER_PROFILE --env phase-one-acceptance --body "r2-standard"
+gh variable set ACCEPTANCE_ADAPTER_PROFILE --env phase-one-acceptance --body "minio-onprem-v1"
 ```
+
+Kurum staging `.env` dosyasında ayrıca
+`ARCHIVE_ACCEPTANCE_BYPASS_ENABLED=enabled` bulunur. Aynı compose yığınının
+production `.env` dosyasında değer `disabled`, `ACCEPTANCE_PROXY_TOKEN` boş
+olmak zorundadır; production'da sentetik kimlik geçidi bulunmaz.
+
+Şema sürümü elle girilmez. Workflow, aynı koşudaki `verify-deployment.mjs`
+ön kontrolünün canlı staging'den doğruladığı sürümü kullanır. Eski
+`ACCEPTANCE_SCHEMA_VERSION` değişkeni artık etkisizdir ve kaldırılabilir.
 
 ### 3.1 Kapı girdileri (manifest çıkış ölçütleri)
 
-Bu dört değişken olmadan teknik kapı hiçbir koşuda açılmaz:
+Faz 0 sonucu ve özeti artık elle beyan edilmez. Güvenilir zincir:
+
+1. `.github/workflows/deploy.yml` başarılı koşar ve imzalı
+   `deployment-evidence-<run-id>` kanıtını üretir.
+2. Kullanıcının staging'e yüklediği pilot belge cron OCR'ından geçer, personel
+   tarafından doğrulanır ve arşivlenir.
+3. `.github/workflows/phase-zero-evidence.yml`, dağıtım koşu kimliği ile pilot
+   oturum kimliği verilerek çalıştırılır. Canlı sağlık/şema, tek asıl ve OCR
+   işi, `system:cron` OCR olayı ve `document.archived` olayını doğrulayıp imzalı
+   `phase-zero-evidence-<run-id>` üretir.
+4. Faz 1 elle tetiklenirken bu koşu kimliği `phase_zero_run_id` girdisine
+   verilir. Etiket tetiklemesi kullanılacaksa aynı değer environment'ta tutulur:
 
 ```bash
-gh variable set ACCEPTANCE_PHASE_ZERO_RESULT --env phase-one-acceptance --body "PASS"
-gh variable set ACCEPTANCE_PHASE_ZERO_EVIDENCE_DIGEST --env phase-one-acceptance --body "<faz0-kanit-sha256>"
+gh variable set ACCEPTANCE_PHASE_ZERO_RUN_ID --env phase-one-acceptance --body "<faz0-workflow-run-id>"
+```
+
+Teknik kapının güvenlik bulgusu girdileri ayrıca sıfır olmalıdır:
+
+```bash
 gh variable set ACCEPTANCE_OPEN_CRITICAL_FINDINGS --env phase-one-acceptance --body "0"
 gh variable set ACCEPTANCE_OPEN_HIGH_FINDINGS --env phase-one-acceptance --body "0"
 ```
 
-> Bu değerler beyandır ama manifestte değişmez kanıt olarak saklanır; yanlış
-> beyan denetimde görünür. Faz 0 özeti gerçek kanıt paketinin SHA-256'sıdır.
+Bu değerler yalnız Bilgi Güvenliği'nin kapsamlandırdığı tarama raporundan sonra
+`0` yapılır. 2026-08-25 yerel provasında üretim bağımlılıkları
+`npm audit --omit=dev` ile **0** bulgu vermiştir; tam geliştirme ağacında ise
+Vinext/image-size zincirinde 2 yüksek ve Drizzle/esbuild zincirinde 4 orta,
+yalnız geliştirme zamanı bulgusu kalmıştır. Bunlar kabul kapsamı dışında
+bırakılacaksa gerekçeli risk kaydı, aksi halde uyumlu yükseltme/migrasyon gerekir.
 
 ### 3.2 Yükleyici kimliğinin yetkilendirilmesi
 
@@ -205,12 +243,12 @@ dayandığını bu heterojenlikle kanıtlar.
 
 ```bash
 # T-11: erişim/anahtar loglarında kişisel veri taraması
-gh secret set ACCEPTANCE_LOG_ENDPOINT --env phase-one-acceptance   # HTTPS log okuma ucu
-gh secret set ACCEPTANCE_LOG_TOKEN --env phase-one-acceptance      # >= 32 karakter
+gh variable set ACCEPTANCE_LOG_ENDPOINT --env phase-one-acceptance   # https://.../api/admin/acceptance-observability?kind=logs
+# Ayrı log jetonu girilmez; workflow dar kapsamlı ARCHIVE_ACCEPTANCE_TOKEN'ı kullanır.
 
 # K-6: kaynak/bellek metrik kanıtı ve büyük test verisi anahtarı
-gh secret set ACCEPTANCE_RESOURCE_METRICS_ENDPOINT --env phase-one-acceptance
-gh secret set ACCEPTANCE_RESOURCE_METRICS_TOKEN --env phase-one-acceptance
+gh variable set ACCEPTANCE_RESOURCE_METRICS_ENDPOINT --env phase-one-acceptance # https://.../api/admin/acceptance-observability?kind=resources
+# Kaynak ucu da aynı dar kapsamlı kabul jetonuyla korunur.
 gh variable set ACCEPTANCE_LARGE_FIXTURES --env phase-one-acceptance --body "enabled"
 
 # K-5: hata enjeksiyonu anahtarı (yalnız üretim-dışı ortam güvencesiyle)
@@ -227,6 +265,9 @@ gh variable set ACCEPTANCE_FAULT_INJECTION --env phase-one-acceptance --body "en
 
 1. `deploy.yml` ile staging dağıtımını yap ve doğrulama adımının geçtiğini gör.
 2. `phase-one-acceptance.yml` workflow'unu elle tetikle; environment onayını ver.
+   Sıkı ön kontrol 19 yürütücünün tamamını, dokuz canlı yeteneği, sıfır açık
+   kritik/yüksek bulguyu, birbirinden farklı IAM test kimliklerini ve staging
+   adresinin üretim adresinden farklı olduğunu testler başlamadan doğrular.
 3. Koşu çıktısındaki `acceptance.run-complete` olayında:
    - `blocked` listesi, henüz kurulmamış fazların testlerini göstermelidir —
      başka bir test BLOCKED ise yetenek girdilerinden biri eksik/bozuktur;
@@ -243,6 +284,7 @@ gh variable set ACCEPTANCE_FAULT_INJECTION --env phase-one-acceptance --body "en
 |---|---|---|
 | `EXECUTOR_NOT_CONFIGURED` | Test için yürütücü yok | Yalnız `ACCEPTANCE_EXECUTOR_MODULE` bilinçli daraltıldıysa görülür |
 | `CAPABILITY_MISSING` (BLOCKED) | Yetenek girdileri eksik | İlgili fazın sır/değişkenleri |
+| `ACCEPTANCE_PREFLIGHT_FAILED` | 19/19 koşunun ön şartlarından biri eksik/tehlikeli | Hata kodundaki yetenek, IAM ayrımı, üretim adresi veya bulgu sayacı |
 | `*_ACCEPTANCE_TOKEN_MISSING` / `*_EVIDENCE_UNAVAILABLE` | Kanıt ucuna erişilemiyor | `ARCHIVE_ACCEPTANCE_TOKEN` (iki tarafta aynı değer) ya da staging `APP_ENV` |
 | `K7_DOCUMENT_LIST_UNAVAILABLE`, `T02_TICKET_DENIED` | Yükleyici kimliğinin rolü dar | §3.2 rol/müdürlük ataması |
 | `T06_*`, `K4_*` erişim FAIL'leri | IAM anahtarı beklenenden geniş/dar | §5 kapsam matrisi |

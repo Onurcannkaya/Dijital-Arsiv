@@ -51,11 +51,11 @@ export function searchTokens(freeText: string): string[] {
   return normalizeSearch(freeText).split(/\s+/).filter(Boolean).slice(0, 8);
 }
 
-/** Değer, parçalardan herhangi birini içeriyor mu? (tam normalleştirmeyle) */
+/** Değer, parçalardan herhangi biriyle başlayan bir kelime içeriyor mu? */
 export function matchesAnyToken(value: string, tokens: string[]): boolean {
   if (!tokens.length || !value) return false;
   const normalized = normalizeSearch(value);
-  return tokens.some((token) => normalized.includes(token));
+  return tokens.some((token) => normalized.startsWith(token) || normalized.includes(` ${token}`));
 }
 
 /**
@@ -72,7 +72,9 @@ export function findHighlightRanges(display: string, tokens: string[]): Highligh
     for (;;) {
       const at = text.indexOf(token, from);
       if (at === -1) break;
-      ranges.push([map[at], map[at + token.length - 1] + 1]);
+      if (at === 0 || text[at - 1] === " ") {
+        ranges.push([map[at], map[at + token.length - 1] + 1]);
+      }
       from = at + 1;
     }
   }

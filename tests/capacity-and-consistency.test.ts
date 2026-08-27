@@ -87,6 +87,23 @@ test("kota tavanı tanımsızken kullanım ölçülür, tavan uydurulmaz", async
   assert.deepEqual(await runQuotaCheck(bindings), { skipped: true, reason: "unconfigured" });
 });
 
+test("kapasite ölçümü kabul hattındaki silinmemiş karantina nesnelerini de sayar", async () => {
+  const bindings = await makeBindings();
+  await bindings.DB.prepare(`INSERT INTO upload_sessions
+      (id, user_id, unit, original_name, requested_document_type, idempotency_key,
+       status, expected_byte_size, declared_media_type, expires_at)
+    VALUES ('capacity-ingest', 'u@sivas.bel.tr', 'Yazı İşleri', 'q.pdf', 'Tasnif bekliyor',
+      'capacity-ingest', 'QUARANTINED', 2048, 'application/pdf', '2099-01-01T00:00:00Z')`).run();
+  await bindings.DB.prepare(`INSERT INTO ingest_objects
+      (id, upload_session_id, object_class, object_key, storage_provider,
+       bucket_or_namespace, media_type, byte_size)
+    VALUES ('capacity-q', 'capacity-ingest', 'quarantine', 'quarantine/capacity-ingest/payload',
+      's3', 'QUARANTINE_FILES', 'application/pdf', 2048)`).run();
+  assert.deepEqual(await readStorageQuota(bindings), { configured: false, usedBytes: 2048 });
+  await bindings.DB.prepare("UPDATE ingest_objects SET deleted_at = CURRENT_TIMESTAMP WHERE id = 'capacity-q'").run();
+  assert.deepEqual(await readStorageQuota(bindings), { configured: false, usedBytes: 0 });
+});
+
 test("eşik aşımı günde bir kez alarma gider; kritik eşik uyarıyı gölgeler", async () => {
   const stub = await startAlertStub();
   try {

@@ -1,6 +1,6 @@
 # Sivas Belediyesi Dijital Arşiv — Ana Sistem Tasarım Belgesi
 
-**Belge durumu:** Kavramsal tasarım temeli — kurum görüşü ve onayı bekliyor  
+**Belge durumu:** Kavramsal tasarım temeli — üretim yerleşimi ADR-018 ile onaylı; müdürlük profilleri ve entegrasyonlar kurum görüşü bekliyor
 **Sürüm:** 0.1  
 **Tarih:** 29 Temmuz 2026  
 **Belge sahibi:** Sivas Belediyesi; kurumsal sahipler belirlenecek  
@@ -235,7 +235,7 @@ Alanların ayrıntılı tanımı için `VERI_SOZLUGU.md` esas alınır.
 | Web/PWA | Yükleme, arama, doğrulama ve yönetim | Erişilebilir, responsive istemci |
 | Mobil istemci | Tarama, kalite ve çevrimdışı kuyruk | Flutter + yerel tarama köprüleri |
 | API geçidi | Kimlik, yetki, kota, sözleşme ve denetim | TypeScript tabanlı servis |
-| Üst veri veritabanı | Belge, varlık, ilişki ve iş akışı | Üretimde PostgreSQL |
+| Üst veri veritabanı | Belge, varlık, ilişki ve iş akışı | İlk dalga tek yazarlı SQLite/WAL (ADR-018 kurum içi port); ölçek/çok replika gereğinde PostgreSQL P9 |
 | Nesne depolama | Asıl ve türev dosyalar | S3 uyumlu, şifreli ve politikayla korunan |
 | İşlem kuyruğu | Kalıcı görev, tekrar deneme ve karantina | Redis/RabbitMQ veya eşdeğeri |
 | OCR/AI servisi | Görüntü iyileştirme, OCR ve alan çıkarımı | Kurum içi Python/FastAPI |

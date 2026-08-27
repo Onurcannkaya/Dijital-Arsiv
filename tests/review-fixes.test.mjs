@@ -69,6 +69,30 @@ test("doğrulama kuyruğu ve göstergesi aynı durumları sayar", async () => {
   assert.match(overview, /AS review/);
   assert.match(overview, /AS ready/);
   assert.match(workspace, /reviewPending/);
+  const actionablePendingGuards = overview.match(/d\.status IN \('review', 'ready'\)/g) ?? [];
+  assert.equal(actionablePendingGuards.length, 3,
+    "alan, ilişki ve metin sayaçlarının üçü de yalnız işlem yapılabilir belgeleri saymalı");
+});
+
+test("mobil gezinme ve arama kontrollerinin erişilebilir adı vardır", async () => {
+  const workspace = await read("app/archive/workspace.tsx");
+
+  assert.match(workspace, /aria-label="Menüyü aç"/);
+  assert.match(workspace, /aria-label="Menüyü kapat"/);
+  assert.match(workspace, /<input aria-label="Arşivde ara"/);
+  assert.doesNotMatch(workspace, /<label className="search"/,
+    "arama sonucu düğmeleri input etiketinin içinde kalmamalı");
+});
+
+test("mobil yardım tablosu sarılır ve işlem türü genel document sınıfını kullanmaz", async () => {
+  const [activity, styles] = await Promise.all([
+    read("app/archive/activity.tsx"),
+    read("app/archive/archive.css"),
+  ]);
+
+  assert.match(activity, /activity-kind-\$\{entry\.kind\}/);
+  assert.doesNotMatch(activity, /activity-icon \$\{entry\.kind\}/);
+  assert.match(styles, /\.help-body td\{[^}]*white-space:normal/);
 });
 
 test("arama dizini yenilemesi kilitli ve kaldığı yerden devam eden bakım işidir", async () => {

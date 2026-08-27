@@ -79,6 +79,8 @@ export type IngestDependencies = {
   hasher: StreamingHasher;
   now?: () => Date;
   randomId?: () => string;
+  /** Fiziksel kullanım + açık yükleme rezervasyonu için atomik kabul tavanı. */
+  capacityLimitBytes?: number | null;
 };
 
 export type CreateUploadInput = {
@@ -213,19 +215,37 @@ export async function createUploadSession(dependencies: IngestDependencies, inpu
   const expiresAt = new Date(now.getTime() + UPLOAD_SESSION_TTL_MS).toISOString();
   let persisted = false;
   try {
-    await dependencies.db.batch([
-      dependencies.db.prepare(`INSERT INTO upload_sessions
+    const capacityClause = dependencies.capacityLimitBytes
+      ? `WHERE
+          (SELECT COALESCE(SUM(byte_size), 0) FROM binary_objects)
+          + (SELECT COALESCE(SUM(byte_size), 0) FROM ingest_objects WHERE deleted_at IS NULL)
+          + (SELECT COALESCE(SUM(expected_byte_size), 0) FROM upload_sessions
+              WHERE status IN ('CREATED', 'UPLOADING'))
+          + ? <= ?`
+      : "";
+    const insertSession = dependencies.db.prepare(`INSERT INTO upload_sessions
         (id, tenant_id, user_id, unit, original_name, requested_document_type, idempotency_key, status, expected_byte_size,
          declared_media_type, provider_upload_token, expires_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'CREATED', ?, ?, ?, ?, ?, ?)`)
-        .bind(id, tenantId, input.userId, input.unit, originalName, requestedDocumentType, idempotencyKey,
-          input.expectedByteSize, mediaType, providerToken, expiresAt, now.toISOString(), now.toISOString()),
+        SELECT ?, ?, ?, ?, ?, ?, ?, 'CREATED', ?, ?, ?, ?, ?, ? ${capacityClause}`);
+    const sessionBindings = [id, tenantId, input.userId, input.unit, originalName,
+      requestedDocumentType, idempotencyKey, input.expectedByteSize, mediaType,
+      providerToken, expiresAt, now.toISOString(), now.toISOString()];
+    if (dependencies.capacityLimitBytes) {
+      sessionBindings.push(input.expectedByteSize, dependencies.capacityLimitBytes);
+    }
+    const results = await dependencies.db.batch([
+      insertSession.bind(...sessionBindings),
       dependencies.db.prepare(`INSERT INTO ingest_objects
         (id, upload_session_id, object_class, object_key, storage_provider,
          bucket_or_namespace, media_type, byte_size, created_at)
-        VALUES (?, ?, 'temporary', ?, 'r2', 'TEMPORARY_FILES', ?, 0, ?)`)
-        .bind(randomId(dependencies), id, key, mediaType, now.toISOString()),
+        SELECT ?, ?, 'temporary', ?, 'r2', 'TEMPORARY_FILES', ?, 0, ?
+        WHERE EXISTS (SELECT 1 FROM upload_sessions WHERE id = ?)`)
+        .bind(randomId(dependencies), id, key, mediaType, now.toISOString(), id),
     ]);
+    if (!results[0]?.meta.changes) {
+      throw new IngestOperationError("STORAGE_QUOTA_EXCEEDED",
+        "Depolama güvenlik kotası nedeniyle yeni yükleme kabul edilemiyor; sistem yöneticisine başvurun.", 507);
+    }
     persisted = true;
     await transitionIngestSession(dependencies.db, {
       sessionId: id,

@@ -48,6 +48,22 @@ const DOCUMENT_STATUSES = new Set(["queued", "processing", "review", "ready", "a
 const DEFAULT_PAGE_LIMIT = 50;
 const MAX_PAGE_LIMIT = 200;
 
+/**
+ * Serbest metin araması kelime başlangıcından eşleşir. Kullanıcı yazarken
+ * `ali` → `alici` bulunur; fakat `hali` içindeki ikinci karakterden başlayan
+ * `ali` yanlış sonuç üretmez. Normalleştirilmiş kolonlarda ayraçlar zaten tek
+ * boşluktur. Ham üst veride yaygın dosya/evrak ayraçları önce boşluğa çevrilir.
+ */
+function wordPrefixCondition(expression: string, normalized = false) {
+  const words = normalized ? expression
+    : `replace(replace(replace(replace(replace(replace(replace(replace(replace(${expression}, '-', ' '), '_', ' '), '/', ' '), '.', ' '), ',', ' '), ';', ' '), ':', ' '), '(', ' '), ')', ' ')`;
+  return `(' ' || ${words}) LIKE ? ESCAPE '\\'`;
+}
+
+function wordPrefixPattern(token: string) {
+  return `% ${escapeLike(token)}%`;
+}
+
 type PageCursor = { createdAt: string; id: string };
 type PageRequest = { limit: number; statuses: string[]; cursor: PageCursor | null };
 
@@ -118,7 +134,6 @@ export async function GET(request: Request) {
     const quick = parsed.filters;
     const normalizedTokens = normalizeSearch(parsed.freeText).split(/\s+/).filter(Boolean).slice(0, 8);
     const rawTokens = parsed.freeText.split(/\s+/).filter(Boolean).slice(0, 8);
-    const contentPattern = normalizedTokens.length ? `%${normalizedTokens.map(escapeLike).join("%")}%` : "";
     const quickFilters = (Object.entries(quick) as Array<[QuickQueryKey, string]>)
       .map(([key, value]) => ({ key, label: QUICK_QUERY_LABELS[key], value }));
 
@@ -189,23 +204,25 @@ export async function GET(request: Request) {
 
     normalizedTokens.forEach((normalizedToken, index) => {
       const rawToken = rawTokens[index] ?? normalizedToken;
-      const rawPattern = `%${escapeLike(rawToken)}%`;
-      const normalizedPattern = `%${escapeLike(normalizedToken)}%`;
+      const rawPattern = wordPrefixPattern(rawToken);
+      const normalizedPattern = wordPrefixPattern(normalizedToken);
       // Alan aramasında bütün değerler taranır; tek değer varsayımı yapılmaz.
       // Varlık etiketleri de aranabilir, böylece parsel ilişkisi kurulan belge
       // ada/parsel metniyle bulunur.
-      filters.push(`(d.reference_no LIKE ? ESCAPE '\\' OR d.original_name LIKE ? ESCAPE '\\'
-        OR d.document_type LIKE ? ESCAPE '\\' OR d.unit LIKE ? ESCAPE '\\'
+      filters.push(`(${wordPrefixCondition("d.reference_no")} OR ${wordPrefixCondition("d.original_name")}
+        OR ${wordPrefixCondition("d.document_type")} OR ${wordPrefixCondition("d.unit")}
         OR EXISTS (SELECT 1 FROM extracted_fields f WHERE f.document_id = d.id
           AND f.verification_status <> 'REJECTED'
-          AND (COALESCE(f.corrected_value, f.field_value) LIKE ? ESCAPE '\\' OR COALESCE(f.normalized_value, '') LIKE ? ESCAPE '\\'))
+          AND (${wordPrefixCondition("COALESCE(f.corrected_value, f.field_value)")}
+            OR ${wordPrefixCondition("COALESCE(f.normalized_value, '')", true)}))
         OR EXISTS (SELECT 1 FROM document_entity_relations r INNER JOIN entities e ON e.id = r.entity_id
           WHERE r.document_id = d.id AND r.verification_status = 'VERIFIED'
-          AND (e.display_label LIKE ? ESCAPE '\\' OR COALESCE(e.external_id, '') LIKE ? ESCAPE '\\'))
+          AND (${wordPrefixCondition("e.display_label")}
+            OR ${wordPrefixCondition("COALESCE(e.external_id, '')")}))
         OR EXISTS (SELECT 1 FROM ocr_pages p WHERE p.document_id = d.id
-          AND (COALESCE(p.confirmed_text, p.full_text) LIKE ? ESCAPE '\\'
-            OR COALESCE(p.confirmed_text, p.raw_text) LIKE ? ESCAPE '\\'
-            OR p.search_text LIKE ? ESCAPE '\\')))`);
+          AND (${wordPrefixCondition("COALESCE(p.confirmed_text, p.full_text)")}
+            OR ${wordPrefixCondition("COALESCE(p.confirmed_text, p.raw_text)")}
+            OR ${wordPrefixCondition("p.search_text", true)})))`);
       bindingsList.push(rawPattern, rawPattern, rawPattern, rawPattern, rawPattern, normalizedPattern,
         rawPattern, rawPattern, rawPattern, rawPattern, normalizedPattern);
     });
@@ -232,13 +249,18 @@ export async function GET(request: Request) {
      * yanlış bağ kalır. Onaylanmamış sayfada ham çıktı hâlâ tek kaynaktır ve
      * aranmaya devam eder.
      */
+    const contentMatchSql = normalizedTokens.length
+      ? `EXISTS (SELECT 1 FROM ocr_pages p WHERE p.document_id = d.id AND ${normalizedTokens
+        .map(() => wordPrefixCondition("p.search_text", true)).join(" AND ")})`
+      : "0";
+    const contentMatchBindings = normalizedTokens.map(wordPrefixPattern);
     const sql = `${documentSelect},
-      CASE WHEN ? = '' THEN 0 ELSE EXISTS (SELECT 1 FROM ocr_pages p WHERE p.document_id = d.id AND p.search_text LIKE ? ESCAPE '\\') END AS content_match
+      ${contentMatchSql} AS content_match
       FROM archive_documents d WHERE ${filters.join(" AND ")}
       ORDER BY d.created_at DESC, d.id DESC LIMIT ?`;
     // Bir fazlası istenir: sonraki sayfanın olup olmadığı böyle anlaşılır.
     const result = await bindings.DB.prepare(sql)
-      .bind(contentPattern, contentPattern, ...bindingsList, page.limit + 1).all<DocumentRecord>();
+      .bind(...contentMatchBindings, ...bindingsList, page.limit + 1).all<DocumentRecord>();
     const rows = result.results.slice(0, page.limit);
     const hasMore = result.results.length > page.limit;
     const last = rows[rows.length - 1];

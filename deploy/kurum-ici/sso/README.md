@@ -16,18 +16,19 @@ Kullanıcı ──> nginx (8080)
                     istemcinin sentetik oai-* başlığı AYNEN geçer → api
 ```
 
-Kabul geçidi fail-closed'dur: `ACCEPTANCE_PROXY_TOKEN` boşsa nginx şablon
-üretimi çift map anahtarıyla bozulur ve vekil hiç açılmaz; jeton yalnız
-staging kabul koşusuna dağıtılır, üretim .env'inde rastgele tutulup kimseye
-verilmez. Yürütücüler jetonu `ACCEPTANCE_PROXY_TOKEN` ortam değişkeninden
-otomatik gönderir (scripts/acceptance-executors/contract.mjs).
+Kabul geçidi iki koşullu fail-closed'dur: staging'de
+`ARCHIVE_ACCEPTANCE_BYPASS_ENABLED=enabled` ve en az 32 karakterli jeton
+birlikte gerekir. Production'da değer `disabled`, jeton boş olmak zorundadır;
+aksi durumda hem runtime kapısı hem nginx açılış betiği sistemi durdurur.
+Yürütücüler jetonu `ACCEPTANCE_PROXY_TOKEN` ortam değişkeninden otomatik
+gönderir (scripts/acceptance-executors/contract.mjs).
 
 ## Kurulum
 
 1. `.env` dosyasına SSO bölümünü doldurun (`../.env.example` şablonundan):
 
 ```bash
-openssl rand -hex 32                       # ACCEPTANCE_PROXY_TOKEN
+openssl rand -hex 32                       # ACCEPTANCE_PROXY_TOKEN (staging)
 openssl rand -base64 32 | tr -- '+/' '-_'  # SSO_COOKIE_SECRET
 ```
 
@@ -56,14 +57,18 @@ docker compose -f docker-compose.yml -f docker-compose.sso.yml --profile kimlik-
    doğrulayın. Uygulama kullanıcıyı e-postayla eşler (`archive_users`);
    AD'deki hesap adı değil E-POSTA yetkili anahtardır.
 
-4. Vekili SSO kaplamasıyla yeniden başlatın ve doğrulayın:
+4. Üretimde kurum sertifikasının ve anahtarının mutlak yollarını `.env`
+   `ARCHIVE_TLS_CERT_FILE/_KEY_FILE` alanlarına yazın. Anahtar world-readable
+   olmamalıdır. SSO + TLS kaplamalarını birlikte başlatın:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.sso.yml up -d --build proxy oauth2-proxy
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/api/documents   # 302 (girişe yönlendirme)
+docker compose -f docker-compose.yml -f docker-compose.sso.yml \
+  -f docker-compose.tls.yml up -d --build proxy oauth2-proxy tls-edge
+curl -k -s -o /dev/null -w '%{http_code}\n' \
+  https://127.0.0.1/api/documents   # 302 (girişe yönlendirme)
 ```
 
-   Tarayıcıdan `http://<makine>:8080` → Keycloak giriş ekranı → başarılı
+   Tarayıcıdan `https://arsiv.sivas.bel.tr` → Keycloak giriş ekranı → başarılı
    girişte `/api/me` kullanıcı e-postasını göstermelidir.
 
 ## Yetkilendirme modeli
@@ -76,9 +81,12 @@ bilinçli olarak bu kaplamanın dışındadır.
 
 ## Üretim notları
 
-- `SSO_COOKIE_SECURE=true` kalmalı → vekilin önünde TLS sonlandıran katman
-  (kurum sertifikalı nginx/L4) zorunludur; `X-Forwarded-Proto` doğru gelmeli.
+- `SSO_COOKIE_SECURE=true` ve `ARCHIVE_EXTERNAL_SCHEME=https` kalmalıdır.
+  Yönlendirme şeması istemcinin `X-Forwarded-Proto` başlığından alınmaz;
+  dağıtım kapısı TLS/SSO dosyalarını ve kanonik callback adresini doğrular.
 - oauth2-proxy ve Keycloak imaj sürümleri sabitlenmiştir; güncellemeler
   değişiklik yönetimiyle yapılır.
 - Kabul koşusu bittiğinde `ACCEPTANCE_PROXY_TOKEN` döndürülür (rotate);
   jeton kanıt dosyalarına ve loglara yazılmaz.
+- Production `.env` dosyasına staging kabul jetonu kopyalanmaz ve bypass
+  anahtarı açılamaz.

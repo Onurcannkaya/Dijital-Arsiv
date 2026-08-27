@@ -1,0 +1,79 @@
+name: Faz 0 pilot kanıtı
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_run_id:
+        description: Başarılı Faz 0 dağıtım workflow run kimliği
+        required: true
+        type: string
+      pilot_session_id:
+        description: Kullanıcının yüklediği ve arşivlediği staging pilot oturum kimliği
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+concurrency:
+  group: phase-zero-pilot-evidence
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: phase-one-acceptance
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 22.18.0
+
+      - name: Dağıtım kanıtını güvenilir koşudan al
+        env:
+          DEPLOYMENT_RUN_ID: ${{ inputs.deployment_run_id }}
+        run: |
+          test -n "$DEPLOYMENT_RUN_ID"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${DEPLOYMENT_RUN_ID}" --jq '.conclusion')" = "success"
+          deployment_workflow="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${DEPLOYMENT_RUN_ID}" --jq '.path')"
+          case "$deployment_workflow" in
+            .github/workflows/deploy.yml|.github/workflows/deploy-onprem.yml) ;;
+            *) echo "Untrusted deployment workflow: $deployment_workflow" >&2; exit 1 ;;
+          esac
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${DEPLOYMENT_RUN_ID}" --jq '.head_sha')" = "$GITHUB_SHA"
+          mkdir -p outputs/phase-zero/deployment
+          gh run download "$DEPLOYMENT_RUN_ID" --name "deployment-evidence-${DEPLOYMENT_RUN_ID}" --dir outputs/phase-zero/deployment
+          gh attestation verify outputs/phase-zero/deployment/verification.json --repo "$GITHUB_REPOSITORY"
+
+      - name: Pilotun canlı ve salt-okunur kanıtını topla
+        env:
+          PHASE_ZERO_BASE_URL: ${{ secrets.ACCEPTANCE_BASE_URL }}
+          PHASE_ZERO_SESSION_ID: ${{ inputs.pilot_session_id }}
+          PHASE_ZERO_READER_IDENTITY: ${{ secrets.ACCEPTANCE_UPLOADER_IDENTITY }}
+          PHASE_ZERO_DEPLOYMENT_EVIDENCE_PATH: outputs/phase-zero/deployment/verification.json
+          ARCHIVE_ACCEPTANCE_TOKEN: ${{ secrets.ARCHIVE_ACCEPTANCE_TOKEN }}
+          ACCEPTANCE_PROXY_TOKEN: ${{ secrets.ACCEPTANCE_PROXY_TOKEN }}
+        run: node scripts/collect-phase-zero-evidence.mjs > outputs/phase-zero/phase-zero-evidence.json
+
+      - name: Faz 0 kanıt sözleşmesini doğrula
+        run: node scripts/verify-phase-zero-evidence.mjs outputs/phase-zero/phase-zero-evidence.json "$GITHUB_SHA"
+
+      - name: Faz 0 kanıtını provenance ile bağla
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: outputs/phase-zero/phase-zero-evidence.json
+
+      - name: Faz 0 kanıtını yükle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: phase-zero-evidence-${{ github.run_id }}
+          path: outputs/phase-zero/phase-zero-evidence.json
+          retention-days: 90
+          if-no-files-found: error

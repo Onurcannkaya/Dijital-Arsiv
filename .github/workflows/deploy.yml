@@ -18,6 +18,9 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 concurrency:
   # Aynı ortama eşzamanlı dağıtım yapılmaz; koşan dağıtım iptal edilmez.
@@ -38,6 +41,17 @@ jobs:
         with:
           node-version: 22.18.0
           cache: npm
+
+      # Eksik environment sırlarını wrangler adımındaki belirsiz hataya bırakmaz;
+      # değerleri yazdırmadan yalnız varlık ve güvenli biçim denetimi yapar.
+      - name: Dağıtım ortamı ön kontrolü
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DEPLOY_BASE_URL: ${{ secrets.DEPLOY_BASE_URL }}
+          ARCHIVE_MIGRATION_TOKEN: ${{ secrets.ARCHIVE_MIGRATION_TOKEN }}
+        run: node scripts/validate-deploy-config.mjs
+
       - run: npm ci
 
       # Dağıtımdan önce tam kalite kapısı: typecheck + lint + build + test.
@@ -60,7 +74,25 @@ jobs:
         env:
           DEPLOY_BASE_URL: ${{ secrets.DEPLOY_BASE_URL }}
           ARCHIVE_MIGRATION_TOKEN: ${{ secrets.ARCHIVE_MIGRATION_TOKEN }}
-        run: npm run deploy:verify
+          DEPLOY_GIT_COMMIT: ${{ github.sha }}
+        run: |
+          mkdir -p outputs/deployment
+          npm run deploy:verify > outputs/deployment/verification.json
+
+      - name: Dağıtım kanıtını provenance ile bağla
+        if: steps.verify_deploy.outcome == 'success'
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: outputs/deployment/verification.json
+
+      - name: Dağıtım kanıtını yükle
+        if: steps.verify_deploy.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deployment-evidence-${{ github.run_id }}
+          path: outputs/deployment/verification.json
+          retention-days: 90
+          if-no-files-found: error
 
       # Yalnız dağıtım başarılı olduysa ve sonraki bir adım (doğrulama) düştüyse
       # geri al. Kalite kapısı düşerse dağıtım hiç çalışmaz ve rollback tetiklenmez.
