@@ -79,8 +79,8 @@ Faz 0 aşağıdaki dört kanıt tamamlanmadan kapanmış sayılmaz:
    CI/CD workflow'una bağlanır ve en az bir gerçek koşuda çalıştığı gösterilir.
    **Kod tarafı bağlandı:** `.github/workflows/deploy.yml` kalite kapısı →
    `wrangler deploy` → `deploy:verify` → yalnız dağıtım başarılıyken koşullu
-   `wrangler rollback` sırasını uygular (staging main'e push'ta otomatik,
-   production elle + korumalı ortam onayı); `tests/phase-zero.test.mjs` bu
+   `wrangler rollback` sırasını uygular (her iki ortam da elle tetiklenir;
+   production ayrıca korumalı ortam onayı ister); `tests/phase-zero.test.mjs` bu
    bağlamayı regresyona karşı korur. Gerçek kaynak kimlikleri, dağıtım kimliği
    ve en az bir canlı koşu kanıtı staging operasyon kapısına aittir.
 4. Gerçek bir pilot belge kullanıcı tarafından yüklenir, cron tarafından
