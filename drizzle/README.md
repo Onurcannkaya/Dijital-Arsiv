@@ -24,6 +24,6 @@ kayıt yönetimi sisteminde sessiz sapma riski demektir.
 | `db/schema.ts` | Drizzle tip tanımı ve kısıt niyetinin okunabilir kaydı. Sorgu üretiminde kullanılmıyor. |
 | `drizzle/0000`–`0005` | Şema sürümü 1'in tarihsel kaydı. |
 
-İki tanımın aynı tabloları içermesi `tests/schema-contract.test.mjs` ile
+İki tanımın aynı tabloları içermesi `tests/schema-contract.test.ts` ile
 denetlenir. Yol haritası maddesi 12'de (PostgreSQL geçişi) tek kaynağa
 indirilecek; o noktada göç zinciri baştan kurulacaktır.
