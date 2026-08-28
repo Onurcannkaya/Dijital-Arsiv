@@ -1,4 +1,4 @@
-# Kabul Koşusu Hazırlık Durumu — 2026-08-26
+# Kabul Koşusu Hazırlık Durumu — 2026-08-28
 
 > **Yerleşim kararı (2026-08-14): kabul koşusu KURUM İÇİ staging'e karşı
 > koşulacak.** Üretim hedefi ADR-018 gereği kurum içidir; kabul kanıtının
@@ -93,6 +93,7 @@ olarak BLOCKED bırakılacağı kabul edilmelidir.
 | Şema | v33; kabul workflow'u sürümü elle tutmaz, canlı staging ön kontrolünden alır |
 | Kabul hattı kuru koşusu (`run-phase-one-acceptance.mjs`, yeteneksiz) | Manifest üretildi; 19 testin 19'u **dürüstçe BLOCKED**, teknik kapı gerekçeleriyle kapalı (`EXIT_PHASE_ZERO_NOT_PROVEN`, `EXIT_*_FINDINGS_OPEN`, `BLOCKED:*`) |
 | Yürütücü modülü | `scripts/acceptance-executors/pipeline.mjs` repoda; sahte-S3/sahte-staging karşılığındaki yürütücü testleri tam takımda yeşil |
+| Uzak koşu (main, 2026-08-27) | **PASS** — **536/536 test** + `npm audit --audit-level=high`, üç Python servisi, API/UI imaj derleme, salt-okunur konteyner açılış smoke'u, compose birleştirme sözleşmesi (run 33058106744) |
 
 Kuru koşu, boru hattının ve manifest/kanıt sözleşmesinin bu depo sürümüyle
 çalıştığını kanıtlar: koşu açıldığında sürpriz, yalnız ortam girdilerinden
@@ -101,8 +102,8 @@ gelebilir.
 ## 2. Koşu öncesi güncellenmesi ZORUNLU değerler
 
 - `ACCEPTANCE_SCHEMA_VERSION` artık ayarlanmaz; canlı dağıtım ön kontrolü
-  `schema_version` çıktısını koşuya verir. Eski v28 environment değişkeni
-  etkisizdir ve kaldırılabilir.
+  `schema_version` çıktısını koşuya verir. Etkisiz kalan environment
+  değişkeni 2026-08-28'de silindi ve yeniden eklenmemelidir.
 - `ACCEPTANCE_GIT_COMMIT` — koşulan dağıtımın gerçek SHA'sı (workflow verir).
 - `DEPLOY_BASE_URL` / `ACCEPTANCE_BASE_URL` — staging worker adresi.
 
@@ -139,6 +140,25 @@ ve bu bir hata değildir — koşu eksikliği dürüstçe raporlar.
   `.github/workflows/deploy-onprem.yml` repodadır: SHA imajları, SBOM/kritik
   açık kapısı, SSO/TLS, göç/readiness, sürüm doğrulama ve rollback bağlıdır.
   Henüz gerçek kurum runner'ında başarılı canlı koşu kanıtı yoktur.
+
+### 2026-08-28 güncellemesi
+
+- Kurum içi port ve kabul kapısı çalışması main'e alındı (PR #83). main'de
+  koşan tek workflow "Faz 0 doğrulama"dır ve yeşildir.
+- `phase-one-acceptance` ortamındaki `ACCEPTANCE_SCHEMA_VERSION` değişkeni
+  SİLİNDİ. Ortamda okunmaya devam eden iki değişken kaldı:
+  `ACCEPTANCE_ADAPTER_PROFILE` ve `ACCEPTANCE_UPLOADER_UNIT`. Sırlar
+  (`ARCHIVE_ACCEPTANCE_TOKEN`, `ARCHIVE_MIGRATION_TOKEN`) değişmedi.
+- Cloudflare pilot dağıtımı (`deploy.yml`) artık main'e push'ta
+  kendiliğinden koşmaz; yalnız elle tetiklenir (PR #84). Gerekçe: ADR-018
+  ile üretim hedefi kurum içine taşındığından `staging` ortamında
+  `CLOUDFLARE_ACCOUNT_ID` ve `DEPLOY_BASE_URL` yok ve koşu her push'ta
+  dağıtım ön kontrolünde düşüyordu. Workflow'un kalite → dağıtım →
+  `deploy:verify` → koşullu rollback sırası ve atteste edilmiş
+  `deployment-evidence-<run-id>` sözleşmesi aynen durur; Faz 0 çıkış kapısı
+  etkilenmez, yalnız tetikleme bilinçli bir eylem oldu.
+- Envanterin geri kalanı değişmedi: koşuyu açan girdiler hâlâ sunucu
+  tahsisine ve runner kararına bağlıdır (§6 Aşama 1).
 
 ## 4. Kurumsal ön koşullar (teknik değil)
 
