@@ -1,8 +1,8 @@
 # Sivas Belediyesi Dijital Arşiv — Teslim Fazları Yol Haritası
 
 **Belge durumu:** Uygulama iş paketi  
-**Sürüm:** 1.0  
-**Tarih:** 30 Temmuz 2026  
+**Sürüm:** 1.1  
+**Tarih:** 28 Ağustos 2026  
 **Kapsam:** Faz 0 çıkış kapısı ve Faz 1 güvenli belge kabul hattı
 
 ## 1. Amaç
@@ -833,7 +833,8 @@ Cloudflare yerine MinIO'lu kurum içi yığın da olabilir; port durumu için §
 | `lib/ingest-contract.ts` | Sağlayıcı bağımsız durumlar, hata kodları ve kabul alındısı |
 | `lib/ingest-state-machine.ts` | İzinli, idempotent durum geçişleri |
 | `lib/ingest-promotion.ts` | Kiralı koşullu terfi, tam yeniden okuma SHA doğrulaması, değiştirilemez terfi alındısı ve atomik kabul sonlandırması |
-| `lib/content-validation.ts` | Magic-byte ve bildirilen/algılanan tür politikası |
+| `services/content-scan/` | Magic-byte ve bildirilen/algılanan tür politikası; karar izole tarayıcı serviste verilir (planlanan `lib/content-validation.ts` yerine) |
+| `lib/content-scan.ts` | Tarama işinin kirası, zaman aşımı ve karantina durum geçişleri |
 | `lib/integrity.ts` | Tam akış SHA taraması ve kalıcı koşu/bulgu kayıtları |
 | `lib/reconciliation.ts` | Sahipsiz nesne ve dosyasız kayıt taraması |
 | `lib/access-tickets.ts` | Süreli/tek kullanımlık bilet üretme ve tüketme |
@@ -857,8 +858,8 @@ Cloudflare yerine MinIO'lu kurum içi yığın da olabilir; port durumu için §
 | `services/ocr/app/main.py` | Yalnız OCR üretimi; belgeyi nesne referansıyla, salt-okunur kimlikle akışlı okuma. PDF erişim türevi üretimi bu servisten `services/document-render`'a taşınır |
 | `tests/object-storage-contract.test.ts` | Sağlayıcıdan bağımsız depolama sözleşme paketi |
 | `tests/ingest-state-machine.test.ts` | Durum, idempotency ve kesinti testleri |
-| `tests/content-validation.test.ts` | Magic-byte/ayrıştırıcı testleri |
-| `tests/phase-one-acceptance.test.ts` | §19 testlerinin otomatik bölümü |
+| `tests/content-scan.test.ts` + `services/content-scan/tests/test_file_validation.py` | Magic-byte/ayrıştırıcı testleri |
+| `tests/phase-one-acceptance.test.mjs` | §19 testlerinin otomatik bölümü |
 | `scripts/run-phase-one-acceptance.mjs` | Staging kabul koşusu ve maskelenmiş kanıt çıktısı |
 | `scripts/verify-storage-manifest.mjs` | Dışa aktarım/geri yükleme SHA doğrulaması |
 | `.github/workflows/phase-one-acceptance.yml` | Kontrollü staging kabul ve kanıt işi |
