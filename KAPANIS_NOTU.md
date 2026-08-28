@@ -1,4 +1,4 @@
-# Kapanış Notu — Durum ve Kalan İşler (2026-08-26)
+# Kapanış Notu — Durum ve Kalan İşler (2026-08-28)
 
 Bu not, kabul hattı + kurum içi port çalışmasının bittiği noktayı ve kalan
 işleri devralacak kişi için tek sayfada toplar. Ayrıntı belgeleri:
@@ -19,8 +19,16 @@ işleri devralacak kişi için tek sayfada toplar. Ayrıntı belgeleri:
   environment'ları açık; `ARCHIVE_MIGRATION_TOKEN` (3 ortam) ve
   `ARCHIVE_ACCEPTANCE_TOKEN` sırları üretilip yazıldı. CI her push'ta kalite
   kapısı + API/UI imaj derleme, salt-okunur açılış smoke'u ve Compose
-  birleştirme doğrulaması koşuyor. Kurum içi SHA/SBOM/rollback workflow'u da
+  birleştirme doğrulaması koşuyor ve main'in ucunda **yeşildir**
+  (536/536 test, 2026-08-27). Kurum içi SHA/SBOM/rollback workflow'u da
   repoda; gerçek runner kanıtı bekliyor.
+- **Cloudflare pilot dağıtımı elle tetiklemeye indi** (`deploy.yml`,
+  2026-08-28): ADR-018 ile üretim hedefi kurum içine taşındığından
+  `staging` ortamında `CLOUDFLARE_ACCOUNT_ID`/`DEPLOY_BASE_URL` yok ve
+  main'e her push'ta koşan otomatik dağıtım, ön kontrolde düşüp kalıcı
+  kırmızı üretiyordu. Workflow'un kalite → dağıtım → `deploy:verify` →
+  koşullu rollback sırası ve atteste edilmiş `deployment-evidence-<run-id>`
+  sözleşmesi aynen durur; Faz 0 çıkış kapısı etkilenmez.
 
 ## Kalan işler (önerilen sıra)
 
@@ -66,7 +74,9 @@ işleri devralacak kişi için tek sayfada toplar. Ayrıntı belgeleri:
       bu ayrımı fiilen doğrular).
 - [ ] `ACCEPTANCE_PROXY_TOKEN` dahil kabul sırlarının
       `phase-one-acceptance` environment'ına girilmesi; environment
-      onaycılarının atanması.
+      onaycılarının atanması. (`ACCEPTANCE_SCHEMA_VERSION` bu listede
+      DEĞİLDİR: elle tutulan değişken 2026-08-28'de silindi, sürüm koşuda
+      canlı staging ön kontrolünden gelir.)
 - [ ] Koşunun tetiklenmesi → BLOCKED listesi boşalana ve teknik kapı
       açılana kadar iterasyon; manifest özetinin değişmez arşive alınması.
 - [ ] Kurumsal release onayları (Bilgi İşlem + Bilgi Güvenliği + Arşiv;
