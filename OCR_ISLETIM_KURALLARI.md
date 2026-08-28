@@ -221,6 +221,41 @@ servis elindeki sayfayı bitirip döner ve kalan sayfayı `nextPage` ile bildiri
 Aksi hâlde istemci vazgeçer, servis çalışmaya devam eder ve tek uçuşlu kilit
 saatlerce tutulur — kuyruk zehirlenir. Bu ilişki değiştirilecekse iki değer
 birlikte değiştirilmelidir.
+
+### 9.1 Tek pahalı sayfa bütçenin tamamını yiyebilir (2026-08-28 ölçümü)
+
+1.646 sayfalık bir encümen cildi elle ilerletilirken ölçüldü: **tek bir sayfa
+240 saniyelik servis bütçesinin tamamını tüketebiliyor.** Dilim, o sayfayı
+bitirip **yalnız 1 sayfayla** döndü (duvar süresi 258 sn). Sayfanın metni
+komşularından farksızdı (1.077 karakter); pahalı olan metin yoğunluğu değil
+görüntünün kendisi.
+
+Bu, bütçe–tavan ilişkisinin neden dar tutulduğunun somut kanıtıdır: 240 sn'lik
+bütçe böyle bir sayfada sınırda çalışır. Tavan (300 sn) düşürülürse bu sınıf
+sayfa **her denemede** zaman aşımına uğrar ve iş üç denemeden sonra
+dead-letter'a düşer.
+
+### 9.2 İki arıza dışarıdan aynı görünür — ayırt eden sinyal dilim başına sayfadır
+
+Aynı gün ikinci bir olay yaşandı: ~4 saattir ayakta olan serviste bir dilim
+5 dakikalık **uygulama tavanını** aştı. Uygulama tasarlandığı gibi davrandı —
+iş kuyruğa döndü, sayaç 1'e çıktı, veri kaybı olmadı. Servis tazelendikten
+sonra **aynı sayfa** 5 sayfalık bir dilimin içinde 283 sn'de geçti.
+
+Yani "dilim yavaş" gözlemi iki farklı sebebe işaret edebilir ve karışırsa
+yanlış müdahale yapılır (gereksiz tazeleme ya da yanan deneme hakkı):
+
+| Gözlem | Sebep | Doğru tepki |
+|---|---|---|
+| **3+ sayfalık** dilim yavaş (> ~65 sn/sayfa) | Süreç yaşlanıyor (§8) | Servisi tazele, sonra devam et |
+| **1–2 sayfalık** dilim yavaş | Tek pahalı sayfa; bütçe onda doldu | Arıza değil — devam et |
+| Üst üste 3 pahalı sayfa | Cildin yoğun bölgesi | Dur, bölgeyi ayrıca değerlendir |
+| Dilim hiç dönmedi | Tavan aşıldı | İş zaten kuyrukta; **tazelemeden tekrar deneme**, önce sebebi ayır |
+
+Kuyruğu elle ilerleten her araç bu ayrımı yapmalıdır. Sayaç, başarılı bir
+dilimden sonra 0'a döner (ölçüldü); `max_attempts` 3'tür, yani ayırt etmeden
+yapılan üç kör deneme işi dead-letter'a düşürür.
+
 ## 10. Kapasite planı — yıllık hacimden işçi ve RAM'e
 
 Bu bölüm bir ölçüm değil, **ölçülmüş sayıları kuruma ait bir hacim tahminine
