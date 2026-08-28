@@ -1,13 +1,17 @@
 # OCR İşletim ve Dağıtım Kuralları
 
 **Belge durumu:** Ölçüme dayalı işletim kuralları
-**Tarih:** 18 Ağustos 2026
+**Tarih:** 28 Ağustos 2026 (§10 kapasite planı eklendi)
 **Kapsam:** `services/ocr` dağıtımı; işçi sayısı, bellek, iş parçacığı ve motor ayarları
 **Ölçüm ortamı:** Windows 10, 20 mantıksal çekirdek, 15,7 GB RAM, GPU yok, PaddleOCR 3.4 / PP-OCRv5
 **Ölçüm verisi:** `D:\Arşiv` — 8 cilt, 7.029 sayfa, gerçek belediye taramaları
 
 > Buradaki her sayı ölçülmüştür; hiçbiri tahmin değildir. Ayrıntılı ölçüm
 > kayıtları `ARSIV_TARAMA_TEST_RAPORU.md` içindedir.
+>
+> **Tek istisna §10'dur:** o bölüm ölçüm değil, ölçülmüş sabitleri kuruma ait
+> bir hacim tahminine çeviren hesap yoludur. İçindeki örnek satırlar gerçek
+> değildir ve açıkça işaretlenmiştir.
 
 ## 1. Kural özeti
 
@@ -217,3 +221,97 @@ servis elindeki sayfayı bitirip döner ve kalan sayfayı `nextPage` ile bildiri
 Aksi hâlde istemci vazgeçer, servis çalışmaya devam eder ve tek uçuşlu kilit
 saatlerce tutulur — kuyruk zehirlenir. Bu ilişki değiştirilecekse iki değer
 birlikte değiştirilmelidir.
+## 10. Kapasite planı — yıllık hacimden işçi ve RAM'e
+
+Bu bölüm bir ölçüm değil, **ölçülmüş sayıları kuruma ait bir hacim tahminine
+çeviren hesap yoludur**. Girdi tablosuna değerler girildiği anda çıktı tablosu
+hesaplanır; başka hiçbir yere dokunmak gerekmez.
+
+> Hesabın dayandığı tek ölçülmüş sabit: **işçi başına 40,7 sn/sayfa** ve
+> **saatte 88 sayfa** (§2). İşçi başına RAM ~4,8 GB, işletim sistemi + uygulama
+> payı 6 GB.
+
+### 10.1 Girdiler (kurumdan gelecek)
+
+| # | Girdi | Değer | Sahibi |
+|---|---|---|---|
+| G1 | Yıllık beklenen belge adedi | `<GİRİLECEK>` | Yazı İşleri + Arşiv (ADR-018 açık girdisi) |
+| G2 | Belge başına ortalama sayfa | `<GİRİLECEK>` | Arşiv |
+| G3 | Metin katmanı kapısından geçme oranı | `<ÖLÇÜLECEK>` | 20–30 örnek dijital evrakla ölçülür (§7) |
+| G4 | Günlük OCR penceresi (saat) | `<GİRİLECEK>` | Bilgi İşlem — gece penceresi mi, 24 saat mi |
+| G5 | Geriye dönük tarama yükü (sayfa) | 7.029 ölçüldü; kalan cilt eklenirse güncellenir | Arşiv |
+
+**G3 uyarısı:** bugünkü arşivde kapı %6,1 tutuyor çünkü eski taramalarda gömülü
+metin katmanı yok. Dijital doğan evrakta oranın çok daha yüksek olmasını
+beklemek makul (2021 ciltlerinde %65,8 ve %69,7 ölçüldü) — **ama bu ölçülmedi**.
+Kapasite kararı ölçülmemiş bir orana dayandırılmaz: G3 ölçülene kadar
+kötümser değerle (0) hesaplayın, ölçüldükten sonra yeniden koşun.
+
+### 10.2 Hesap
+
+```
+Y1  yıllık sayfa            = G1 × G2
+Y2  OCR'a giren yıllık sayfa = Y1 × (1 − G3)
+Y3  günlük OCR sayfası       = Y2 / 250            (iş günü)
+Y4  günlük işçi-saati        = Y3 / 88             (§2: saatte 88 sayfa)
+Y5  gereken işçi             = tavan(Y4 / G4)
+Y6  gereken RAM (GB)         = 6 + 4,8 × Y5
+Y7  geriye dönük göç süresi  = G5 × (1 − G3) / (88 × Y5)   (bir defalık)
+```
+
+`Y5` en az 1'dir. `Y6` çıktısı §2'deki boyutlandırma tablosuyla çapraz
+doğrulanır: 1 işçi ~11 GB, 2 işçi ~16 GB, 4 işçi ~25 GB, 6 işçi ~34 GB.
+
+Formül ölçümü yeniden üretiyor: `Y7` bugünkü envanter için 1 işçide 75,0 saat,
+4 işçide 18,8 saat veriyor — ölçülen 74,7 ve 18,7 saatle %0,4 içinde örtüşüyor.
+Hesap uydurma değil, ölçülen eğrinin genelleştirilmiş hâlidir.
+
+### 10.3 Örnek koşular (GERÇEK DEĞİL — yalnız hesabın nasıl işlediğini gösterir)
+
+| Senaryo | G1 | G2 | G3 | G4 | Y3 günlük sayfa | Y4 işçi-saati | Y5 işçi | Y6 RAM |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Küçük | 12.000 | 6 | %50 | 8 | 144 | 1,6 | **1** | ~11 GB |
+| Orta | 30.000 | 6 | %50 | 8 | 360 | 4,1 | **1** | ~11 GB |
+| Büyük | 50.000 | 8 | %40 | 8 | 960 | 10,9 | **2** | ~16 GB |
+| Kapısız büyük | 50.000 | 8 | %0 | 8 | 1.600 | 18,2 | **3** | ~21 GB |
+
+Tablonun söylediği şey şudur: **günlük evrak akışı ucuzdur.** Orta senaryoda bile
+tek işçi günde 4 saat çalışıp yetişir. Pahalı olan, yüzlerce sayfalık
+**ciltlerin geriye dönük taranmasıdır** — o bir defalık yüktür ve takvime
+yazılır, günlük kapasiteye değil.
+
+### 10.4 Geriye dönük göç ayrı planlanır
+
+Bugünkü envanter 7.029 sayfa. Kapı sonrası 6.603 sayfa OCR'a giriyor:
+
+| İşçi | Süre |
+|---:|---:|
+| 1 (bugünkü makine) | 74,7 saat |
+| 2 | 37,3 saat |
+| 4 | **18,7 saat** |
+| 6 | 12,4 saat |
+
+Bu yük günlük pencereye sıkıştırılmaz; hafta sonu ya da kesintisiz bir blok
+olarak planlanır. Arşive yeni cilt eklendikçe doğrusal büyür.
+
+### 10.5 Planı geçersiz kılan değişiklikler
+
+Aşağıdakilerden biri olursa bu bölüm yeniden hesaplanır, eski çıktısına
+güvenilmez:
+
+- **G3 ölçülürse** (dijital doğan evrakta kapı oranı) — en büyük belirsizlik budur.
+- **GPU'lu makine gelirse.** Bütün ölçümler CPU üzerindedir; PaddleOCR GPU'da
+  tipik olarak kat kat hızlanır ama bu **ölçülmedi**. Satın alma öncesi tek
+  günlük ölçüm 40,7 sn/sayfa sabitini değiştirir ve tablo baştan kurulur.
+- **Sayfa profili değişirse** (dpi, tarama kalitesi, renkli/gri).
+- **Paddle sürümü değişirse** — §6'daki kapalı ayarlar yeniden denenebilir hale
+  gelir.
+
+### 10.6 Donanım gelmeden yapılmayacaklar
+
+Kapasite kararı uygulanana kadar iki değişiklik **açılmamalıdır**:
+
+- İkinci OCR işçisi — bu makinede verimi yarıya düşürür (§2).
+- Uygulamanın işleri eşzamanlı dağıtması — veri güvenliği ölçüldü ve
+  `tests/ocr-concurrent-claim.test.ts` ile sabitlendi, ama bellek yetmeden
+  açmak yalnız takası hızlandırır (§5).
