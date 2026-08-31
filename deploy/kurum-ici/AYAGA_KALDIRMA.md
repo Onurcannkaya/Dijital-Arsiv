@@ -91,9 +91,19 @@ Doğrulama sırası (her adım bir öncekine bağlıdır):
 | 7 | Render servisi | `docker compose ps document-render` | `healthy` |
 | 8 | Vekil + sağlık ucu | `curl -s http://127.0.0.1:8080/api/health` | `status: ready` (hepsi sağlıklıyken) |
 | 9 | Render imaj özeti | CI dağıtımında `renderer-image-digest.txt`; yerel pilotta `docker image inspect` | API sağlık denetimindeki özet, çalışan renderer'ın registry özetiyle birebir eşit |
+| 10 | **API dışa port açmıyor** | `docker compose port api 8788` | **Hiçbir şey dönmemeli** ("no port ... published"). Yayımlanmış bir eşleme çıkarsa yığın açık bırakılmaz; `docker-compose.yml`'de `api` altındaki `ports:` kaydı kaldırılır. |
 
-> 7. adım `degraded` dönüyorsa `checks` alanı hangi bileşenin bekletildiğini
-> söyler; 4-6. adımlar tamamlanmadan `ready` beklenmez.
+> 8. adım `degraded` dönüyorsa `checks` alanı hangi bileşenin bekletildiğini
+> söyler; 4-7. adımlar tamamlanmadan `ready` beklenmez.
+>
+> **10. adım neden var:** uygulama kimliği `oai-authenticated-user-email`
+> başlığından okur ve bu başlığa GÜVENİR; sahteciliği kapatan şey, başlığı
+> kendi doğrulanmış değeriyle ezen SSO vekili ile API'ye yalnız vekil
+> üzerinden ulaşılabilmesidir. 3. adımda görülen `url=http://0.0.0.0:8788`
+> konteynerin İÇİNDEKİ bağlanmadır ve tek başına güvenlik sorunu değildir;
+> koruma, ana makineye port yayımlanmamasından gelir. Bu satır o korumanın
+> fiilen yerinde olduğunu doğrular — sorun giderirken geçici diye açılan bir
+> port kalıcılaşırsa kimlik sınırı sessizce düşer.
 
 ## 3. Duman testi
 

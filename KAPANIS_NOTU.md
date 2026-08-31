@@ -44,7 +44,7 @@ işleri devralacak kişi için tek sayfada toplar. Ayrıntı belgeleri:
 
 ### 2. Makine kurulumu (P7 sahada)
 - [ ] Docker'lı sunucu tahsisi (`AYAGA_KALDIRMA.md` §0 ön koşulları).
-- [ ] `deploy/kurum-ici` yığınının ilk açılışı + 8 adımlık doğrulama
+- [ ] `deploy/kurum-ici` yığınının ilk açılışı + 10 adımlık doğrulama
       tablosu + `./smoke.sh` (ACCEPTED terminali görülmeli).
 - [ ] İlk açılışta doğrulanacak iki repo-dışı varsayım: nginx SSO şablonu
       sözdizimi ve MinIO sürümünün `If-None-Match` koşullu yazma desteği
